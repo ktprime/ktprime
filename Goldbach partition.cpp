@@ -1,9 +1,9 @@
 /************************************************************
 copyright (C) 2009 - 2013 by Huang Yuanbing
-mail to: bailuzhou@163.com
+mail : bailuzhou@163.com
 free use for non-commercial purposes
 
-	this programming is the most algorithm for count
+	this programming is the most fast algorithm for count
 goldbach partition, performance and throughput improvement by minimizing cache conflicts and misses
 in the last level caches of multi-cores processors.
 
@@ -21,7 +21,7 @@ http://numbers.computation.free.fr/Constants/Primes/twin.html.
 # include <math.h>
 # include <assert.h>
 
-# define KVERSION       "1.0"
+# define KVERSION       "2.0"
 # define MAXN           "1e16"
 # define MINN           10000000
 
@@ -54,9 +54,9 @@ http://numbers.computation.free.fr/Constants/Primes/twin.html.
 	#include <omp.h>
 # endif
 
-# define FAST_CROSS      1
+# define FAST_CROSS      0
 # define OPT_L1CACHE     1
-# define OPT_L2CACHE     0
+# define OPT_L2CACHE     1
 # define PRIME_DIFF      0
 # define TREE2           0
 # define OPT_L1_SIEVE    1
@@ -130,7 +130,6 @@ static const char* const HelpCmd = "\
 	[B: Benchmark (start) (end)]\n\
 	[U: Unit test (1 - 10000)]\n\
 	[N: Number of patterns (start) (count)]\n\
-	[O: Optimaze best threads (count)]\n\
 	[I: List (powbase) (start index) (end index)]\n\
 	[L: List (start) (end/count) (step)]\n";
 
@@ -171,11 +170,11 @@ static const char* const PrintFormat =
 	#define PRIME_NEXT(p, j) p = Prime[++j]
 #endif
 
-//the smallest Startp[i] * wheel % Prime[i] = 1
-static uint Startp[PRIME_NUMS];
+//the smallest Moudle[i] * wheel % Prime[i] = 1
+static uint Moudle[PRIME_NUMS];
 
 typedef uchar ptype;
-static ptype Pattern[99532800 + 10];
+static ptype* Pattern = NULL;//[99532800 + 10];
 
 #if FAST_CROSS
 //CrossedTpl cross out prime <= 17
@@ -240,6 +239,8 @@ static struct ThreadInfo
 {
 	int Pbegi;
 	int Pendi;
+
+
 	uint64 Result;
 } TData[MAX_THREADS];
 
@@ -275,7 +276,7 @@ static void devideTaskData(int threads, int pbegi, int pendi)
 static uint64 startWorkThread(int threads, int pbegi, int pendi)
 {
 	int i;
-	//assert(pendi >= pbegi && pbegi >= 0);
+	assert(pendi >= pbegi && pbegi >= 0);
 	if (threads > MAX_THREADS) {
 		threads = 4;
 	}
@@ -358,7 +359,7 @@ function extended_gcd(a, b)
 */
 //get min Result y: ay % b = 1
 //and param a, b : gcd(a, b) = 1
-static int extendedEuclid(int a, int b, int &y)
+static int extendedEuclidean(int a, int b, int &y)
 {
 	int x;
 	if (a == 0) {
@@ -367,7 +368,7 @@ static int extendedEuclid(int a, int b, int &y)
 			y = b;
 		}
 	} else {
-		y = extendedEuclid(b % a, a, x);
+		y = extendedEuclidean(b % a, a, x);
 		x -= b / a * y;
 	}
 
@@ -455,8 +456,7 @@ static void packQwordBit1(utype* bitarray, const int leng)
 }
 
 //use asm to accelerate hot spot
-inline static void
-setBitArray(utype bitarray[], int s1, int s2, const int step)
+static void setBitArray(utype bitarray[], int s1, int s2, const int step)
 {
 	if (s2 > s1) {
 		s2 ^= (s1 ^= (s2 ^= s1));
@@ -519,27 +519,6 @@ static void set2BitArray(utype bitarray[], uint64& start, const int step, const 
 	start = ((uint64)s2 << 32) | s1;
 }
 
-//all old number in range[start, statr + leng] which
-//is multiple of factor will be crossed
-//out and the bitarray will the bit position 1
-//the ith bit of bitarray is map to number start + 2 * i + 1
-/**
-static void crossOutEvenFactor(utype bitarray[], const uint64 start,
-						int leng, const int factor)
-{
-	int offset = factor - start % factor;
-	if (offset % 2 == 0) {
-		offset += factor;
-	} else if (start <= factor) {
-		offset += 2 * factor;
-	}
-
-	const int bits = leng >> 1;
-	for (offset >>= 1; offset <= bits; offset += factor) {
-		SET_BIT(bitarray, offset);
-	}
-}*/
-
 //the ith bit of bitarray is map to start + 2 * i + 1
 //it's difference with crossOutEvenFactor, only
 //6k + 1, 6k + 5 number which is multiple of factor will be crossed out
@@ -555,17 +534,15 @@ static void crossOutFactor(utype bitarray[], const uint64 start, const int leng,
 	}
 
 	if (s1 > leng)
-		return;
+		return ;
 
 	const int bits = leng >> 1;
-#if 1
 	if (factor < 7) {
 		for (s1 >>= 1; s1 <= bits; s1 += factor) {
 			SET_BIT(bitarray, s1);
 		}
-		return;
+		return ;
 	}
-#endif
 
 #if 1
 	const int mrid6 = ((start + s1) / factor) % 6;
@@ -625,7 +602,8 @@ static void sieveWheelFactor(utype bitarray[], const uint64 start, const int len
 	for (int i = 2, p = 3; wheel % p == 0; PRIME_NEXT(p, i)) {
 		crossOutFactor(bitarray, start, leng, p);
 		if (start <= p) {
-			SET_BIT(bitarray, (p - start) / 2);
+			assert(start == 0);
+			SET_BIT(bitarray, p / 2);
 		}
 	}
 }
@@ -756,34 +734,13 @@ static void reverseBitArray(utype bitarray[], const int leng)
 	packQwordBit1(bitarray, leng);
 }
 
-/**
-static inline int test_and_set_bit(int nr, volatile void *addr)
-{
-	int oldbit;
-	asm volatile("bts %2,%1\n\t"
-			"sbb %0,%0"
-			: "=r" (oldbit), ADDR
-			: "Ir" (nr) : "memory");
-	return oldbit;
-}
-
-static inline int test_and_clear_bit(int nr, volatile void *addr)
-{
-	int oldbit;
-	asm volatile("btr %2,%1\n\t"
-			"sbb %0,%0"
-			: "=r" (oldbit), ADDR
-			: "Ir" (nr) : "memory");
-	return oldbit;
-}*/
-
 //make sure no divide overflow
 //improvement of 100%
 static inline int
-asmMulDiv(const uint startp, const uint pattern, uint p)
+asmMulDiv(const uint moudle, const uint pattern, uint p)
 {
 #ifdef NO_ASM_X86
-	p = ((uint64)startp) * pattern % p;
+	p = ((uint64)moudle) * pattern % p;
 #elif !defined _MSC_VER
 	__asm
 	(
@@ -791,14 +748,14 @@ asmMulDiv(const uint startp, const uint pattern, uint p)
 		"imul %%edx\n"
 		"divl %%ecx\n"
 		: "=d" (p)
-		: "d"(startp), "a"(pattern), "c"(p)
+		: "d"(moudle), "a"(pattern), "c"(p)
 #else
 		"movl %1, %%eax\n"
 		"imull %2\n"
 		"divl %0\n"
 		"movl %%edx, %0\n"
 		: "+m" (p)
-		: "g"(pattern), "g"(startp)
+		: "g"(pattern), "g"(moudle)
 		: "%eax", "%edx"
 #endif
 	);
@@ -806,7 +763,7 @@ asmMulDiv(const uint startp, const uint pattern, uint p)
 	__asm
 	{
 		mov eax, pattern
-		imul startp
+		imul moudle
 		div p
 		mov p, edx
 	}
@@ -816,10 +773,10 @@ asmMulDiv(const uint startp, const uint pattern, uint p)
 }
 
 static inline int
-asmMulDivSub(const uint startp, const uint pattern, uint p, const uint leng)
+asmMulDivSub(const uint moudle, const uint pattern, uint p, const uint leng)
 {
 #ifdef NO_ASM_X86
-	p = (((uint64)startp) * pattern - leng) % p + leng;
+	p = (((uint64)moudle) * pattern - leng) % p + leng;
 #elif !(defined _MSC_VER)
 	__asm
 	(
@@ -835,7 +792,7 @@ asmMulDivSub(const uint startp, const uint pattern, uint p, const uint leng)
 		"addl %%ecx, %%edx\n"
 		"movl %%edx, %0\n"
 		: "+m" (p)
-		: "g"(pattern), "g"(startp), "g"(leng)
+		: "g"(pattern), "g"(moudle), "g"(leng)
 		: "%eax", "%ecx", "%edx"
 #else
 		"imull %3\n"
@@ -846,7 +803,7 @@ asmMulDivSub(const uint startp, const uint pattern, uint p, const uint leng)
 		"idivl %4\n" //no overflow!!!
 		"addl %%ecx, %%edx\n"
 		: "=d" (p)
-		: "a"(pattern), "c"(leng), "g"(startp), "g"(p)
+		: "a"(pattern), "c"(leng), "g"(moudle), "g"(p)
 #endif
 	);
 #else
@@ -855,7 +812,7 @@ asmMulDivSub(const uint startp, const uint pattern, uint p, const uint leng)
 		mov eax, pattern
 		mov ecx, leng
 
-		imul startp //startp * pattern
+		imul moudle //moudle * pattern
 		sub eax, ecx // - leng
 		sbb edx, 0
 
@@ -964,7 +921,7 @@ static int savePattern(const utype bitarray[], int leng, ptype pi1pattern[])
 		if (!TST_BIT2(bitarray, p)) {
 			pi1pattern[pi1n++] = p - lastpattern;
 			lastpattern = p;
-			assert(p - lastpattern < (sizeof(ptype) << 8));
+//			assert(p - lastpattern < (sizeof(ptype) << 8));
 		}
 	}
 	pi1pattern[0] += diff;
@@ -973,11 +930,11 @@ static int savePattern(const utype bitarray[], int leng, ptype pi1pattern[])
 	return pi1n;
 }
 
-//min prime in range [start, sum / 2]
-static int getSegpattern(const int sum, int start, int wheel, ptype pattern[])
+//min prime in range [start, n / 2]
+static int getSegpattern(const int n, int start, int wheel, ptype pattern[])
 {
 	int gpn = 0;
-	const int leng = sum / 2 + ((sum / 2) & 1);
+	const int leng = n / 2 + ((n / 2) & 1);
 
 	if (pattern) {
 		pattern[0] = 0;
@@ -991,7 +948,7 @@ static int getSegpattern(const int sum, int start, int wheel, ptype pattern[])
 
 		memset(bitarray, 0, (sleng >> 4) + 1);
 
-		sieveWheelFactor(bitarray, sum - start - sleng, sleng + 16, wheel);
+		sieveWheelFactor(bitarray, n - start - sleng, sleng + 16, wheel);
 		reverseBitArray(bitarray, sleng >> 1);
 		sieveWheelFactor(bitarray, start, sleng + 16, wheel);
 		if (pattern) {
@@ -1005,7 +962,7 @@ static int getSegpattern(const int sum, int start, int wheel, ptype pattern[])
 }
 
 //optimize for memory
-static int getGppattern(const uint64 n, const int wheel, ptype pattern[])
+static int getGppattern(const uint64 n, const uint wheel, ptype pattern[])
 {
 	const uint moudle = (uint)(n % wheel);
 	int gpn = getSegpattern(moudle, 0, wheel, pattern);
@@ -1033,7 +990,7 @@ static uint64 sieveGpL1(utype bitarray[], const int pattern1, const int pattern2
 	uint64 spos[43990 + 1];
 
 	for (; p <= minp; PRIME_NEXT(p, k)) {
-		const int moudle = Startp[k];
+		const int moudle = Moudle[k];
 #if OPT_L1_SIEVE
 		int s1 = asmMulDiv(moudle, pattern1, p);
 		//assert(s1 * wheel + pattern1 % p == 0)
@@ -1075,56 +1032,10 @@ static uint64 sieveGpL1(utype bitarray[], const int pattern1, const int pattern2
 	return ((uint64)k << 32) | p;
 }
 
-#if 0
-static uint64 sieveGpL2(utype bitarray[], const int pattern1, const int pattern2, const int leng)
-{
-	int sleng = MAX_L2SIZE;
-	int minp = Gp.SqrtN < sleng ? Gp.SqrtN : sleng;
-	int k = Gp.FirstIndex;
-	int p = SmallPrime[k++];
-
-	//186k
-	uint64* spos = (uint64*)malloc(sizeof(uint64) * (MAX_L2SIZE / 12));
-
-	for (; p <= minp; PRIME_NEXT(p, k)) {
-		const int moudle = Startp[k];
-		int s1 = asmMulDiv(moudle, pattern1, p);
-		//assert(s1 * wheel + pattern1 % p == 0)
-		int s2 = leng - asmMulDivSub(moudle, pattern2, p, leng);
-		if (s2 < 0)
-			s2 += p;
-		spos[k] = s1 + ((uint64)s2 << 32);
-	}
-
-	for (int start = 0; start < leng; start += sleng) {
-		if (start + sleng > leng) {
-			sleng = leng - start;
-		}
-
-		k = Gp.FirstIndex;
-		p = SmallPrime[k++];
-
-		//40%
-		utype* pbitarray = bitarray + (start >> BSHIFT);
-		for (; p <= minp; PRIME_NEXT(p, k)) {
-			spos[k] = set2BitArray(pbitarray, spos[k], p, sleng);
-		}
-	}
-
-	free(spos);
-
-	return ((uint64)k << 32) | p;
-}
-#endif
-
 //set goldbach partition (k*wheel + pattern1) with pattern = pattern1
 static int sieveGp(utype bitarray[], const int pattern1)
 {
-	int pattern2 = Gp.Moudel - pattern1;
-	if (pattern2 < 0) {
-		pattern2 += Gp.Wheel;
-	}
-
+	int pattern2 = (Gp.Wheel + Gp.Moudel - pattern1) % Gp.Wheel;
 	int leng = (int)((Gp.N - pattern1 - pattern2) / Gp.Wheel);
 	int k = Gp.FirstIndex;
 	int p = SmallPrime[k++];
@@ -1132,13 +1043,6 @@ static int sieveGp(utype bitarray[], const int pattern1)
 
 #if OPT_L1CACHE
 	//performance improvement from 100 -> 72
-#if 0
-	if (leng > MAX_L2SIZE && sqrtn > MAX_L2SIZE) {
-		uint64 kpos = sieveGpL2(bitarray, pattern1, pattern2, leng);
-		k = kpos >> 32;
-		p = (int)kpos;
-	} else
-#endif
 	if (leng > Config.CpuL1Size) {
 		uint64 kpos = sieveGpL1(bitarray, pattern1, pattern2, leng);
 		k = (int)(kpos >> 32); p = (int)kpos;
@@ -1152,7 +1056,7 @@ static int sieveGp(utype bitarray[], const int pattern1)
 #endif
 
 	for (; p <= minp; PRIME_NEXT(p, k)) {
-		const uint moudle = Startp[k];
+		const uint moudle = Moudle[k];
 #if 1
 		int s1 = leng - asmMulDiv(moudle, pattern2, p);
 		int s2 = asmMulDivSub(moudle, pattern1, p, leng);
@@ -1170,11 +1074,12 @@ static int sieveGp(utype bitarray[], const int pattern1)
 
 #if OPT_L2CACHE
 	for (; p <= sqrtn; PRIME_NEXT(p, k)) {
-		const uint moudle = Startp[k];
+		const uint moudle = Moudle[k];
 #if 0
 		int s1 = leng - asmMulDiv(moudle, pattern2, p);
 		int s2 = asmMulDivSub(moudle, pattern1, p, leng);
-		if (s2 > leng) s2 -= p;
+		if (s2 > leng)
+			s2 -= p;
 		if (s2 > 0)
 			SET_BIT(bitarray, s2);
 		if (s1 > 0)
@@ -1291,7 +1196,7 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 }
 
 //factorial of prime factor of wheel
-static int getFactorial(const int wheel)
+static int getFactorial(const uint wheel)
 {
 	int factorial = 1;
 	for (int i = 0, p = SmallPrime[i]; wheel % p == 0; p = SmallPrime[++i]) {
@@ -1301,7 +1206,7 @@ static int getFactorial(const int wheel)
 }
 
 //
-static int countPiPattern(int wheel)
+static int countPiPattern(uint wheel)
 {
 	int patterns = 1;
 	for (int i = 0, p = SmallPrime[i]; wheel % p == 0; p = SmallPrime[++i]) {
@@ -1312,7 +1217,7 @@ static int countPiPattern(int wheel)
 }
 
 //get the frist prime index in Prime which is not a factor of wheel
-static int getFirstPrime(const int wheel)
+static int getFirstPrime(const uint wheel)
 {
 	int i = 0;
 	for (int p = SmallPrime[i]; wheel % p == 0; p = SmallPrime[++i]) {
@@ -1336,27 +1241,27 @@ static int initPattern(const uint64 n, const int wheel, ptype pattern[])
 	} else if (CHECK_FLAG(CHECK_PATTERN)) {
 		printf("wheel patterns = %d\n", pns);
 	}
-	assert(pns < sizeof(Pattern));
+//	assert(pns < sizeof(Pattern));
 
 	return pns;
 }
 
-static void initStartp(const int wheel, int maxp)
+static void initStartp(const int wheel, int maxp, uint moudle[])
 {
 	double ts = getTime( );
 
 	for (int i = 1, p = 2; p < maxp; PRIME_NEXT(p, i)) {
 		int y;
-		y = extendedEuclid(-wheel % p, p, y);
+		y = extendedEuclidean(-wheel % p, p, y);
 		if (y < 0) {
 			y += p;
 		}
-		Startp[i] = y;
-		//assert(Startp[j] < p && Startp[j] >= 0);
+		moudle[i] = y;
+		//assert(moudle[j] < p && moudle[j] >= 0);
 	}
 
 	if (CHECK_FLAG(PRINT_LOG)) {
-		printf("init startp time use %.2lf ms\n", getTime( ) - ts);
+		printf("init moudle time use %.2lf ms\n", getTime( ) - ts);
 	}
 }
 
@@ -1390,7 +1295,7 @@ static uint getDefaultWheel(const uint64 n)
 	} else if (powten <= 15) {
 		wheel = 9699690;
 	} else if (powten <= 17) {
-		wheel = 22309287;
+		wheel = 223092870;
 	} else {
 		wheel = 223092870ul * 29;
 	}
@@ -1400,18 +1305,9 @@ static uint getDefaultWheel(const uint64 n)
 
 //set sieve buffer size and adjust wheel based
 //on cpu L2 cache size and n
-/*
-static int getSieveCacheSize(const uint64 n, int wheel)
-{
-	const int cachesize = n / wheel;
-	return (cachesize >> BSHIFT) + 1;
-}*/
-
-//set sieve buffer size and adjust wheel based
-//on cpu L2 cache size and n
 static int getWheel(const uint64 n)
 {
-	int wheel = getDefaultWheel(n);
+	uint wheel = getDefaultWheel(n);
 
 	int cachesize = (int)(n / wheel);
 
@@ -1462,30 +1358,30 @@ static int getPrime(const int n)
 	return pi1n;
 }
 
-//bad performance!!!
-static int getSegPartition(const uint64 sum, int leng)
+//[0 - maxn] - [n - maxn, n]
+static int getPartition(const uint64 n, int maxn)
 {
 	int gp = 0;
-	if (leng > sum / 2) {
-		leng = sum / 2;
+	if (maxn > n / 2) {
+		maxn = n / 2;
 	}
 
-	leng += leng & 1;
+	maxn += maxn & 1;
 
 #if (OMP)
 	omp_set_num_threads(Config.Threads);
-	#pragma omp parallel for if (sum >= MINN * 3)
+	#pragma omp parallel for if (n >= MINN * 3)
 #endif
-	for (int start = 0, sleng = SEGMENT_SIZE; start < leng; start += sleng) {
+	for (int start = 0, sleng = SEGMENT_SIZE; start < maxn; start += sleng) {
 		utype bitarray[(SEGMENT_SIZE >> (BSHIFT + 1)) + 100];
-		if (sleng >= leng - start) {
-			sleng = leng - start;
+		if (sleng >= maxn - start) {
+			sleng = maxn - start;
 		}
 
 		memset(bitarray, 0, (sleng >> 4) + 1);
 		segmentedSieve(bitarray, start, sleng + 16, 2);
 		reverseBitArray(bitarray, sleng >> 1);
-		segmentedSieve(bitarray, sum - start - sleng, sleng + 16, 2);
+		segmentedSieve(bitarray, n - start - sleng, sleng + 16, 2);
 
 		gp += countBitZeros(bitarray, sleng >> 1);
 	}
@@ -1510,7 +1406,7 @@ static int getSmallGp(const uint64 n)
 		}
 	}
 
-	int ret = getSegPartition(n, leng);
+	int ret = getPartition(n, leng);
 
 	if (CHECK_FLAG(PRINT_LOG)) {
 		printf("sieve small n = %lld, leng = %d", n, leng);
@@ -1520,19 +1416,25 @@ static int getSmallGp(const uint64 n)
 	return ret;
 }
 
-//init Prime, Pattern, Startp
-static int initGp(const uint64 n)
+//init Prime, Pattern, Moudle
+static uint initGp(const uint64 n)
 {
-	const int wheel = getWheel(n);
+	if (n > Gp.N) {
+		getPrime((int)sqrt((double)n) + 2001);
+	}
+	const uint wheel = getWheel(n);
 
 	Gp.N = n;
 	Gp.Wheel = wheel;
-	Gp.Moudel = (int)(n % wheel);
-	Gp.SqrtN = (int)sqrt((double)n + 0.1);
+	Gp.Moudel = (uint)(n % wheel);
+	Gp.SqrtN = (uint)sqrt((double)n + 0.1);
 	Gp.FirstIndex = getFirstPrime(wheel);
+
+	Gp.Patterns = initPattern(n, wheel, 0);
+	Pattern = (ptype*)malloc(sizeof(ptype) * Gp.Patterns + 8);
 	Gp.Patterns = initPattern(n, wheel, Pattern);
 
-	initStartp(wheel, Gp.SqrtN + 256);
+	initStartp(wheel, Gp.SqrtN + 256, Moudle);
 
 	if (CHECK_FLAG(PRINT_LOG)) {
 		const int factorial = getFactorial(wheel);
@@ -1636,11 +1538,12 @@ static uint64 getGp(const uint64 n, int pn)
 {
 	assert(n < atoint64(MAXN) + 1000 && n % 2 == 0);
 
-	if (n > Gp.N) {
-		getPrime((int)sqrt((double)n) + 2001);
-	}
 	if (n >= MINN) {
+		double ts = getTime( );
 		initGp(n);
+		if (CHECK_FLAG(PRINT_LOG)) {
+			printf("initGp time %.2lf ms\n", getTime() - ts);
+		}
 	}
 
 	uint64 sgn = getSmallGp(n), gpn = 0;
@@ -1689,6 +1592,11 @@ static uint64 getGp(const uint64 n, int pn)
 		saveTask(LastTask);
 	}
 
+	if (Pattern) {
+		free(Pattern);
+		Pattern = NULL;
+	}
+
 	Gp.Wheel = 0;
 
 	return gpn + sgn;
@@ -1710,7 +1618,7 @@ static void printResult(const uint64 n, uint64 gpn, double ts)
 	putchar('\n');
 }
 
-static uint64 KPartiton(const uint64 n, int pn)
+static uint64 GPartiton(const uint64 n, int pn)
 {
 	double ts = getTime( );
 
@@ -1757,7 +1665,7 @@ static int startTest(int tesecase, bool rwflag)
 			if (n < 1000000) {
 				n = 4 * n + 1000000;
 			}
-			KPartiton(n, 0);
+			GPartiton(n, 0);
 		} else {
 			uint64 res, n;
 			char linebuf[256] = {0};
@@ -1835,7 +1743,7 @@ static void listDiffGp(const char params[][80], int cmdi)
 		if (isdigit(params[4][0])) {
 			printf("%d ", pcnt);
 		}
-		allSum += KPartiton(n, 0);
+		allSum += GPartiton(n, 0);
 	}
 
 	printf("average = %lld, ", allSum / pcnt);
@@ -1852,7 +1760,7 @@ static void listPowGp(const char params[][80], int cmdi)
 
 	printf("in %d^%d - %d^%d\n", m, startindex, m, endindex);
 
-	if (m < 2 && m > 10000){
+	if (m < 2 && m > 10000) {
 		m = 10;
 	}
 	if (startindex > endindex) {
@@ -1879,8 +1787,8 @@ static void listPatterns(uint64 start, int count)
 {
 	Gp.Wheel = 0;
 	getPrime((int)sqrt((double)start) + count * 4 + 2000);
-	int wheel = getWheel(start);
-	printf("wheel = %d\n", wheel);
+	uint wheel = getWheel(start);
+	printf("wheel = %u\n", wheel);
 	for (int i = 0; i < count; i++) {
 		int patterns = getGppattern(start, wheel, 0);
 		printf("pattern(%lld) = %d\n", start, patterns);
@@ -1914,33 +1822,13 @@ static void benchMark(const char params[][80])
 	uint64 gap = start;
 	for (; start * 10 <= n; ) {
 		for (int j = 0; j < 9; j++) {
-			KPartiton((j + 1) * gap, 0);
+			GPartiton((j + 1) * gap, 0);
 		}
 		start *= 10;
 		gap *= 10;
 	}
 
 	freopen(CONSOLE, "w", stdout);
-}
-
-//auto set best threads
-static void benchMarkByThreads(const uint64 n, int threads)
-{
-	double mints = 1234567890;
-	int bestthreads = 4;
-	SET_FLAG(PRINT_RET);
-	for (int i = 1; i <= threads; i++) {
-		Config.Threads = i;
-		double ts = getTime();
-		KPartiton(n, 1000);
-		ts = getTime() - ts;
-		if (mints > ts) {
-			bestthreads = Config.Threads;
-			mints = ts;
-		}
-	}
-	Config.Threads = bestthreads;
-	printf("best thread = %d\n", bestthreads);
 }
 
 //test pi, pi2, gp function
@@ -2232,13 +2120,9 @@ static bool excuteCmd(const char* cmd)
 		}
 
 		if (cmdc == 'B') {
-//			if (isdigit(params[cmdi + 1][0]))
-//				excuteCmd("e15 0 1500 m6 d");
 			benchMark(params);
 		} else if (cmdc == 'U') {
 			testGp( ); startTest(n1, n2 == 0);
-		} else if (cmdc == 'O') {
-			benchMarkByThreads(n1, n2);
 		} else if (cmdc == 'L') {
 			listDiffGp(params, cmdi);
 		} else if (cmdc == 'I') {
@@ -2246,7 +2130,7 @@ static bool excuteCmd(const char* cmd)
 		} else if (cmdc == 'N') {
 			listPatterns(n1, n2);
 		} else if (cmdc == 'E' || isdigit(cmdc)) {
-			KPartiton(n1, n2);
+			GPartiton(n1, n2);
 		}
 
 		if (pcmd) {
@@ -2283,8 +2167,8 @@ int main(int argc, char* argv[])
 			excuteCmd(argv[i]);
 	}
 
-	excuteCmd("1e10;1e11; d 1e15 10");
-
+	excuteCmd("1e10;1e11");
+//	excuteCmd("t1 d m7 1e14 200; e15 100");
 //	excuteCmd("d m7 1e15");
 
 	char ccmd[256] = {0};
@@ -2317,11 +2201,11 @@ feature:
   2. detial algorithm and readme
 
 Linux g++:
-  g++ -Wall -march=native -s -pipe -O2 -ffunction-sections -fomit-frame-pointer -lpthread KPartiton.cpp
+  g++ -Wall -march=native -s -pipe -O2 -ffunction-sections -fomit-frame-pointer -lpthread GPartiton.cpp
 Mingw/g++:
-  g++ -Wall -mpopcnt -mtune=native -O2 -s -pipe KPartiton.cpp
+  g++ -Wall -mpopcnt -mtune=native -O2 -s -pipe GPartiton.cpp
 MS vc++:
-  cl /O2 /Os KPartiton.cpp
+  cl /O2 /Os GPartiton.cpp
 
  ****************************************************/
 
