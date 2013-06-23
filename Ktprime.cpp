@@ -3,6 +3,31 @@ copyright (C) 2008-2013 by Huang Yuanbing
 mail to: bailuzhou@163.com
 free use for non-commercial purposes
 
+Patterns
+p_i = p_1 + b_i, i = 1, 2, ..., k
+s   = p_k - p_1
+k   s : b
+2   2 : 0  2
+3   6 : 0  4  6
+3   6 : 0  2  6
+4   8 : 0  2  6  8
+5  12 : 0  4  6  10  12
+5  12 : 0  2  6  8   12
+6  16 : 0  4  6  10  12  16
+
+    * pi(x) : prime-counting function
+    * pi2(x) : count of twin primes.
+      twin prime = (p, p + 2)
+    * pi3(x) : count of prime triplets.
+      prime triplet = (p, p + 2, p + 6) or (p, p + 4, p + 6)
+    * pi4(x) : count of prime quadruplets.
+      prime quadruplet = (p, p + 2, p + 6, p + 8)
+    * pi5(x) : count of prime quintuplets.
+      prime quintuplet = (p, p + 2, p + 6, p + 8, p + 12) or (p, p + 4, p + 6, p + 10, p + 12)
+    * pi6(x) : count of prime sextuplets.
+      prime sextuplet = (p, p + 4, p + 6, p + 10, p + 12, p + 16)
+    * pi7(x) : count of prime septuplets.
+      prime septuplet = (p, p + 2, p + 6, p + 8, p + 12, p + 18, p + 20)
 
 http://primes.utm.edu/glossary/xpage/PrimeKTuplet.html
 Prime k-tuplet definition at the Prime Glossary.
@@ -1575,7 +1600,8 @@ static int sievePikL1(utype bitarray[], const uint pattern, int bitleng, int& p)
 //30%
 static int sievePi1(utype bitarray[], const int pattern)
 {
-	const int bitleng = 1 + (int)((KData.N - pattern) / KData.Wheel);
+	const int bitleng = 1 + (int)((KData.N - KData.S + KData.S % pattern - pattern) / KData.Wheel);
+//	const int bitleng2 = (int)((KData.S) / KData.Wheel);
 	const int sqrtn = KData.SqrtN;
 
 	int k = KData.firstIndex;
@@ -1593,6 +1619,7 @@ static int sievePi1(utype bitarray[], const int pattern)
 		if (s1 < bitleng)
 			setBitArray(bitarray, s1, p, bitleng);
 #else
+		//int s1 = (((uint64)Moudle[k]) * pattern - bitleng) % p + bitleng - bitleng2;
 		int s1 = asmMulDivSub(Moudle[k], pattern, p, bitleng);
 		if (s1 > bitleng) {
 			s1 -= p; //			if (s1 >= bitleng) s1 -= p;
@@ -1755,7 +1782,7 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 	uint64 gpts = 0;
 	double tstart = getTime();
 
-	const uint sieve_byte = ((KData.N / KData.Wheel) / 8) + 1024 / 4;
+	const uint sieve_byte = ((KData.N - KData.S) / KData.Wheel) / 8 + 1024 / 4;
 	utype* bitarray = (utype*)malloc(sieve_byte);
 	assert(bitarray && Pattern);
 
@@ -2314,7 +2341,7 @@ static uint64 ktprime(const uint64 s, const uint64 n, int pn)
 		getPrime(0, sqrtn + 1001, Prime);
 	}
 
-	int wheel = getWheel(n);
+	int wheel = getWheel(n - s);
 	const int maxn = sqrtn > wheel ? sqrtn : wheel;
 	bool addsmall = s < maxn;
 	//optimize for Ktuplet prime with small n > e7
@@ -3060,7 +3087,8 @@ int main(int argc, char* argv[])
 	}
 
 	excuteCmd("k1 e10");
-	excuteCmd("k21 e10");
+	ktprime(1e15, 1e15+1e9, 0);
+//	excuteCmd("k21 e10");
 
 	char ccmd[256] = {0};
 	while (true) {
@@ -3121,4 +3149,3 @@ command:
 c1600 m5 d t4 e15 0 1000
 need 28h amd phoenm x4 830
  ****************************************************/
-
