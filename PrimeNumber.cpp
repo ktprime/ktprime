@@ -23,7 +23,7 @@
 # define WPBIT           6 //6 - 7
 # define ERATSMALL       4 //2 - 6
 # define ERATMEDIUM      4 //2 - 6
-# define ERATBIG         4 //2 - 6
+# define ERATBIG         6 //2 - 6
 
 #if 0
 	# define WHEEL        WHEEL30
@@ -40,16 +40,15 @@
 //for test
 # define CHECK            0
 # define RELEASE          0
+
 //x86 cpu only
-# define BIT_SCANF        1
+# define BIT_SCANF        0
 # define POPCNT           0
 # define TREE2            0
 
 //SSE4.2/SSE4a POPCNT instruction for fast bit counting.
 #if _MSC_VER > 1400
 	# include <intrin.h>
-#elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44)
-//	# include <popcntintrin.h>
 #endif
 
 #if __x86_64__ || _M_AMD64
@@ -93,6 +92,7 @@
 	#include <sys/time.h>
 	#include <unistd.h>
 #endif
+
 typedef unsigned char uchar;
 typedef unsigned short ushort;
 typedef unsigned int uint;
@@ -234,7 +234,6 @@ struct _Bucket
 
 struct _BucketInfo
 {
-	uint CurIndex;
 	uint MaxIndex;
 	uint LoopSize;
 	uint SieveSize;
@@ -639,12 +638,7 @@ static void crossOff4Factor(uchar* ppbeg[], const uchar* pend, const uint mask, 
 #endif
 	}
 
-	if (ps0 <= pend)
-		*ps0 |= mask;
-	if (ps1 <= pend)
-		*ps1 |= mask >> 8;
-	if (ps2 <= pend)
-		*ps2 |= mask >> 16;
+	CHECK_SET(ps0, mask); CHECK_SET(ps1, mask >> 8); CHECK_SET(ps2, mask >> 16);
 }
 
 inline static void crossOff2Factor(uchar* ps0, uchar* ps1, const uchar* pend, const ushort smask, const int p)
@@ -657,8 +651,7 @@ inline static void crossOff2Factor(uchar* ps0, uchar* ps1, const uchar* pend, co
 		*ps0 |= masks0; ps0 += p;
 	}
 
-	if (ps0 <= pend)
-		*ps0 |= masks0;
+	CHECK_SET(ps0, masks0);
 }
 
 //popcnt instruction : INTEL ix/SSE4.2, AMD Phonem/SSE4A
@@ -666,7 +659,7 @@ inline static void crossOff2Factor(uchar* ps0, uchar* ps1, const uchar* pend, co
 #if POPCNT
 inline static int countBitsPopcnt(const uint64 n)
 {
-#ifdef X86_64
+#if X86_64
 	return (int)_mm_popcnt_u64(n);
 #else
 	return _mm_popcnt_u32(n) + _mm_popcnt_u32((uint)(n >> 32));
@@ -677,11 +670,13 @@ inline static int countBitsPopcnt(const uint64 n)
 #if POPCNT == 0 && TREE2 == 0
 inline static int countBitsTable(const uint64 n)
 {
+#if __GNUC__
+	return __builtin_popcountll(n);
+#else
 	uint hig = (uint)(n >> 32), low = (uint)n;
-//	return __builtin_popcount(hig) + __builtin_popcount(low)
-//	return __builtin_popcountll(n);
 	return WordNumBit1[(ushort)hig] + WordNumBit1[(ushort)low] +
 		WordNumBit1[hig >> 16] + WordNumBit1[low >> 16];
+#endif
 }
 #endif
 
@@ -915,7 +910,6 @@ static void newWheelBlock(uint blocks)
 
 static int initBucketInfo(const uint sieve_size, const uint sqrtp, uint64 range)
 {
-	BucketInfo.CurIndex = 0;
 	assert (range / sieve_size < -1u);
 	BucketInfo.MaxIndex = range / sieve_size + 1;//overflow for large range
 	if (range % sieve_size == 0) BucketInfo.MaxIndex --;
@@ -957,7 +951,7 @@ static int initBucketInfo(const uint sieve_size, const uint sqrtp, uint64 range)
 
 static void pushBucket(const uint sieve_index, const uint wp, const uchar wheel_index)
 {
-	const uint next_bucket = (sieve_index >> BucketInfo.Log2Size) + BucketInfo.CurIndex;
+	const uint next_bucket = sieve_index >> BucketInfo.Log2Size;
 	if (next_bucket < BucketInfo.MaxIndex) {
 		_Bucket* pbucket = Bucket + (next_bucket & BucketInfo.LoopSize);
 		WheelPrime* wheel = pbucket->Wheel ++;
@@ -1197,6 +1191,7 @@ static void eratSieveL1(uchar bitarray[], const uint64 start, const int segsize,
 		const WheelFirst wf = WheelFirst30[sieve_index % WHEEL30][WheelInit30[p % WHEEL30].WheelIndex];
 		const uint multiples = (WHEEL_SKIP >> wf.NextMultiple * 4) | (WHEEL_SKIP << (32 - 4 * wf.NextMultiple));
 		sieve_index += wf.Correct * p;
+
 #if __GNUC__ && CPU == INTEL
 //		sieveSmall3(bitarray, pend, p, sieve_index, multiples);
 		sieveSmall0(bitarray, pend, p, sieve_index, multiples);
@@ -1346,7 +1341,7 @@ static void eratSieveMedium(uchar bitarray[], const uint64 start, uint sieve_siz
 //a modulo 210 wheel that skips multiples of 2, 3, 5 and 7.
 static void eratSieveBucket(uchar bitarray[], const uint sieve_size)
 {
-	_Bucket* pbucket = Bucket + (BucketInfo.CurIndex & BucketInfo.LoopSize);
+	_Bucket* pbucket = Bucket;
 
 	int loops = (uint64)pbucket->Wheel % MEM_WHEEL / sizeof(WheelPrime);
 	if (loops == 0) { loops = WHEEL_SIZE; }
@@ -1391,9 +1386,15 @@ static void eratSieveBucket(uchar bitarray[], const uint sieve_size)
 		StockPool[StockSize ++] = phead;
 	}
 
-	pbucket->Wheel = NULL;
-	pbucket->Head = NULL;
-	BucketInfo.CurIndex ++;
+	int maxi = BucketInfo.MaxIndex --;
+	if (maxi < BucketInfo.LoopSize) {
+		Bucket[maxi].Wheel = NULL;
+		Bucket[maxi].Head = NULL;
+	}
+	for (int i = 0; Bucket[i].Head; i++) {
+		Bucket[i].Wheel = Bucket[i + 1].Wheel;
+		Bucket[i].Head =  Bucket[i + 1].Head;
+	}
 }
 
 static int segmentProcessed(uchar bitarray[], const uint64 start, const int sieve_size, Cmd* cmd)
@@ -1436,6 +1437,7 @@ static int segmentedSieve(const uint64 start, const uint sieve_size, const uint 
 
 		//sieve p in [23, L1_DCACHE_SIZE / 30] 240/1560
 		eratSieveSmall(bitarray + sieve_index / WHEEL30, start + sieve_index, segsize);
+
 		//sieve p in [L1_DCACHE_SIZE / 30, L2_DCACHE_SIZE / 30] 147/1760 180/1560
 		static double time_use = 0; double ts = getTime();
 		eratSieveL2(bitarray + sieve_index / WHEEL30, start + sieve_index, segsize);
@@ -1597,12 +1599,6 @@ static uint64 pi2(const uint64 start, const uint64 end, Cmd* cmd = NULL)
 {
 	assert (start <= end);
 
-	if (Config.Flag & SAVE_RESUTL) {
-		freopen("prime.txt", "w", stdout);
-		Cmd cmdbuf = {PCALL_BACK, (uchar*)printPrime, 0};
-		cmd = &cmdbuf;
-	}
-
 	uint64 primes = checkSmall(start, end, cmd);
 
 	const uint sieve_size = Config.SieveSize;
@@ -1612,9 +1608,6 @@ static uint64 pi2(const uint64 start, const uint64 end, Cmd* cmd = NULL)
 		primes += segmentedSieve(start, sieve_size - (int)(start % sieve_size), cmd);
 		primes += initPiCache(start / sieve_size + 2, end / sieve_size + 1, 1, cmd);
 		primes += segmentedSieve(end - (int)(end % sieve_size), (int)(end % sieve_size) + 1, cmd);
-	}
-	if (Config.Flag & SAVE_RESUTL) {
-		freopen(CONSOLE, "w", stdout);
 	}
 
 	return primes;
@@ -1737,7 +1730,17 @@ uint64 doSievePrime2(const uint64 start, const uint64 end, Cmd* cmd = NULL)
 
 	sievePrime(Prime + 1, sqrtp);
 
+	if (Config.Flag & SAVE_RESUTL) {
+		freopen("prime.txt", "w", stdout);
+		Cmd cmdbuf = {PCALL_BACK, (uchar*)printPrime, 0};
+		cmd = &cmdbuf;
+	}
+
 	const uint64 primes = pi2(start, end, cmd);
+
+	if (Config.Flag & SAVE_RESUTL) {
+		freopen(CONSOLE, "w", stdout);
+	}
 
 	if ((!cmd || cmd->Oper != FIND_MAXGAP) && (Config.Flag & PRINT_RET))
 		printPiResult(start, end, primes, ts);
@@ -2381,13 +2384,13 @@ static void printInfo( )
 	puts(sepator);
 	puts(sepator);
 
-#ifdef _MSC_VER
+#if _MSC_VER
 	printf("Compiled by MS/vc ++ %d", _MSC_VER);
 #elif __GNUC__
 	printf("Compiled by MinGW/g ++ %d.%d.%d", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
 #endif
 
-#ifdef X86_64
+#if X86_64
 	printf(" x86-64");
 #endif
 
@@ -2418,7 +2421,7 @@ static void doCompile(const char* flag)
 	const char* const cxxflag =
 #if _MSC_VER
 		"cl /O2 /Oi /Ot /Oy /GT /GL %s %s %s";
-#elif defined X86_64
+#elif X86_64
 		"g++ -m64 -msse3 -mpopcnt %s -O3 -funroll-loops -s -pipe %s -o %s";
 #else
 		"g++ -m32 -msse3 -mpopcnt %s -O3 -funroll-loops -s -pipe %s -o %s";
@@ -2629,10 +2632,10 @@ int main(int argc, char* argv[])
 		excuteCmd(argv[1]);
 
 #if RELEASE == 0
-	excuteCmd("e12 e9;");
+	excuteCmd("1 e9;");
 	excuteCmd("1e16 e9");
 	excuteCmd("1e18 e9");
-	excuteCmd("1e19 10^10");
+//	excuteCmd("1e19 10^10");
 	excuteCmd("0-1e11 1e9");
 #endif
 //
@@ -2679,12 +2682,11 @@ PI[1e14, 1e14+1e12] = 31016203073 (1006.57 sec)
 
 vc++
 	cl /O2 /Oi /Ot /Oy /GT /GL PrimeNumber.cpp
-mingw/gcc
-	g++ -march=native -O3 -funroll-loops -s -pipe PrimeNumber76.cpp -o PrimeNumber
-	-fprofile-use -flto -fprofile-generate
-else
-	g++ -O3 -s -pipe PrimeNumber.cpp -o PrimeNumber -fprofile-generate/use -flto
+gcc
+	amd:	g++ -DCPU=1 -march=native -O3 -funroll-loops -s -pipe PrimeNumber.cpp -o PrimeNumber
+	intel:	g++ -DCPU=0 -march=native -O3 -funroll-loops -s -pipe PrimeNumber.cpp -o PrimeNumber
 doc:
+	-fprofile-use -flto -fprofile-generate
 	http://www.ieeta.pt/~tos/software/prime_sieve.html
 	http://code.google.com/p/primesieve/wiki/Links
 	Cache optimized linear sieve
