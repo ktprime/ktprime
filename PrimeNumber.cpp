@@ -16,9 +16,10 @@
 # define KVERSION        "2.9"
 # define WHEEL_SKIP      0x26424246
 # define MAX_MULTIPLES   10 //30->6, 210->10
+# define L1_DCACHE_SIZE  32
 # define L2_DCACHE_SIZE  256
 # define SIBIT           8
-# define WPBIT           7 //SIBIT - 1
+# define WPBIT           (SIBIT - 1)
 
 //performance marco
 # define ERATSMALL       4 //2 - 6
@@ -40,6 +41,7 @@
 //for test
 # define CHECK            0
 # define RELEASE          0
+
 //x86 cpu only
 # define BIT_SCANF        1
 # define POPCNT           0
@@ -48,8 +50,6 @@
 //SSE4.2/SSE4a POPCNT instruction for fast bit counting.
 #if _MSC_VER > 1300
 	# include <intrin.h>
-#elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44)
-//	# include <popcntintrin.h>
 #endif
 
 #if __x86_64__ || _M_AMD64
@@ -66,13 +66,10 @@
 #define  AMD    1
 
 #if CPU == INTEL //Intel core ix
-	# define L1_DCACHE_SIZE  32
 	# define MAX_SIEVE       1024
 #elif CPU == AMD
-	# define L1_DCACHE_SIZE  64
 	# define MAX_SIEVE       512
 #else  //intel old pentium4
-	# define L1_DCACHE_SIZE  32
 	# define MAX_SIEVE       512
 #endif
 
@@ -116,6 +113,7 @@ static const char* const Help = "\
 	[D: Debug log]\n\
 	[M: Progress of calculating]\n\
 	[C: Cpu L1/L2 data cache size (L1:16-128, L2:256-1024)]\n\
+	[L: Set sieve size L1(1-6), L2(1-6)]\n\n\
 	[I: Info of sieve]\n\
 	[F: Save result to prime.pi]\n\
 	[A: Result compare by two algorithm]\n\
@@ -166,17 +164,21 @@ static struct
 	uint L1Size;
 	uint L1Maxp;
 	uint L1Index;
+	uint L1Segs;
+
 	uint L2Size;
 	uint L2Maxp;
 	uint L2Index;
+	uint L2Segs;
 }
 Threshold =
 {
 	L1_DCACHE_SIZE * (WHEEL30 << 10),
 	(L1_DCACHE_SIZE << 10) / ERATSMALL,
-	0,
+	0, ERATSMALL,
 	L2_DCACHE_SIZE * (WHEEL30 << 10),
 	(L2_DCACHE_SIZE << 10) / ERATMEDIUM,
+	0, ERATMEDIUM
 };
 
 //config
@@ -231,8 +233,8 @@ struct _Bucket
 struct _BucketInfo
 {
 	uint Log2Size;
-	uint CurBucket;
 	uint SieveSize;
+	uint CurBucket;
 	uint MaxBucket;
 
 	uint CurStock;
@@ -652,7 +654,7 @@ static void crossOff4Factor(uchar* ppbeg[], const uchar* pend, const uint mask, 
 	CHECK_OR(ps0, mask); CHECK_OR(ps1, mask >> 8); CHECK_OR(ps2, mask >> 16);
 }
 
-inline static void crossOff2Factor(uchar* ps0, uchar* ps1, const uchar* pend, const ushort smask, const int p)
+inline static void crossOff2Factor(uchar* ps0, uchar* ps1, const uchar* pend, const ushort smask, const uint p)
 {
 	const uchar masks1 = smask >> 8;
 	const uchar masks0 = (uchar)smask;
@@ -1021,7 +1023,7 @@ static void initWheelBucket(uint offset, const uint sqrtp, const uint64 start, c
 	uint nextp = 0;
 	uint64 remp = 0;
 	if ((uint64)offset * offset >= start) {
-		offset = sqrt((double)start) + 0;
+		offset = (uint)sqrt((double)start) + 0;
 	}
 
 	for (uint segsize = Threshold.L2Size / 1; offset < sqrtp; offset += segsize) {
@@ -1481,13 +1483,29 @@ static void setCpuSize(uint cdata)
 
 	if (cdata >= 16 && cdata < L2_DCACHE_SIZE) { //L1
 		Threshold.L1Size = cdata * (WHEEL30 << 10);
-		Threshold.L1Maxp = Threshold.L1Size / WHEEL30 / ERATSMALL;
+		Threshold.L1Maxp = Threshold.L1Size / (WHEEL30 * Threshold.L1Segs);
 	} else if (cdata >= L2_DCACHE_SIZE && cdata <= 1024) { //L2
 		Threshold.L2Size = cdata * (WHEEL30 << 10);
-		Threshold.L2Maxp = Threshold.L2Size / WHEEL30 / ERATMEDIUM;
+		Threshold.L2Maxp = Threshold.L2Size / (WHEEL30 * Threshold.L2Segs);
 	}
 
 	initThreshold(Threshold.L2Maxp + 512);
+}
+
+static void setLSegs(uint cdata)
+{
+	int level = cdata / 10;
+	int segs = cdata % 10;
+	if (segs <= 6 && segs > 0) {
+		if (level == 1) {
+			Threshold.L1Segs = segs;
+			Threshold.L1Maxp = Threshold.L1Size / (WHEEL30 * segs);
+		} else if(level == 2) {
+			Threshold.L2Segs = segs;
+			Threshold.L2Maxp = Threshold.L2Size / (WHEEL30 * segs);
+		}
+		initThreshold(Threshold.L2Maxp + 512);
+	}
 }
 
 static int setSieveSize(uint sieve_size)
@@ -2056,11 +2074,8 @@ static void startBenchmark( )
 	};
 
 	double ts = getTime();
-
 	Config.Flag &= ~(PRINT_LOG | PRINT_RET);
-
 	uint64 primes = 0;
-//	setSieveSize(Threshold.L2Size);
 	Config.Progress = 0;
 	for (int i = 1; i <= 10; i ++) {
 		primes = doSievePrime(0, ipow(10, i));
@@ -2138,7 +2153,7 @@ static int startRandTest(int tcases, int sieve_size, int powbase)
 
 	uint64 maxn = (uint64)pow(10.0, powbase);
 	if (maxn < 1E6) {
-		maxn = 2e9;
+		maxn = (uint64)2e9;
 	}
 
 	pi2(0, 1000000000);
@@ -2158,7 +2173,7 @@ static int startRandTest(int tcases, int sieve_size, int powbase)
 	for (int i = 1; i <= tcases; i ++) {
 		if (powbase) {
 			uint64 start = 0 + ((uint64)rand()) * rand() * rand() % maxn;
-			uint64 end = 1E6 + ((uint)rand() * rand()) % (1000000000);
+			uint64 end = 1E6 + ((uint64)rand() * rand()) % (1000000000);
 			if (start > end)
 				start ^= (end ^= (start ^= end));
 
@@ -2315,8 +2330,8 @@ static int getCpuInfo()
 	}
 
 	Threshold.L2Size = L2_DCACHE_SIZE * (WHEEL30 << 10);
-	Threshold.L1Maxp = Threshold.L1Size / WHEEL30 / ERATSMALL;
-	Threshold.L2Maxp = Threshold.L2Size / WHEEL30 / ERATMEDIUM;
+	Threshold.L1Maxp = Threshold.L1Size / (WHEEL30 * ERATSMALL);
+	Threshold.L2Maxp = Threshold.L2Size / (WHEEL30 * ERATMEDIUM);
 
 	return cpuinfo[2] >> 16;
 }
@@ -2369,8 +2384,8 @@ static void printInfo( )
 			MAX_SIEVE, WHEEL_SIZE >> 7, ERATBIG, WHEEL);
 	printf("[ARG ]  : L1Size = %dk, L2Size = %dk, SieveSize = %dk\n",
 			Threshold.L1Size / WHEEL30 >> 10, Threshold.L2Size / WHEEL30 >> 10, Config.SieveSize / WHEEL30 >> 10);
-	printf("[ARG ]  : L1Index/L1Maxp/L2Index/L2Maxp/MinPrime = (%d,%d,%d,%d,%d)\n",
-		Threshold.L1Index, Threshold.L1Maxp, Threshold.L2Index, Threshold.L2Maxp, Config.MinPrime);
+	printf("[ARG ]  : L1Seg/L1Maxp/L2Seg/L2Maxp/MinPrime = (%d,%d,%d,%d,%d)\n",
+		Threshold.L1Segs, Threshold.L1Maxp, Threshold.L2Segs, Threshold.L2Maxp, Config.MinPrime);
 	puts(sepator);
 	puts(sepator);
 }
@@ -2432,6 +2447,9 @@ static int parseCmd(const char params[][60])
 				break;
 			case 'C':
 				setCpuSize(cdata);
+				break;
+			case 'L':
+				setLSegs(cdata);
 				break;
 			case 'M':
 				Config.Progress = (1 << cdata) - 1;
@@ -2533,9 +2551,9 @@ bool excuteCmd(const char* cmd)
 					powbase = (int)atoint64(params[cmdi + 3]);
 			}
 			startRandTest(testcase, sieve_size, powbase);
-		} else if (cmdc == 'L') {
-			puts("-------------------start list multi result---------------");
-			listPrime(params);
+//		} else if (cmdc == 'L') {
+//			puts("-------------------start list multi result---------------");
+//			listPrime(params);
 		} else if (cmdc == 'P') {
 			puts("-------------------start print prime---------------------");
 			Cmd cmd = {PCALL_BACK, (uchar*)printPrime, 0};
