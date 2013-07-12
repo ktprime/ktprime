@@ -13,7 +13,7 @@
 # define WHEEL210        210
 # define PRIME_PRODUCT   (210 * 11 * 13 * 17 * 19)
 # define TEST_FILE       "prime.pi"
-# define KVERSION        "2.9"
+# define KVERSION        "2.91"
 # define WHEEL_SKIP      0x26424246
 # define MAX_MULTIPLES   10 //30->6, 210->10
 # define L1_DCACHE_SIZE  32
@@ -240,12 +240,11 @@ struct _BucketInfo
 	uint CurStock;
 	uint StockSize;
 	uint PtrSize;
-	bool UseSieve;
 };
 
 static const uint MAX_BUCKET = (1 << 14) / 3; //> 10*2^32 / 2^18 * 30 = 10^14 / 3
 static const uint WHEEL_SIZE = 1 << 11; //12: 32k, best in [10 - 13]
-static const uint MEM_BLOCK = (1 << 24) / WHEEL_SIZE; //32 MB
+static const uint MEM_BLOCK = (1 << 22) / WHEEL_SIZE; //32 MB
 static const uint MEM_WHEEL = WHEEL_SIZE * sizeof(WheelPrime);
 static const uint MAX_CACHE = (MAX_SIEVE + 2 * L1_DCACHE_SIZE) << 10;
 static const uint MAX_STOCK = 203280221 / WHEEL_SIZE + MAX_BUCKET; //pi(2^32) = 203280221
@@ -495,7 +494,7 @@ uint64 atoint64(const char* str)
 	return ret;
 }
 
-#define CHECK_OR(pbit, orbit)  if (pbit <= pend) *pbit |= orbit
+#define CHECK_OR(pbit, orbit) if (pbit <= pend) *pbit |= orbit
 static void crossOffWheelFactor(uchar* ppbeg[], const uchar* pend, const uint p)
 {
 	uchar* ps0 = ppbeg[0], *ps1 = ppbeg[1];
@@ -1257,8 +1256,6 @@ static void eratSieveMedium(uchar bitarray[], const uint64 start, uint sieve_siz
 		while (sieve_index < sieve_size) {
 			wheel = wdata + wheel->WheelIndex;
 			sieve_index += wheel->Correct + wheel->NextMultiple * wi;
-//			wheel = *(uint*)(wdata + ((uchar)wheel));
-//			sieve_index += (uchar)(wheel >> 16) + (wheel >> 24) * wi;
 		}
 		pwheel++ ->SieveIndex = (sieve_index - sieve_size) << SIBIT | wheel->WheelIndex;
 	}
@@ -1275,9 +1272,7 @@ static void eratSieveMedium(uchar bitarray[], const uint64 start, uint sieve_siz
 		const uint wi = wp >> SIBIT;
 		WheelElement* wdata = WHEEL_MAP[wp % (1 << SIBIT)];
 #if 0
-		WheelElement wheel = wdata[pwheel->SieveIndex % (1 << SIBIT)];
-		bitarray[sieve_index] |= wheel.UnsetBit;
-		sieve_index += wheel.Correct + wheel.NextMultiple * wi;
+		WheelElement wheel; wheel.WheelIndex = pwheel->SieveIndex % (1 << SIBIT);
 		while (sieve_index < sieve_size) {
 			wheel = wdata[wheel.WheelIndex];
 			bitarray[sieve_index] |= wheel.UnsetBit;
@@ -1286,7 +1281,7 @@ static void eratSieveMedium(uchar bitarray[], const uint64 start, uint sieve_siz
 		pwheel++ ->SieveIndex = (sieve_index - sieve_size) << SIBIT | wheel.WheelIndex;
 #else
 		uint wheel = pwheel ->SieveIndex;
-#if 1
+#if 0
 		wheel = *(uint*)(wdata + (wheel & 0xff));
 		bitarray[sieve_index] |= wheel >> 8;
 		sieve_index += (uchar)(wheel >> 16) + (wheel >> 24) * wi;
@@ -1350,13 +1345,13 @@ static void eratSieveBucket(uchar bitarray[], const uint sieve_size)
 	BucketInfo.CurBucket --;
 	for (int i = 0; Bucket[i].Head; i++) {
 		Bucket[i].Wheel = Bucket[i + 1].Wheel;
-		Bucket[i].Head =  Bucket[i + 1].Head;
+		Bucket[i].Head = Bucket[i + 1].Head;
 	}
 }
 
 static int segmentProcessed(uchar bitarray[], const uint64 start, const int sieve_size, Cmd* cmd)
 {
-	assert(start % WHEEL30 == 0);
+//	assert(start % WHEEL30 == 0);
 	const uint bytes = sieveBytes(start, sieve_size);
 	if (NULL == cmd)
 		return countBit0sArray((uint64*)bitarray, bytes * 8);
@@ -1409,7 +1404,7 @@ static int segmentedSieve(const uint64 start, const uint sieve_size, const uint 
 		eratSieveMedium(bitarray, start, sieve_size, Threshold.L2Index, medium);
 //	time_use1 += getTime() - ts; if (sieve_size != Config.SieveSize) { printf("eratSieveMedium time %.f ms\n", time_use1); time_use1 = 0; }
 
-	if (BucketInfo.UseSieve) {
+	if (BucketInfo.StockSize) {
 		static double time_use2 = 0; double ts2 = getTime();
 		//3.sieve p [sieve_size / 2, sqrtp] 610/1720, 610/1560
 		eratSieveBucket(bitarray, Config.SieveSize / WHEEL30);
@@ -1563,11 +1558,11 @@ static uint64 initPiCache(uint64 starti, uint64 endi, int threads, Cmd* cmd)
 //calculate number of prime in Range[start, end] with start <= end
 static uint64 pi2(const uint64 start, const uint64 end, Cmd* cmd = NULL)
 {
-	assert (start <= end);
-
-	uint64 primes = checkSmall(start, end, cmd);
+//	assert (start <= end);
 
 	const uint sieve_size = Config.SieveSize;
+	uint64 primes = checkSmall(start, end, cmd);
+
 	if (end - start <= sieve_size) {
 		primes += segmentedSieve(start, (int)(end - start) + 1, cmd);
 	} else {
@@ -1717,7 +1712,6 @@ uint64 doSievePrime2(const uint64 start, const uint64 end, Cmd* cmd = NULL)
 uint64 doSievePrime(const uint64 start, const uint64 end, Cmd* cmd = NULL)
 {
 //	assert (start <= end && (end - start) < 1e16);
-
 	double ts = getTime();
 
 	if (Config.Flag & SAVE_RESUTL) {
@@ -1726,10 +1720,10 @@ uint64 doSievePrime(const uint64 start, const uint64 end, Cmd* cmd = NULL)
 		cmd = &cmdbuf;
 	}
 
-	const uint sqrtp = (uint)sqrt((double)end) + 1;
-	uint sieve_size = Config.SieveSize;
 	uint64 primes = checkSmall(start, end, cmd);
-	if (sieve_size < Threshold.L2Size && sqrtp >= Config.MinPrime && sqrtp > 10000000) {
+	uint sieve_size = Config.SieveSize;
+	const uint sqrtp = (uint)sqrt((double)end) + 1;
+	if (sieve_size < Threshold.L2Size && sqrtp > 10000000) {
 		sieve_size = setSieveSize(MAX_SIEVE);
 	}
 	const uint minp = Config.MinPrime;
@@ -1744,8 +1738,8 @@ uint64 doSievePrime(const uint64 start, const uint64 end, Cmd* cmd = NULL)
 	const uint64 segment_low = start - (start % WHEEL210);
 	initMediumWheel(sieve_size, medium + 256, segment_low, sieve_size < Threshold.L2Size);
 
-	BucketInfo.UseSieve = sqrtp > minp && sqrtp >= Threshold.L2Maxp;
-	if (BucketInfo.UseSieve) {
+	const bool sieve_big = sqrtp > minp && sqrtp >= Threshold.L2Maxp;
+	if (sieve_big) {
 		initBucketInfo(sieve_size, sqrtp, end - segment_low);
 		initWheelBucket(minp, sqrtp, segment_low, end - segment_low);
 
@@ -1766,9 +1760,8 @@ uint64 doSievePrime(const uint64 start, const uint64 end, Cmd* cmd = NULL)
 		printPiResult(start, end, primes, ts);
 	if (Config.Flag & SAVE_RESUTL)
 		freopen(CONSOLE, "w", stdout);
-	if (BucketInfo.UseSieve) {
-		for (int i = 0; i < BucketInfo.PtrSize; i++)
-			free(WheelPtr[i]);
+	if (BucketInfo.StockSize) {
+		for (int i = 0; i < BucketInfo.PtrSize; i++) free(WheelPtr[i]);
 		assert(BucketInfo.StockSize == BucketInfo.CurStock && BucketInfo.CurBucket == 0);
 		memset(&BucketInfo, 0, sizeof(BucketInfo));
 	}
@@ -2627,19 +2620,19 @@ MINGW: gcc 4.6.3
 CXXFLAGS: -Ofast -msse4 -s -pipe  -march=corei7 -funroll-loops
 windows 7 64 bit, AMD Althon 2 X4 641 2.8G  / Intel i3 350M 2.26G
                                  primenumber/primesieve
-PI[1e11, 1e11+1e10] = 394050419        4.84 / 6.42
-PI[1e12, 1e12+1e10] = 361840208        5.74 / 8.51
-PI[1e13, 1e13+1e10] = 334067230        7.17 /10.50
-PI[1e14, 1e14+1e10] = 310208140        9.07 /12.81
-PI[1e15, 1e15+1e10] = 289531946        11.06/14.94
-PI[1e16, 1e16+1e10] = 271425366        13.03/17.10
-PI[1e17, 1e17+1e10] = 255481287        15.40/19.78
-PI[1e18, 1e18+1e10] = 241272176        19.05/24.27
-PI[1e19, 1e19+1e10] = 228568014        25.34/33.16
+PI[1e11, 1e11+1e10] = 394050419        4.84 / 5.32
+PI[1e12, 1e12+1e10] = 361840208        5.74 / 6.41
+PI[1e13, 1e13+1e10] = 334067230        7.17 / 7.86
+PI[1e14, 1e14+1e10] = 310208140        9.07 / 9.86
+PI[1e15, 1e15+1e10] = 289531946        11.06/12.50
+PI[1e16, 1e16+1e10] = 271425366        13.03/14.84
+PI[1e17, 1e17+1e10] = 255481287        15.40/17.40
+PI[1e18, 1e18+1e10] = 241272176        19.05/20.87
+PI[1e19, 1e19+1e10] = 228568014        25.34/27.50
 
-PI[1e18, 1e18+1e6] = 24280              1.16/0.74
-PI[1e18, 1e18+1e8] = 2414886            1.80/1.72
-PI[1e18, 1e18+1e9] = 24217085           3.91/4.00
+PI[1e18, 1e18+1e6] = 24280              1.16/0.72
+PI[1e18, 1e18+1e8] = 2414886            1.80/1.54
+PI[1e18, 1e18+1e9] = 24217085           3.91/3.95
 
 sieve size = 512 k, init time (2.46 sec)
 PI[1e18, 1e18+1e12] = 24127637783 (1796.57 sec)
