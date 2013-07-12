@@ -360,7 +360,7 @@ static double getTime( )
 #endif
 }
 
-static int ilog10(uint64 n, uint base)
+static int ilog(uint64 n, uint base)
 {
 	int powbase = 0;
 	while (n / base) {
@@ -408,24 +408,6 @@ static uint64 ipow(uint64 x, uint n)
 	return pown;
 }
 #endif
-
-static uint isqrt(uint64 n)
-{
-	uint64 rem = 0, root = 0, divisor = 0;
-
-	for (int i = 0; i < 32; i ++) {
-		root <<= 1;
-		rem = ((rem << 2) + (uint)(n >> 62));
-		n <<= 2;
-		divisor = (root << 1) + 1;
-		if (divisor <= rem) {
-			rem -= divisor;
-			root ++;
-		}
-	}
-
-	return (uint)root;
-}
 
 #if BIT_SCANF
 inline static uint bitScanForward(stype n)
@@ -625,13 +607,12 @@ static uchar* crossOffWheelFactor2(uchar* pbeg, const uchar* pend, const uint st
 static void crossOff4Factor(uchar* ppbeg[], const uchar* pend, const uint mask, const uint p)
 {
 #if 0
-	typedef struct umask {
+	struct umask {
 		uchar mask0;
 		uchar mask1;
 		uchar mask2;
 		uchar mask3;
-	} smask;
-	smask umask = {mask, mask >> 8, mask >> 16, mask >> 24};
+	} umask = {mask, mask >> 8, mask >> 16, mask >> 24};
 #endif
 
 	uchar* ps0 = ppbeg[0], *ps1 = ppbeg[1];
@@ -639,10 +620,10 @@ static void crossOff4Factor(uchar* ppbeg[], const uchar* pend, const uint mask, 
 
 	while (ps3 <= pend) {
 #if 0
-		*ps0 |= umask.mask0; ps0 += p;
-		*ps1 |= umask.mask1; ps1 += p;
-		*ps2 |= umask.mask2; ps2 += p;
-		*ps3 |= umask.mask3; ps3 += p;
+		*ps0 |= umask.mask0, ps0 += p;
+		*ps1 |= umask.mask1, ps1 += p;
+		*ps2 |= umask.mask2, ps2 += p;
+		*ps3 |= umask.mask3, ps3 += p;
 #else
 		*ps0 |= mask >> 0, ps0 += p;
 		*ps1 |= mask >> 8, ps1 += p;
@@ -654,14 +635,14 @@ static void crossOff4Factor(uchar* ppbeg[], const uchar* pend, const uint mask, 
 	CHECK_OR(ps0, mask); CHECK_OR(ps1, mask >> 8); CHECK_OR(ps2, mask >> 16);
 }
 
-inline static void crossOff2Factor(uchar* ps0, uchar* ps1, const uchar* pend, const ushort smask, const uint p)
+inline static void crossOff2Factor(uchar* ps0, uchar* ps1, const uchar* pend, const ushort smask, const int p)
 {
 	const uchar masks1 = smask >> 8;
 	const uchar masks0 = (uchar)smask;
 
 	while (ps1 <= pend) {
-		*ps1 |= masks1; ps1 += p;
-		*ps0 |= masks0; ps0 += p;
+		*ps1 |= masks1, ps1 += p;
+		*ps0 |= masks0, ps0 += p;
 	}
 
 	CHECK_OR(ps0, masks0);
@@ -856,7 +837,7 @@ static int findPrimeGap(const ushort bitarray[], uint64 sieve_index, const int w
 			max_gap = gap;
 			result[2] = sieve_index + i * WHEEL30 * sizeof(mask) + PRIME_OFFSET(mask);
 		}
-		uint next = i + skip_words;
+		int next = i + skip_words;
 		if (next < word_size && bitarray[next] != 0xffff) {
 			i = next - 1;
 			pdiff = 0;
@@ -1038,7 +1019,7 @@ static void initWheelBucket(uint offset, const uint sqrtp, const uint64 start, c
 		uint p2 = offset - offset % WHEEL30 - sizeof(mask) * WHEEL30;
 
 #if CPU == INTEL
-		const uint pmax = 1024 << 1;
+		const uint pmax = 1600 << 1;
 #else
 		const uint pmax = ((uint64)offset * offset / (uint)(start >> 32)) - 0;
 #endif
@@ -1074,6 +1055,7 @@ static void initWheelBucket(uint offset, const uint sqrtp, const uint64 start, c
 			const uint wp = (p / WHEEL210 << WPBIT) + WheelInit210[p % WHEEL210].WheelIndex;
 			const uint module_wheel = sieve_index % WHEEL210;
 			const WheelFirst wf = WheelFirst210[module_wheel][wp % (1 << WPBIT)];
+
 #if CPU == INTEL || X86_64 == 0
 			sieve_index = (sieve_index / WHEEL210 + (wp >> WPBIT) * wf.Correct) * (WHEEL210 / WHEEL30);
 			sieve_index += (wf.Correct * (p % WHEEL210) + module_wheel) / WHEEL30;
@@ -1304,11 +1286,13 @@ static void eratSieveMedium(uchar bitarray[], const uint64 start, uint sieve_siz
 		pwheel++ ->SieveIndex = (sieve_index - sieve_size) << SIBIT | wheel.WheelIndex;
 #else
 		uint wheel = pwheel ->SieveIndex;
-		wheel = *(uint*)(wdata + (uchar)wheel);
+#if 1
+		wheel = *(uint*)(wdata + (wheel & 0xff));
 		bitarray[sieve_index] |= wheel >> 8;
 		sieve_index += (uchar)(wheel >> 16) + (wheel >> 24) * wi;
+#endif
 		while (sieve_index < sieve_size) {
-			wheel = *(uint*)(wdata + ((uchar)wheel));
+			wheel = *(uint*)(wdata + (wheel & 0xff));
 			bitarray[sieve_index] |= wheel >> 8;
 			sieve_index += (uchar)(wheel >> 16) + (wheel >> 24) * wi;
 		}
@@ -1325,9 +1309,6 @@ static void eratSieveBucket(uchar bitarray[], const uint sieve_size)
 	if (loops == 0) { loops = WHEEL_SIZE; }
 
 	for (Stock* phead = (Stock*)Bucket; phead = phead->Next; loops = WHEEL_SIZE) {
-//	for (Stock* phead = Bucket[0].Head, *pnext = phead; phead = pnext; loops = WHEEL_SIZE) {
-//		pnext = phead->Next;
-
 		WheelPrime* cur_wheel = phead->Wheel;
 
 		while (loops --) {
@@ -1348,7 +1329,9 @@ static void eratSieveBucket(uchar bitarray[], const uint sieve_size)
 #endif
 			pushBucket(sieve_index, wp, wheel->WheelIndex);
 #else
-			uint wheel = *(uint*)&Wheel210[wp % (1 << WPBIT)][sieve_index % (1 << SIBIT)];
+			uint wheel = sieve_index % (1 << SIBIT);
+//			sieve_index >>= SIBIT;
+			wheel = *(uint*)&Wheel210[wp % (1 << WPBIT)][(uchar)wheel];
 			bitarray[sieve_index >>= SIBIT] |= wheel >> 8;
 			sieve_index += (uchar)(wheel >> 16) + (wheel >> 24) * (wp >> WPBIT);
 #if ERATBIG > 2
@@ -1458,6 +1441,9 @@ static int segmentedSieve(uint64 start, uint sieve_size, Cmd* cmd = NULL)
 
 static void initThreshold(uint maxp)
 {
+	Threshold.L1Maxp = Threshold.L1Size / (WHEEL30 * Threshold.L1Segs);
+	Threshold.L2Maxp = Threshold.L2Size / (WHEEL30 * Threshold.L2Segs);
+
 	uint p = 11, k = 5;
 	for (; p < maxp; PRIME_DIFF(p, k)) {
 		if (p >= Threshold.L1Maxp) {
@@ -1483,10 +1469,8 @@ static void setCpuSize(uint cdata)
 
 	if (cdata >= 16 && cdata < L2_DCACHE_SIZE) { //L1
 		Threshold.L1Size = cdata * (WHEEL30 << 10);
-		Threshold.L1Maxp = Threshold.L1Size / (WHEEL30 * Threshold.L1Segs);
 	} else if (cdata >= L2_DCACHE_SIZE && cdata <= 1024) { //L2
 		Threshold.L2Size = cdata * (WHEEL30 << 10);
-		Threshold.L2Maxp = Threshold.L2Size / (WHEEL30 * Threshold.L2Segs);
 	}
 
 	initThreshold(Threshold.L2Maxp + 512);
@@ -1499,10 +1483,8 @@ static void setLSegs(uint cdata)
 	if (segs <= 6 && segs > 0) {
 		if (level == 1) {
 			Threshold.L1Segs = segs;
-			Threshold.L1Maxp = Threshold.L1Size / (WHEEL30 * segs);
 		} else if(level == 2) {
 			Threshold.L2Segs = segs;
-			Threshold.L2Maxp = Threshold.L2Size / (WHEEL30 * segs);
 		}
 		initThreshold(Threshold.L2Maxp + 512);
 	}
@@ -1632,9 +1614,9 @@ static uint64 pi(uint64 start, const uint64 end, uint sieve_size, Cmd* cmd)
 
 static void printPiResult(const uint64 start, const uint64 end, uint64 primes, double ts)
 {
-	int sta10 = ilog10(start, 10);
-	int end10 = ilog10(end, 10);
-	int dif10 = ilog10(end - start + 1, 10);
+	int sta10 = ilog(start, 10);
+	int end10 = ilog(end, 10);
+	int dif10 = ilog(end - start + 1, 10);
 
 	if (start > 0) {
 		if (start % ipow(10, sta10) == 0 && sta10 > 2)
@@ -1780,6 +1762,8 @@ uint64 doSievePrime(const uint64 start, const uint64 end, Cmd* cmd = NULL)
 
 	primes += pi(start, end, sieve_size, cmd);
 
+	if ((!cmd || cmd->Oper != FIND_MAXGAP) && (Config.Flag & PRINT_RET))
+		printPiResult(start, end, primes, ts);
 	if (Config.Flag & SAVE_RESUTL)
 		freopen(CONSOLE, "w", stdout);
 	if (BucketInfo.UseSieve) {
@@ -1788,8 +1772,6 @@ uint64 doSievePrime(const uint64 start, const uint64 end, Cmd* cmd = NULL)
 		assert(BucketInfo.StockSize == BucketInfo.CurStock && BucketInfo.CurBucket == 0);
 		memset(&BucketInfo, 0, sizeof(BucketInfo));
 	}
-	if ((!cmd || cmd->Oper != FIND_MAXGAP) && (Config.Flag & PRINT_RET))
-		printPiResult(start, end, primes, ts);
 
 	return primes;
 }
@@ -2028,7 +2010,7 @@ static void initWheel210()
 
 static void fixRangeTest(uint64 lowerBound, const uint64 range, uint64 Ret)
 {
-	uint llog10 = ilog10(lowerBound, 10), rlog10 = ilog10(range, 10);
+	uint llog10 = ilog(lowerBound, 10), rlog10 = ilog(range, 10);
 	printf("Sieving the primes within [10^%u, 10^%u+10^%u] randomly\n", llog10, llog10, rlog10);
 	uint64 primes = 0, upperBound = lowerBound + range;
 
@@ -2647,17 +2629,17 @@ windows 7 64 bit, AMD Althon 2 X4 641 2.8G  / Intel i3 350M 2.26G
                                  primenumber/primesieve
 PI[1e11, 1e11+1e10] = 394050419        4.84 / 6.42
 PI[1e12, 1e12+1e10] = 361840208        5.74 / 8.51
-PI[1e13, 1e13+1e10] = 334067230        7.37 /10.50
-PI[1e14, 1e14+1e10] = 310208140        9.50 /12.81
-PI[1e15, 1e15+1e10] = 289531946        11.46/14.94
-PI[1e16, 1e16+1e10] = 271425366        13.53/17.10
-PI[1e17, 1e17+1e10] = 255481287        15.80/19.78
-PI[1e18, 1e18+1e10] = 241272176        19.15/24.27
-PI[1e19, 1e19+1e10] = 228568014        25.74/33.16
+PI[1e13, 1e13+1e10] = 334067230        7.17 /10.50
+PI[1e14, 1e14+1e10] = 310208140        9.07 /12.81
+PI[1e15, 1e15+1e10] = 289531946        11.06/14.94
+PI[1e16, 1e16+1e10] = 271425366        13.03/17.10
+PI[1e17, 1e17+1e10] = 255481287        15.40/19.78
+PI[1e18, 1e18+1e10] = 241272176        19.05/24.27
+PI[1e19, 1e19+1e10] = 228568014        25.34/33.16
 
-PI[1e18, 1e18+1e6] = 24280              0.74/1.16
-PI[1e18, 1e18+1e8] = 2414886            1.52/1.80
-PI[1e18, 1e18+1e9] = 24217085           3.90/4.53
+PI[1e18, 1e18+1e6] = 24280              1.16/0.74
+PI[1e18, 1e18+1e8] = 2414886            1.80/1.72
+PI[1e18, 1e18+1e9] = 24217085           3.91/4.00
 
 sieve size = 512 k, init time (2.46 sec)
 PI[1e18, 1e18+1e12] = 24127637783 (1796.57 sec)
