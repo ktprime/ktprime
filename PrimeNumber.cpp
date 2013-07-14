@@ -43,7 +43,7 @@
 # define RELEASE          0
 
 //x86 cpu only
-# define BIT_SCANF        1
+# define BIT_SCANF        0
 # define POPCNT           0
 # define TREE2            0
 
@@ -634,7 +634,7 @@ static void crossOff4Factor(uchar* ppbeg[], const uchar* pend, const uint mask, 
 	CHECK_OR(ps0, mask); CHECK_OR(ps1, mask >> 8); CHECK_OR(ps2, mask >> 16);
 }
 
-inline static void crossOff2Factor(uchar* ps0, uchar* ps1, const uchar* pend, const ushort smask, const int p)
+inline static void crossOff2Factor(uchar* ps0, uchar* ps1, const uchar* pend, const ushort smask, const uint p)
 {
 	const uchar masks1 = smask >> 8;
 	const uchar masks0 = (uchar)smask;
@@ -1018,7 +1018,7 @@ static void initWheelBucket(uint offset, const uint sqrtp, const uint64 start, c
 		uint p2 = offset - offset % WHEEL30 - sizeof(mask) * WHEEL30;
 
 #if CPU == INTEL
-		const uint pmax = 1600 << 1;
+		const uint pmax = 2048 << 1;
 #else
 		const uint pmax = ((uint64)offset * offset / (uint)(start >> 32)) - 0;
 #endif
@@ -1434,20 +1434,20 @@ static int segmentedSieve(uint64 start, uint sieve_size, Cmd* cmd = NULL)
 	return segmentProcessed(bitarray, start, sieve_size, cmd);
 }
 
-static void initThreshold(uint maxp)
+static void initThreshold()
 {
 	Threshold.L1Maxp = Threshold.L1Size / (WHEEL30 * Threshold.L1Segs);
 	Threshold.L2Maxp = Threshold.L2Size / (WHEEL30 * Threshold.L2Segs);
 
 	uint p = 11, k = 5;
-	for (; p < maxp; PRIME_DIFF(p, k)) {
+	for (; p < Threshold.L2Maxp; PRIME_DIFF(p, k)) {
 		if (p >= Threshold.L1Maxp) {
 			Threshold.L1Index = k;
 			Threshold.L1Maxp = p;
 			break;
 		}
 	}
-	for (; p < maxp; PRIME_DIFF(p, k)) {
+	for (; p < Threshold.L2Maxp + 256; PRIME_DIFF(p, k)) {
 		if (p >= Threshold.L2Maxp) {
 			Threshold.L2Index = k;
 			Threshold.L2Maxp = p;
@@ -1468,20 +1468,20 @@ static void setCpuSize(uint cdata)
 		Threshold.L2Size = cdata * (WHEEL30 << 10);
 	}
 
-	initThreshold(Threshold.L2Maxp + 512);
+	initThreshold();
 }
 
 static void setLSegs(uint cdata)
 {
-	int level = cdata / 10;
-	int segs = cdata % 10;
-	if (segs <= 6 && segs > 0) {
+	const int level = cdata / 10 % 10;
+	const int segs = cdata % 10;
+	if (segs <= 6 && segs > 0 && level < 3) {
 		if (level == 1) {
 			Threshold.L1Segs = segs;
 		} else if(level == 2) {
 			Threshold.L2Segs = segs;
 		}
-		initThreshold(Threshold.L2Maxp + 512);
+		initThreshold();
 	}
 }
 
@@ -1676,7 +1676,7 @@ static int sievePrime(uchar prime[], uint n)
 	prime[primes + 0] = 0;
 	prime[primes + 1] = prime[primes + 2] = (uchar)(-1u);
 
-	initThreshold(maxp);
+	initThreshold();
 
 //	if (Config.Flag & PRINT_LOG)
 //		dumpPrime(getTime() - ts, prime);
@@ -1771,7 +1771,7 @@ uint64 doSievePrime(const uint64 start, const uint64 end, Cmd* cmd = NULL)
 
 static int dumpPrime(double ts, uchar prime[])
 {
-	uint j = 8 + PRIME_PRODUCT / 9699690, p = Prime[0];
+	uint p = Prime[0], j = 8 + PRIME_PRODUCT / 9699690;
 	for (; prime[j + 0] > 0; j ++) {
 		p += prime[j];
 		PRIME_ADD_DIFF(p);
@@ -2008,14 +2008,16 @@ static void fixRangeTest(uint64 lowerBound, const uint64 range, uint64 Ret)
 	uint64 primes = 0, upperBound = lowerBound + range;
 
 	while (lowerBound < upperBound) {
-		uint sieve_size = ((uint64)rand() * rand() * rand()) % 2000000000 + ipow(10, 8);
-		if (sieve_size + lowerBound > upperBound)
-			sieve_size = upperBound - lowerBound;
+		uint64 rd = rand() * rand();
+		uint64 end = lowerBound + ((rd * rand() * rd) % (1u << 31)) + ipow(10, 8);
+		if (end > upperBound)
+			end = upperBound;
 
 		setSieveSize(rand() % MAX_SIEVE + 128);
-		primes += doSievePrime(lowerBound, lowerBound + sieve_size - 1);
-		lowerBound += sieve_size;
+		setLSegs(rand() % 6 + 11); setLSegs(rand() % 6 + 21);
+		primes += doSievePrime(lowerBound, end - 1);
 		printf("Remaining chunk: %.2lf%%\r", (upperBound - lowerBound) * 100.0 / range);
+		lowerBound = end;
 	}
 	printf("Pi[10^%u, 10^%u+10^%u] = %lld\n", llog10, llog10, rlog10, primes);
 	assert(primes == Ret);
@@ -2064,8 +2066,9 @@ static void startBenchmark( )
 	setSieveSize(MAX_SIEVE);
 	for (int j = 12; j <= 19; j ++) {
 		uint64 start = ipow(10, j);
+		setLSegs(rand() % 6 + 11); setLSegs(rand() % 6 + 21);
 		primes = doSievePrime(start, start + ipow(2, 32));
-		printf("pi(10^%d, 10^%d+2^32) = %lld               \n", j, j, primes);
+		printf("pi(10^%d, 10^%d+2^32) = %lld                   \n", j, j, primes);
 		assert(primes == primeCounts[j]);
 	}
 
