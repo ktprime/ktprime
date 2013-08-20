@@ -20,17 +20,17 @@
 # define INTEL           0
 
 //performance marco
-# define L1_DCACHE_SIZE  32
+# define L1_DCACHE_SIZE  64
 # define L2_DCACHE_SIZE  256
 # define SIBIT           8
 # define WPBIT           (SIBIT - 1)
 
 # define ERAT_SMALL      4 //2 - 6
 # define ERAT_MEDIUM     4 //2 - 6
-# define ERAT_BIG        2 //2 - 6
-# define MAX_SIEVE       1024
+# define ERAT_BIG        4 //2 - 6
+# define MAX_SIEVE       512
 
-#if 1
+#if W30
 	# define WHEEL        WHEEL30
 	# define WHEEL_MAP    Wheel30
 	# define WHEEL_INIT   WheelInit30
@@ -324,17 +324,16 @@ struct WheelInit
 
 typedef WheelElement WheelFirst;
 static WheelInit WheelInit30[WHEEL30];
-static WheelElement Wheel30[8][8];
 static WheelFirst WheelFirst30[WHEEL30][8];
+static WheelElement Wheel30[8][8];
 
-static WheelInit WheelInit210[WHEEL210];
-static WheelElement Wheel210[48][64];
+//210
 static WheelFirst WheelFirst210[WHEEL210][64];
+static WheelElement Wheel210[48][64];
+static WheelInit WheelInit210[WHEEL210];
 
-static uchar Pattern30[64] =
-{
-	1  ,7  ,11 ,13 ,17 ,19 ,23 ,29 ,
-
+static uchar Pattern30[64] = {
+	1 , 7 , 11 ,13 ,17 ,19 ,23 ,29
 };
 
 typedef void (*call_back)(uint64, uint64);
@@ -603,7 +602,19 @@ static void crossOff4Factor(uchar* ppbeg[], const uchar* pend, const uint mask, 
 	CHECK_OR(ps0, mask); CHECK_OR(ps1, mask >> 8); CHECK_OR(ps2, mask >> 16);
 }
 
-//popcnt instruction : SSE4.2/SSE4A for fast bit counting
+inline static void crossOff2Factor(uchar* ps0, uchar* ps1, const uchar* pend, const uint smask, const uint p)
+{
+	const uchar masks1 = smask >> 8;
+	const uchar masks0 = (uchar)smask;
+
+	while (ps1 <= pend) {
+		*ps1 |= masks1, ps1 += p;
+		*ps0 |= masks0, ps0 += p;
+	}
+
+	CHECK_OR(ps0, masks0);
+}
+
 #if POPCNT
 inline static int countBitsPopcnt(const uint64 n)
 {
@@ -1075,16 +1086,19 @@ sieveSmall5(uchar bitarray[], const uchar* pend, const uint wi, const uint pi, W
 	const uint p = wi * WHEEL30 + Pattern30[pi];
 	WheelElement* wdata = Wheel30[pi];
 
-	for (int i = 0; i < 8; i ++) {
-		uchar* ps = bitarray;
-		uchar masks = wheel->UnsetBit;
+	for (int i = 0; i < 4; i ++) {
+		uchar* ps0 = bitarray;
+		ushort smask = wheel->UnsetBit;
 		bitarray += wheel->Correct + wheel->NextMultiple * wi;
-		while (ps <= pend) {
-			*ps |= masks; ps += p;
-		}
-		if (i < 7) {
+		wheel = wdata + wheel->WheelIndex;
+
+		uchar* ps1 = bitarray;
+		smask |= ((ushort)wheel->UnsetBit) << 8;
+		bitarray += wheel->Correct + wheel->NextMultiple * wi;
+		if (i < 3)
 			wheel = wdata + wheel->WheelIndex;
-		}
+
+		crossOff2Factor(ps0, ps1, pend, smask, p);
 	}
 
 	return wheel;
@@ -1108,8 +1122,8 @@ static void eratSieveL1(uchar bitarray[], const uint64 start, const int segsize,
 		const uint multiples = (WHEEL_SKIP >> wf.NextMultiple * 4) | (WHEEL_SKIP << (32 - 4 * wf.NextMultiple));
 		sieve_index += wf.Correct * p;
 
-		sieveSmall0(bitarray, pend, p, sieve_index, multiples);
-//		sieveSmall1(bitarray, pend, p, sieve_index, multiples);
+//		sieveSmall0(bitarray, pend, p, sieve_index, multiples);
+		sieveSmall1(bitarray, pend, p, sieve_index, multiples);
 //		sieveSmall2(bitarray, pend, p, sieve_index, multiples);
 //		sieveSmall3(bitarray, pend, p, sieve_index, multiples);
 	}
@@ -1425,7 +1439,6 @@ static void setLSegs(uint cdata)
 static int setSieveSize(uint sieve_size)
 {
 	if (sieve_size == 0) {
-		memset(PiCache, 0, sizeof(PiCache));
 		return 0;
 	}
 
@@ -1439,7 +1452,6 @@ static int setSieveSize(uint sieve_size)
 		sieve_size = MAX_CACHE * WHEEL30;
 
 	sieve_size = (1 << ilog(sieve_size / WHEEL30 + 1, 2)) * WHEEL30;
-
 	if (sieve_size != Config.SieveSize) {
 		memset(PiCache, 0, sizeof(PiCache));
 	}
@@ -2505,11 +2517,9 @@ PI[1e19, 1e19+1e10] = 228568014        25.34/27.50
 PI[1e18, 1e18+1e6] = 24280              1.16/0.72
 PI[1e18, 1e18+1e8] = 2414886            1.80/1.54
 PI[1e18, 1e18+1e9] = 24217085           3.91/3.90
-
-sieve size = 512 k, init time (2.46 sec)
-PI[1e18, 1e18+1e12] = 24127637783 (1796.57 sec)
-PI[1e16, 1e16+1e12] = 27143405794 (1406.57 sec)
-PI[1e14, 1e14+1e12] = 31016203073 (1006.57 sec)
+PI[1e18, 1e18+1e12]= 24127637783        1686
+PI[1e16, 1e16+1e12]= 27143405794        1286
+PI[1e14, 1e14+1e12]= 31016203073        906
 
 vc++
 	cl /O2 /Oi /Ot /Oy /GT /GL PrimeNumber.cpp
