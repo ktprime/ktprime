@@ -14,7 +14,7 @@
 # define PRIME_PRODUCT   (210 * 11 * 13 * 17 * 19)
 # define TEST_FILE       "prime.pi"
 # define SAVE_FILE       "prime.txt"
-# define KVERSION        "3.0"
+# define KVERSION        "3.1"
 # define WHEEL_SKIP      0x26424246
 # define MAX_MULTIPLES   10 //30->6, 210->10
 # define INTEL           0
@@ -28,9 +28,9 @@
 # define ERAT_SMALL      4 //2 - 6
 # define ERAT_MEDIUM     4 //2 - 6
 # define ERAT_BIG        4 //2 - 6
-# define MAX_SIEVE       512
+# define MAX_SIEVE       1024
 
-#if W30
+#ifndef W210
 	# define WHEEL        WHEEL30
 	# define WHEEL_MAP    Wheel30
 	# define WHEEL_INIT   WheelInit30
@@ -287,9 +287,6 @@ static uchar Lsb[1 << 16];
 static uchar WordNumBit1[1 << 16];
 #endif
 
-//cache small segment primes
-static uint PiCache[100];
-
 //accelerates to save diff prime < 2^31 into Prime[]
 //range = [n, n + 2 * WHEEL30]
 struct PrimeGap
@@ -376,22 +373,19 @@ static uint64 ipow(uint x, uint n)
 
 static uint isqrt(uint64 x)
 {
-	const uint64 bits = 64;
-	const uint64 one = 1;
-
 	// s      = bits / 2 - nlz(x - 1) / 2
 	// nlz(x) = bits - 1 - ilog2(x)
-	uint64 s = bits / 2 - (bits - 1) / 2 + ilog((x - 1) / 2, 2);
+	uint s = 1 + ilog((x - 1) / 2, 2);
 
 	// first guess: least power of 2 >= sqrt(x)
-	uint64 g0 = one << s;
+	uint64 g0 = (uint64)1 << s;
 	uint64 g1 = (g0 + (x >> s)) >> 1;
 
 	while (g1 < g0) {
 		g0 = g1;
 		g1 = (g0 + (x / g0)) >> 1;
 	}
-	return g0;
+	return (uint)g0;
 }
 
 
@@ -1474,10 +1468,6 @@ static int setSieveSize(uint sieve_size)
 
 	sieve_size = (1 << ilog(sieve_size / WHEEL30 + 1, 2)) * WHEEL30;
 
-//	if (sieve_size != Config.SieveSize) {
-//	memset(PiCache, 0, sizeof(PiCache));
-//	}
-
 	return Config.SieveSize = sieve_size;
 }
 
@@ -2475,6 +2465,9 @@ int main(int argc, char* argv[])
 	if (argc > 1)
 		excuteCmd(argv[1]);
 
+//	for (uint64 i = atoint64("e14"), size = 10000000; size > 0; size--)
+//		assert(isqrt(i + size) == (uint)sqrt(i + size));
+
 #if 0
 	excuteCmd("D");
 	srand(time(0));
@@ -2530,10 +2523,8 @@ vc++
 gcc
 	amd:	g++ -DCPU=1 -march=native -O3 -funroll-loops -s -pipe PrimeNumber.cpp -o PrimeNumber
 	intel:	g++ -DCPU=0 -march=native -O3 -funroll-loops -s -pipe PrimeNumber.cpp -o PrimeNumber
-doc:
+
 	-fprofile-use -flto -fprofile-generate
-else
-	g++ -O3 -s -pipe PrimeNumber.cpp -o PrimeNumber -fprofile-generate/use -flto
 doc:
 	http://www.ieeta.pt/~tos/software/prime_sieve.html
 	http://code.google.com/p/primesieve/wiki/Links
