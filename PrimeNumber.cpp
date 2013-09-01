@@ -11,7 +11,7 @@
 //const
 # define WHEEL30         30
 # define WHEEL210        210
-# define PRIME_PRODUCT   (210 * 11 * 13 * 17 * 19)
+# define PRIME_PRODUCT   (210 * 11 * 13 * 17 * 4)
 # define TEST_FILE       "prime.pi"
 # define SAVE_FILE       "prime.txt"
 # define KVERSION        "3.1"
@@ -23,14 +23,14 @@
 # define L1_DCACHE_SIZE  64
 # define L2_DCACHE_SIZE  256
 # define SIBIT           8
-# define WPBIT           (SIBIT - 2)
+# define WPBIT           6 //6 - 7, 8:1e19
 
 # define ERAT_SMALL      4 //2 - 6
 # define ERAT_MEDIUM     4 //2 - 6
 # define ERAT_BIG        4 //2 - 6
 # define MAX_SIEVE       1024
 
-#ifndef W210
+#ifndef W210 //intel cpu
 	# define WHEEL        WHEEL30
 	# define WHEEL_MAP    Wheel30
 	# define WHEEL_INIT   WheelInit30
@@ -68,13 +68,13 @@
 #endif
 
 #ifdef _WIN32
-	typedef unsigned __int64 uint64;
 	typedef __int64 int64;
+	typedef unsigned __int64 uint64;
 	#define CONSOLE "CON"
 	#include <windows.h>
 #else
-	typedef unsigned long long uint64;
 	typedef long long int64;
+	typedef unsigned long long uint64;
 	#define CONSOLE "/dev/tty"
 	#include <sys/time.h>
 	#include <unistd.h>
@@ -264,7 +264,7 @@ static WheelPrime* MediumWheel;
 #if CHECK
 	static uchar Prime[MAX_MEDIUM * 50];
 #else
-	static uchar Prime[MAX_MEDIUM * 1];
+	static uchar Prime[MAX_MEDIUM / 2];
 #endif
 
 //position of least significant 1 bit of an integer
@@ -332,8 +332,8 @@ static uchar Pattern30[64] =
 };
 
 typedef void (*call_back)(uint64, uint64);
-static int segmentedSieve(uint64 start, uint sieve_size, Cmd*);
 static void initWheelGap();
+static int segmentedSieve(uint64 start, uint sieve_size, Cmd*);
 
 //get current time
 static double getTime( )
@@ -373,8 +373,6 @@ static uint64 ipow(uint x, uint n)
 
 static uint isqrt(uint64 x)
 {
-	// s      = bits / 2 - nlz(x - 1) / 2
-	// nlz(x) = bits - 1 - ilog2(x)
 	uint s = 1 + ilog((x - 1) / 2, 2);
 
 	// first guess: least power of 2 >= sqrt(x)
@@ -416,7 +414,7 @@ inline static uint bitScanForward(stype n)
 #endif
 
 //return n % p < 2^32
-static uint fastMod(const uint64 n, uint p)
+inline static uint fastMod(const uint64 n, uint p)
 {
 #if ASM_X86 == 0
 	p = (uint)(n % p);
@@ -647,7 +645,7 @@ inline static int countBitsPopcnt(const uint64 n)
 
 inline static int countBitsTable(const uint64 n)
 {
-#if __GNUC__
+#if __GNUC__ && 0
 	return __builtin_popcountll(n);
 #else
 	uint hig = (uint)(n >> 32), low = (uint)n;
@@ -1449,7 +1447,7 @@ static void setLSegs(uint cdata)
 		} else if(level == 2) {
 			Threshold.L2Segs = segs;
 			setThreshold();
-		} else if (level == 3) {
+		} else if (level == 3 && ERAT_BIG > 2) {
 			Threshold.L3Segs = segs;
 		}
 	}
@@ -1963,7 +1961,7 @@ static void fixRangeTest(uint64 lowerBound, const int64 range, uint64 Ret)
 
 static void startBenchmark( )
 {
-	uint primeCounts[] =
+	const uint primeCounts[] =
 	{
 		4,         // pi(10^1)
 		25,        // pi(10^2)
@@ -2226,7 +2224,8 @@ static void printInfo( )
 	printf("Count/Sieve primes in (0, 2^64 - 4 * 2^32), KVERSION %s\n", KVERSION);
 	puts("Implemented by the segmented sieve of eratosthenes [wheel = 30/210]");
 	puts("Copyright @ by Huang Yuanbing 2011 - 2013 bailuzhou@163.com");
-	puts("Code: https://github.com/ktprime/ktprime/blob/master/PrimeNumber.cpp");
+	puts("Code:https://github.com/ktprime/ktprime/blob/master/PrimeNumber.cpp");
+	puts("CXXFLAG:g++ -march=native [-DW210,-DCPU=1] -funroll-loops -O3 -s -pipe");
 
 	puts(sepator);
 
@@ -2268,9 +2267,9 @@ static void doCompile(const char* flag)
 #if _MSC_VER
 		"cl /O2 /Oi /Ot /Oy /GT /GL %s %s %s";
 #elif X86_64
-		"g++ -m64 -msse3 %s -O3 -funroll-loops -static -pipe %s -o %s";
+		"g++ -m64 -march=native %s -O3 -funroll-loops -static -pipe %s -o %s";
 #else
-		"g++ -m32 -msse3 %s -O3 -funroll-loops -static -pipe %s -o %s";
+		"g++ -m32 -march=native %s -O3 -funroll-loops -static -pipe %s -o %s";
 #endif
 
 	char ccmd[257] = {0};
@@ -2459,14 +2458,10 @@ void initPrime(int sieve_size)
 
 int main(int argc, char* argv[])
 {
-	printInfo();
 	initPrime(MAX_SIEVE);
 
 	if (argc > 1)
 		excuteCmd(argv[1]);
-
-//	for (uint64 i = atoint64("e14"), size = 10000000; size > 0; size--)
-//		assert(isqrt(i + size) == (uint)sqrt(i + size));
 
 #if 0
 	excuteCmd("D");
