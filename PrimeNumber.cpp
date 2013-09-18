@@ -19,18 +19,18 @@
 # define WHEEL_SKIP       0x799b799b
 # define MAX_MULTIPLES    10 //30->6, 210->10
 # define INTEL            0
-# define SIBIT            8
 
 //performance marco
 # define L1_DCACHE_SIZE   64
 # define L2_DCACHE_SIZE   256
-# define MAX_SIEVE        1024 //512 amd
+# define SIBIT            8
 # define WPBIT            6 //6 - 7, 8:1e19
+
 # define ERAT_SMALL       4 //2 - 6
 # define ERAT_MEDIUM      4 //2 - 6
-# define ERAT_BIG         2 //2 - 6
+# define ERAT_BIG         4 //2 - 6
 //x86 cpu only
-# define BIT_SCANF        0
+# define BIT_SCANF        1
 # define POPCNT           0
 # define TREE2            0
 #ifndef MAX_SIEVE
@@ -91,10 +91,10 @@ typedef unsigned int uint;
 #define PRIME_ADD_DIFF(p) if (p % 2 == 0) { p += 255; }
 
 #if BIT_SCANF == 0
-	#define PRIME_OFFSET(mask) Lsb[mask]
+	#define PRIME_OFFSET(mask)   Lsb[mask]
 	typedef ushort stype;
 #else
-	#define PRIME_OFFSET(mask) Pattern30[bitScanForward(mask)]
+	#define PRIME_OFFSET(mask)   Pattern30[bitScanForward(mask)]
 #if X86_64
 	typedef uint64 stype;
 #else
@@ -157,7 +157,7 @@ enum EBITMASK
 enum BUCKET
 {
 	MAX_BUCKET = (1 << 14) / 3 + 4, //> 10*2^32 / 2^18 * 30 = 10^14 / 3
-	WHEEL_SIZE = 1 << 12, //12: 32k, best in [10 - 13]
+	WHEEL_SIZE = 1 << 11, //12: 32k, best in [10 - 13]
 	MEM_BLOCK = (1 << 22) / WHEEL_SIZE, //32 MB
 	MEM_WHEEL = WHEEL_SIZE * 8,//sizeof(WheelPrime),
 
@@ -563,10 +563,10 @@ static uchar* crossOffWheelFactor2(uchar* pbeg, const uchar* pend, const uint st
 	return p;
 }
 
-#define CHECK_OR(n, mask) if (ps##n <= pend) *ps##n |= mask
+#define CHECK_OR(n, mask)  if (ps##n <= pend) *ps##n |= mask
 static void crossOffWheelFactor(uchar* ppbeg[], const uchar* pend, const uint p)
 {
-	#define CHECK_OR1(n) if (ps##n <= pend) *ps##n |= BIT##n
+	#define CHECK_OR1(n)       if (ps##n <= pend) *ps##n |= BIT##n
 
 	uchar* ps0 = ppbeg[0], *ps1 = ppbeg[1];
 	uchar* ps2 = ppbeg[2], *ps3 = ppbeg[3];
@@ -883,6 +883,7 @@ static int initBucketInfo(const uint sieve_size, const uint sqrtp, const uint64 
 	//maxp wheel 210 pattern, max pattern difference is 10
 	BucketInfo.MaxBucket = (uint64)sqrtp * MAX_MULTIPLES / sieve_size + 2;
 //	assert (BucketInfo.MaxBucket < sizeof(Bucket) / sizeof(Bucket[0]));
+
 	BucketInfo.Log2Size = ilog(sieve_size / WHEEL30, 2);
 	BucketInfo.SieveSize = (1 << BucketInfo.Log2Size) - 1;
 
@@ -1014,7 +1015,7 @@ static void initWheelBucket(uint minp, const uint sqrtp, const uint64 start, con
 			uint sieve_index = p - (uint)(start % p);
 #endif
 
-			if (sieve_index >= range) { continue ; }
+//			if (sieve_index >= range) { continue ; }
 
 			const uint wp = (p / WHEEL210 << WPBIT) + WheelInit210[p % WHEEL210].WheelIndex;
 			const uchar module_wheel = sieve_index % WHEEL210;
@@ -1128,8 +1129,9 @@ static void eratSieveL1(uchar bitarray[], const uint64 start, const int segsize,
 		}
 
 		const WheelFirst wf = WheelFirst30[sieve_index % WHEEL30][WheelInit30[p % WHEEL30].WheelIndex];
-		sieve_index += wf.Correct * p;
 		const uint multiples = WHEEL_SKIP >> (wf.NextMultiple * 2);
+
+		sieve_index += wf.Correct * p;
 
 		sieveSmall0(bitarray, pend, p, sieve_index, multiples);
 //		sieveSmall1(bitarray, pend, p, sieve_index, multiples);
@@ -1422,9 +1424,7 @@ static void setThreshold()
 
 static void setCpuSize(uint cdata)
 {
-	if (cdata & (cdata - 1)) {
-		cdata = 1 << ilog(cdata, 2);
-	}
+	cdata = 1 << ilog(cdata, 2);
 
 	if (cdata >= 16 && cdata < L2_DCACHE_SIZE) { //L1
 		Threshold.L1Size = cdata * (WHEEL30 << 10);
@@ -1528,7 +1528,7 @@ static uint64 pi(uint64 start, const uint64 end, Cmd* cmd)
 			printf("[%u]: sqrt = %d, start = %I64d, seg = %d != %d = ok\n", (uint)si, (int)isqrt(start), start, seg, ok);
 		}
 #endif
-		if ((si ++ & Config.Progress) == 7) {
+		if ((si ++ & Config.Progress) == 15) {
 			double ratio = si * segs;
 			printf(">> %02d%%, total time ~ %.2f sec, primes ~= %lld\r",
 					((int)ratio) / 10, (getTime() - ts) / ratio, (int64)(1000 * primes / ratio));
@@ -2445,6 +2445,7 @@ void initPrime(int sieve_size)
 
 int main(int argc, char* argv[])
 {
+	assert(MAX_SIEVE >= 256 && MAX_SIEVE <= 2048);
 	initPrime(MAX_SIEVE);
 
 	if (argc > 1)
@@ -2484,7 +2485,7 @@ int main(int argc, char* argv[])
 /***
 MINGW: gcc 4.6.3
 CXXFLAG:g++ -march=native [-DW210,-DCPU=1] -funroll-loops -O3 -s -pipe;
-windows 7 64 bit, AMD Althon 2 X4 641 2.8G / Intel i3 350M 2.26G
+windows 7 64 bit, AMD Althon 2 X4 641 2.8G  / Intel i3 350M 2.26G
 PI[1e11, 1e11+1e10] = 394050419        4.68 / 5.32
 PI[1e12, 1e12+1e10] = 361840208        5.70 / 6.41
 PI[1e13, 1e13+1e10] = 334067230        7.13 / 7.86
