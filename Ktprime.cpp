@@ -87,7 +87,7 @@ http://numbers.computation.free.fr/Constants/Primes/twin.html.
 # endif
 
 # define FAST_CROSS      1
-# define OPT_L1CACHE     0
+# define OPT_L1CACHE     1
 # define OPT_L2CACHE     1
 
 #if defined _M_AMD64
@@ -2506,7 +2506,7 @@ static void listPowGpt(const char cmdparams[][80], int cmdi)
 
 	printf("in %d^%d - %d^%d\n", m, startindex, m, endindex);
 
-	if (m < 2 && m > 10000) {
+	if (m < 2 || m > 10000) {
 		m = 10;
 	}
 	if (startindex > endindex) {
@@ -2762,7 +2762,7 @@ static void printInfo()
 	puts("---------------------------------------------------------------");
 
 	printf("\
-	1.%s PI(n)\n \
+	1.%s %s PI(n)\n \
 	2.Twin/Cousin/Sexy/p, p+2n/ prime pairs PI2(n)\n \
 	3.Ktuplet prime PIk(n)\n (n < %s) version %s\n",
 	KtupletName[0], KtupletName[1], MAXN, KVERSION);
@@ -2856,7 +2856,7 @@ static void printKpattern()
 			int kp = KData.Kpattern[i];
 			printf(", p + %d", kp);
 			if (kp % 2 != 0 || (i > 1 && kp <= KData.Kpattern[i - 1])) {
-				printf(" : invalid pattern[i] %d\n", i, kp);
+				printf(" : invalid pattern[%d] %d\n", i, kp);
 			}
 		}
 		putchar('\n');
