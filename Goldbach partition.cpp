@@ -121,7 +121,6 @@ static const char* const HelpConfig = "\
 	[R: Runtime check pattern]\n\
 	[A: Save/Continue last task]\n\
 	[M: Monitor progress m(0 - 30)]\n\
-	[H: Help]\n\
 	[F: Factorial of whell prime factor f(7 - 29)]\n\
 	[T: Threads number t(2 - 64)]\n\
 	[C: Cpu L1/L2 data cache size c(L1:16-128, L2:128-1024)]\n";
@@ -239,8 +238,6 @@ static struct ThreadInfo
 {
 	int Pbegi;
 	int Pendi;
-
-
 	uint64 Result;
 } TData[MAX_THREADS];
 
@@ -857,10 +854,6 @@ static int simpleEratoSieve(const uint sqrtn)
 				SET_BIT(bitarray, j);
 			}
 		}
-	}
-
-	if (0 && CHECK_FLAG(PRINT_LOG)) {
-		printf("Prime[%d] = %d\n", primes, lastprime);
 	}
 
 	return primes;
@@ -1760,7 +1753,7 @@ static void listPowGp(const char params[][80], int cmdi)
 
 	printf("in %d^%d - %d^%d\n", m, startindex, m, endindex);
 
-	if (m < 2 && m > 10000) {
+	if (m < 2 || m > 10000) {
 		m = 10;
 	}
 	if (startindex > endindex) {
