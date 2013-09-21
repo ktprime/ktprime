@@ -251,14 +251,18 @@ static struct
 static uchar SievedTpl[BUFFER_SIZE];
 static uchar SievedTpl8[8][(2 * BUFFER_SIZE) / 8 + 32];
 
+#if BIT_SCANF == 0
 //bit 1 left most table
 static char LeftMostBit1[1 << 16];
+#endif
 
 //15 - 8 sgi | 7 - 4 step |0 - 3 wi;
 static ushort WheelSkip[WHEEL][8];
 
 //number of bits 1 binary representation table in Range[0-2^16)
+#if POPCNT == 0
 static uchar WordNumBit1[1 << 16];
+#endif
 
 //WordReverse[i] is equal to the bit reverse of i (i < 2^16)
 static ushort WordReverse[1 << 16];
@@ -350,11 +354,11 @@ static struct ThreadInfo
 
 } Tdata[MAX_THREADS];
 
-static int setSieveSize(int sievesize);
+static int setSieveSize(uint sievesize);
 static void getGp2(uint64 minn, int gpcount, uint64 gp[]);
 static void coreSieve1(uint64 minn, int gpcount, uint64 gp[]);
 static void coreSieve2(uint64 minn, int gpcount, uint64 first, uint64 gp[]);
-typedef void (*sieve_func)(const uint64 , const uint64 , const int , const int , uint64 []);
+typedef void (*sieve_func)(const uint64 , const uint64 , const uint , const int , uint64 []);
 
 static double getTime( )
 {
@@ -670,7 +674,7 @@ static uchar reverseByte(const uchar c)
 //set bitarray1 bit position from s1 to sievesize by step
 //set bitarray2 bit position from s2 to sievesize by step
 inline static void
-set2BitArray2(utype bitarray1[], utype bitarray2[], int s1, int s2, const int step, const int sievesize)
+set2BitArray2(utype bitarray1[], utype bitarray2[], int s1, int s2, const int step, const uint sievesize)
 {
 	for (; s2 < sievesize; ) {
 		SET_BIT(bitarray1, s1); s1 += step;
@@ -1256,7 +1260,7 @@ static int dumpGp(const uint64 offset, const int wordlengs, const ushort* bitarr
 }
 
 //init the current segment bitarray and pack sievesize
-static int setSieveTpl(const uint64 start, const int sievesize, uchar bitarray[])
+static int setSieveTpl(const uint64 start, const uint sievesize, uchar bitarray[])
 {
 	int bitleng = sievesize;
 
@@ -1288,7 +1292,7 @@ static int setSieveTpl(const uint64 start, const int sievesize, uchar bitarray[]
 }
 
 //init the current segment bitarray and pack sievesize
-static int setSieveTpl2(uint64 start, const int sievesize, uchar bitarray[][BUFFER_SIZE8])
+static int setSieveTpl2(uint64 start, const uint sievesize, uchar bitarray[][BUFFER_SIZE8])
 {
 	int bitleng = sievesize + start % WHEEL;
 	bitleng = bitleng / WHEEL * 8 + WheelLeng[bitleng % WHEEL];
@@ -1489,7 +1493,7 @@ sieveSmall3(uchar dstarray[][BUFFER_SIZE8], const uint sleng, const uint p, uint
 	}
 }
 
-static void doSieve2(uchar dstarray[][BUFFER_SIZE8], const uint64 start, const int sievesize)
+static void doSieve2(uchar dstarray[][BUFFER_SIZE8], const uint64 start, const uint sievesize)
 {
 	uint sqrtp = isqrt(start + sievesize) + 1;
 	if ((start + sievesize) < ((uint64)sqrtp) * sqrtp) {
@@ -1603,7 +1607,7 @@ static int segmentedSieve(uint64 start, uint sievesize, uchar dstarray[])
 	return primes;
 }
 
-static int setSieveSize(int sievesize)
+static int setSieveSize(uint sievesize)
 {
 	if (sievesize < 6000 && sievesize > 15) {
 		sievesize *= (WHEEL << 10);
@@ -1747,11 +1751,13 @@ static void initWheelSkip()
 static void initBitTable( )
 {
 	//1. init WordNumBit1 table in 0-2^16
-	int nbitsize = sizeof(WordNumBit1) / sizeof(WordNumBit1[0]);
+	int nbitsize = 1 << 16;
 	int i;
+#if POPCNT == 0
 	WordNumBit1[0] = 0;
 	for (i = 1; i < nbitsize; i++)
 		WordNumBit1[i] = WordNumBit1[i >> 1] + (i & 1);
+#endif
 
 	//2. init bit reverseByte of word table
 	uchar bytereverse[256] = {0};
@@ -1772,11 +1778,13 @@ static void initBitTable( )
 		Map16To30[i] = mask;
 	}
 
+#if BIT_SCANF == 0
 	//4. init LeftMostBit1 table
 	for (int m = 2; m < (1 << 16); m += 2) {
 		LeftMostBit1[m + 0] = LeftMostBit1[m >> 1] + 1;
 		LeftMostBit1[m + 1] = 0;
 	}
+#endif
 }
 
 //init Prime, SievedTpl and WordNumBit1 table
@@ -2029,7 +2037,7 @@ static void addGpInMiddle(const uint64 minn, const int gpcount, uint64 gp[])
 // ----(n-start-leng)->--(n - start) ---(n - start2)---<---(n - start2 - sievesize)----
 **/
 //start + 1, start + sievesize + 1
-static int segmentedGp01(const uint64 start1, const uint64 start2, const int sievesize)
+static int segmentedGp01(const uint64 start1, const uint64 start2, const uint sievesize)
 {
 	//assert(start + sievesize <= start2 + 1 && 0 == start % WHEEL);
 	uchar bitarray1[BLOCK_SIZE / (CHAR_BIT * 2)] MEM_ALIGN(16);
@@ -2069,7 +2077,7 @@ static int segmentedGp01(const uint64 start1, const uint64 start2, const int sie
 }
 
 //more fast than segmentedGp01
-static int segmentedGp02(const uint64 start1, const uint64 start2, int sievesize)
+static int segmentedGp02(const uint64 start1, const uint64 start2, uint sievesize)
 {
 	//assert(start + sievesize <= start2 + 1 && 0 == start % WHEEL);
 	uchar bitarray1[BUFFER_SIZE + 32] MEM_ALIGN(16);
@@ -2103,7 +2111,7 @@ static int segmentedGp02(const uint64 start1, const uint64 start2, int sievesize
 }
 
 //the first algorithm to segmented goldbach partition
-static void segmentedGp1(const uint64 start1, const uint64 start2, const int sievesize, const int gpcount, uint64 gp[])
+static void segmentedGp1(const uint64 start1, const uint64 start2, const uint sievesize, const int gpcount, uint64 gp[])
 {
 	//	assert(start + sievesize <= start2 + 1 && 0 == start % WHEEL);
 
@@ -2148,7 +2156,7 @@ static void segmentedGp1(const uint64 start1, const uint64 start2, const int sie
 
 //the seconds algorithm to segmented goldbach partition
 //10% fast than the third algorithm for gpcount < 1000
-static void segmentedGp2(const uint64 start1, const uint64 start2, const int sievesize, const int gpcount, uint64 gp[])
+static void segmentedGp2(const uint64 start1, const uint64 start2, const uint sievesize, const int gpcount, uint64 gp[])
 {
 	//assert(start + sievesize <= start2 + 1 && 0 == start % WHEEL);
 	uchar tmparray[BUFFER_SIZE + 32] MEM_ALIGN(16);
@@ -2202,7 +2210,7 @@ static void segmentedGp2(const uint64 start1, const uint64 start2, const int sie
 }
 
 //the third algorithm to segmented goldbach partition
-static void segmentedGp3(const uint64 start1, const uint64 start2, const int sievesize, const int gpcount, uint64 gp[])
+static void segmentedGp3(const uint64 start1, const uint64 start2, const uint sievesize, const int gpcount, uint64 gp[])
 {
 	//assert(start + sievesize <= start2 + 1);// & BUFFER_SIZE > sievesize);
 	uchar bitarray1[8][BUFFER_SIZE8] MEM_ALIGN(16);
@@ -2365,7 +2373,7 @@ static void coreSieve2(uint64 minn, const int gpcount, const uint64 first, uint6
 {
 	const uint64 half = minn / 2;
 	const int gstep = Config.Threads * Config.SieveSize;
-	int sievesize = Config.SieveSize;
+	uint sievesize = Config.SieveSize;
 
 	double ts = getTime();
 	if (minn > Maxn + 2 * MAX_GPCOUNT)
@@ -2406,7 +2414,7 @@ static void coreSieve2(uint64 minn, const int gpcount, const uint64 first, uint6
 static void coreSieve1(uint64 minn, const int gpcount, uint64 gp[])
 {
 	const uint64 half = minn / 2;
-	int sievesize = Config.SieveSize;
+	uint sievesize = Config.SieveSize;
 	if (sievesize > half)
 		sievesize = half;
 	if (minn > Maxn + 2 * MAX_GPCOUNT)
@@ -2699,7 +2707,7 @@ int main(int argc, char* argv[])
 		}
 	}
 
-	excuteCmd("t1 E9 1E1 pr");
+	excuteCmd("t1 E9 1E3");
 
 	char ccmd[255] = {0};
 	while (true) {
@@ -2720,7 +2728,7 @@ e11  4118054813    149091160
 e12  37607912018   1243722370
 e13  346065536839  10533150855
 e14  3204941750802 90350630388
-e15               783538341852
+e15                783538341852
 http://code.google.com/p/pcxprj/wiki/CompilerAndLinkerSwitchGuide
 -fprofile-generate
 -fprofile-use
