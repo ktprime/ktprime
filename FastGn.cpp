@@ -36,14 +36,13 @@ http://graphics.stanford.edu/~seander/bithacks.html
 # include <stdio.h>
 # include <memory.h>
 # include <stdlib.h>
-# include <math.h>
 # include <ctype.h>
 # include <string.h>
 # include <time.h>
 # include <assert.h>
 # include <limits.h>
 
-# define VERSION         "1.1"
+# define VERSION         "1.2"
 # define WHEEL           30
 # define WHEEL_SKIP      0x799b799b
 
@@ -57,7 +56,7 @@ http://graphics.stanford.edu/~seander/bithacks.html
 
 # define SSE2            0
 # define BIT_SCANF       1
-# define PRIME_DIFF      0
+# define PRIME_DIFF      1
 
 //use of the SSE4.2/ SSE4a POPCNT instruction for fast bit counting.
 #if _MSC_VER > 1300
@@ -877,11 +876,11 @@ static int countBit0ArrayOrPopcnt(uint64 bitarray1[], uint64 bitarray2[], const 
 #if SSE2 //vc++ >= 2003
 static int countBit0ArrayOrSSE2(const uchar bitarray1[], const uchar* bitarray2, const int bitleng)
 {
-	int loops = bitleng / 128;
 	const __m128i* pma128 = (__m128i*)bitarray1;
 	const __m128i* puma128 = (__m128i*)bitarray2;
 
 	int bit1s = 0;
+	int loops = bitleng / 128;
 
 #if _MSC_VER
 	__m128i xmm1;
@@ -890,7 +889,7 @@ static int countBit0ArrayOrSSE2(const uchar bitarray1[], const uchar* bitarray2,
 	{
 		__m128i xmm1;
 		uint64 m128i_u64[2];
-		uint   m128i_u32[4];
+//		uint   m128i_u32[4];
 	} xmm1;
 #endif
 //	assert((uint)pma128 % 16 == 0);
@@ -915,6 +914,9 @@ static int countBit0ArrayOrSSE2(const uchar bitarray1[], const uchar* bitarray2,
 #endif
 	}
 
+//	int ret2 = countBit0ArrayOrPopcnt((uint64*)bitarray1, (uint64*)bitarray2, bitleng);
+//	if (((bitleng / 128 + 1) * 128 - bit1s) != ret2)
+//		printf(" %d %d %d %d != %d\n", bitleng % 128, bitleng, bit1s, ret2, (bitleng / 128 + 1) * 128 - bit1s);
 	return (bitleng / 128 + 1) * 128 - bit1s;
 }
 
@@ -1165,7 +1167,7 @@ static void splitToBitArray1(uchar srcarray[], const int byteleng, uchar dstarra
 	}
 }
 
-static void splitToBitArray(uchar srcarray[], const int byteleng, uchar dstarray[][BUFFER_SIZE8])
+static void splitToBitArray(uchar srcarray[], const int bitleng, uchar dstarray[][BUFFER_SIZE8])
 {
 	union
 	{
@@ -1176,7 +1178,7 @@ static void splitToBitArray(uchar srcarray[], const int byteleng, uchar dstarray
 #if 0
 	for (int i = 0; i < 8; i++) {
 //		if (Config.GpMask & (1 << i)) {
-			for (int j = 0; j < byteleng; j += 8) {
+			for (int j = 0; j < bitleng; j += 8) {
 				utmp.mask = (*(uint64*)(srcarray + j) >> i) & (0x0101010101010101);
 				dstarray[i][j / 8] =
 					  (utmp.word[0] | (utmp.word[0] >> 7)) << 0
@@ -1187,7 +1189,7 @@ static void splitToBitArray(uchar srcarray[], const int byteleng, uchar dstarray
 //		}
 	}
 #else
-	for (int j = 0; j * 8 < byteleng; j += 1) {
+	for (int j = 0; j * 8 < bitleng; j += 1) {
 		uint64 bqword = *(uint64*)(srcarray + j * 8);
 		for (int i = 0; i < 8; i++) {
 			utmp.mask = bqword & 0x0101010101010101;
@@ -1201,7 +1203,7 @@ static void splitToBitArray(uchar srcarray[], const int byteleng, uchar dstarray
 	}
 #endif
 	for (int i = 0; i < 8; i++)
-		packQword(dstarray[i], byteleng);
+		packQword(dstarray[i], bitleng);
 }
 
 //get prime from bit buffer
@@ -1222,7 +1224,7 @@ static int savePrime(const uint64 offset, const int wordleng, const ushort* bita
 			if (dstarray == NULL)
 				printf("%u %lld\n", total++, p);
 			else
-				dstarray[primes] = p - offset;
+				dstarray[primes] = uint(p - offset);
 			primes++;
 			mask &= mask - 1;
 		}
@@ -1633,20 +1635,18 @@ static void eratoSieve(const uint maxp)
 	memset(bitarray, 0, (100 + maxp) >> 4);
 
 #if PRIME_DIFF
-	uint lastprime = Prime[0] = BLOCK_SIZE % 19 == 0 ? 23 : 29;
+	Prime[0] = BLOCK_SIZE % 19 == 0 ? 23 : 29;
+	Prime[1] = 2;
+	uint lastprime = 2;
 #endif
 
 	for (uint p = 3; p <= maxp; p += 2) {
 		if (!TST_BIT(bitarray, p / 2)) {
-			primes++;
-
 #if PRIME_DIFF
-			if (p > lastprime) {
-				Prime[primes] = p - lastprime;
-				lastprime = p;
-			}
+			Prime[++primes] = p - lastprime;
+			lastprime = p;
 #else
-			Prime[primes] = p;
+			Prime[++primes] = p;
 #endif
 
 			if (p > 30000)
@@ -1660,7 +1660,6 @@ static void eratoSieve(const uint maxp)
 	//pack the last two byte for safety
 	Prime[primes + 2] = Prime[primes + 1] = 255;
 #else
-	Prime[0] = primes - 1;
 	Prime[primes + 1] = 1 << 29;
 #endif
 
@@ -1925,7 +1924,7 @@ static int addOneGp35(const uint64 maxn)
 	int gmask = 0;
 	assert(maxn % 2 == 1);
 
-	for (uint j = 2, p = Prime[j]; p <= maxn / p && gps > 0; NEXT_PRIME(p, j)) {
+	for (uint j = 2, p = 3; p <= maxn / p && gps > 0; NEXT_PRIME(p, j)) {
 		const uint rid = maxn % p;
 		if (rid == 0 && !(gmask & 0x1)) {
 			gmask |= 0x1;
@@ -2049,7 +2048,7 @@ static int segmentedGp01(const uint64 start1, const uint64 start2, const int sie
 
 		const uint64 maxn = start2 + sievesize - 1 - 3;
 		//assert(maxn % 2 == 1);
-		for (uint j = 2, p = Prime[j]; p <= maxn / p; NEXT_PRIME(p, j)) {
+		for (uint j = 2, p = 3; p <= maxn / p; NEXT_PRIME(p, j)) {
 			const uint rid = maxn % p;
 			if (rid == 0)
 				bitarray2[0] |= 0x2;
@@ -2379,7 +2378,7 @@ static void coreSieve2(uint64 minn, const int gpcount, const uint64 first, uint6
 
 	for (uint64 start = first; start < half; start += gstep) {
 		if (start > half - sievesize || half < sievesize)
-			sievesize = half - start;
+			sievesize = uint(half - start);
 		if ((start & Config.PrintGap) == 0 && Config.PrintGap > 0) {
 			int dots = 100 * start / half;
 			printf("\r %.2f sec, %02d%% ", (getTime() - ts) / 10 / dots, dots);
@@ -2413,7 +2412,6 @@ static void coreSieve1(uint64 minn, const int gpcount, uint64 gp[])
 	if (minn > Maxn + 2 * MAX_GPCOUNT)
 		minn = Maxn;
 
-
 	double ts = getTime();
 	memset(gp, 0, sizeof(gp[0]) * gpcount);
 
@@ -2426,7 +2424,7 @@ static void coreSieve1(uint64 minn, const int gpcount, uint64 gp[])
 #endif
 	for (uint64 start = 0; start < half; start += sievesize) {
 		if (start > half - sievesize)
-			sievesize = half - start;
+			sievesize = uint(half - start);
 		if ((start & Config.PrintGap) == 0 && Config.PrintGap > 0) {
 			int dots = (100 * start / half);
 			printf("\r %.2f sec, %02d%% ", (getTime() - ts) / 10 / dots, dots);
@@ -2688,8 +2686,8 @@ int main(int argc, char* argv[])
 		if (c == 'm') {
 			doCompile( );
 		} else if (c == 'u') {
-//			excuteCmd("f r 30 e4; u e4 3; u e3 20");
-//			excuteCmd("f 3e5 e4; u 10000 10; u 1000 5000");
+			excuteCmd("f r 30 e4; u e4 3; u e3 20");
+			excuteCmd("f 3e5 e4; u 10000 10; u 1000 5000");
 			excuteCmd("a f 6e6 10000; u 1000 3000; u 1000 600");
 			excuteCmd("a f 5e7 2200; g1 u 2000 120; g2 u 200 1000l; g3 u 200 100");
 			excuteCmd("f 2^27+2 1000; g2 u 120 100; u 200 600");
@@ -2701,7 +2699,7 @@ int main(int argc, char* argv[])
 		}
 	}
 
-	excuteCmd("t1 E9 1E3");
+	excuteCmd("t1 E9 1E1 pr");
 
 	char ccmd[255] = {0};
 	while (true) {
