@@ -3,6 +3,10 @@ copyright (C) 2008-2013 by Huang Yuanbing
 mail to: bailuzhou@163.com
 free use for non-commercial purposes
 
+	this programming is the most algorithm for count k-tuplet prime number
+goldbach partition, performance and throughput improvement by minimizing cache conflicts and misses
+in the last level caches of multi-cores processors.
+
 Patterns
 p_i = p_1 + b_i, i = 1, 2, ..., k
 s   = p_k - p_1
@@ -46,40 +50,45 @@ http://code.google.com/p/primesieve/
 http://numbers.computation.free.fr/Constants/Primes/twin.html.
 **************************************************************/
 
-# include <ctype.h>
-# include <memory.h>
-# include <stdlib.h>
-# include <time.h>
 # include <stdio.h>
+# include <string.h>
+# include <stdlib.h>
+# include <ctype.h>
+# include <time.h>
+# include <memory.h>
 # include <math.h>
 # include <assert.h>
 
-# define KVERSION       "9.5"
+# define KVERSION       "9.4"
 # define TABLE_GAP      "1e11"
 # define MAXN           "1e16"
 # define MINN           10000000
 
 # define MAX_L1SIZE     (64 << 13)
-# define MAX_L2SIZE     (256 << 13)
-# define SEGMENT_SIZE   (510510 * 19)
+# define SEGMENT_SIZE   (510510 * 4)
 # define MAX_THREADS    32
-# define POPCNT         0
 
 //SSE4 popcnt instruction, make sure your cpu support it
 //use of the SSE4.2/ SSE4a POPCNT instruction for fast bit counting.
 #if _MSC_VER > 1400
+	# define POPCNT      1
 	# include <intrin.h>
+#elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44)
+	# define POPCNT      0
+	# include <popcntintrin.h>
+#else
+	# define POPCNT      0
+#endif
+	# define TREE2       0
 
+#ifdef _MSC_VER
 	# pragma warning(disable: 4996 4244 4127 4505 4018)
 	#if _MSC_VER > 1200
 	# pragma warning (disable:6328 6031)
 	#endif
-
-#elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44)
-//	# include <popcntintrin.h>
 #endif
 
-# define TREE2           0
+//#pragma pack (16)
 
 # define OMP             0
 # if OMP
@@ -88,13 +97,9 @@ http://numbers.computation.free.fr/Constants/Primes/twin.html.
 
 # define FAST_CROSS      1
 # define OPT_L1CACHE     1
-# define OPT_L2CACHE     1
 
 #if defined _M_AMD64
 	# define ASM_X86     0
-#if _MSC_VER
-	# define LINE_COVER  1
-#endif
 #elif _MSC_VER >= 1200
 	# define ASM_X86     1
 #else
@@ -106,7 +111,7 @@ typedef unsigned short ushort;
 typedef unsigned int   uint;
 
 #ifdef _WIN32
-	typedef __int64 uint64;
+	typedef unsigned __int64 uint64;
 	#define CONSOLE "CON"
 	#include <windows.h>
 #else
@@ -117,6 +122,7 @@ typedef unsigned int   uint;
 	#include <pthread.h>
 #endif
 
+//amd 5, intel 5
 # define BSHIFT 5
 # if BSHIFT == 3
 	typedef uchar utype;
@@ -131,8 +137,8 @@ typedef unsigned int   uint;
 
 # define MASK_N(n)          (1 << ((n) & MASK))
 # define SET_BIT(a, n)      a[(n) >> BSHIFT] |= MASK_N(n)
-//# define FLP_BIT (a, n)     a[(n) >> BSHIFT] ^= MASK_N(n)
-//# define CLR_BIT(a, n)      a[(n) >> BSHIFT] &= ~MASK_N(n)
+# define FLP_BIT (a, n)     a[(n) >> BSHIFT] ^= MASK_N(n)
+# define CLR_BIT(a, n)      a[(n) >> BSHIFT] &= ~MASK_N(n)
 # define TST_BIT(a, n)      (a[(n) >> BSHIFT] & MASK_N(n))
 # define TST_BIT2(a, n)     TST_BIT(a, (n) / 2)
 
@@ -140,39 +146,52 @@ typedef unsigned int   uint;
 # define SET_FLAG(flag)     Config.Flag |= flag
 # define CLR_FLAG(flag)     Config.Flag &= ~(flag)
 
+#if !defined __CPLUSPLUS
+	#define bool   int
+	#define true   1
+	#define false  0
+#endif
+
 static const char* const HelpConfig = "\
 	[P: Print time use]\n\
 	[D: Debug log]\n\
 	[S: Save result to file]\n\
 	[R: Runtime check pattern]\n\
 	[A: Save/Continue last task]\n\
-	[K: Calculate of Prime/Twin[Cousin]/Ktuplet Prime k(0 - 8)]\n\
+	[K: Calculate of Goldbach/Prime/Twin[Cousin]/Ktuplet Prime k(0 - 8)]\n\
 	[M: Monitor progress m(0 - 30)]\n\
-	[H: Help]\n\
-	[F: Factorial of whell prime factor f(7 - 29)]\n\
+	[F: factorial of whell prime factor f(7 - 29)]\n\
 	[T: Threads number t(2 - 64)]\n\
 	[C: Cpu L1/L2 data cache size (L1:16-128, L2:128-1024)]\n";
 
 static const char* const HelpCmd = "\
+	[H: Help cmd [k]]\n\
 	[B: Benchmark (start) (end) (gptk)]\n\
+	[Q: Exit programming]\n\
 	[U: Unit test (n 1 - 10000) (gptk 0 - 2)]\n\
-	[N: Number of patterns (start)\n\
+	[N: Number of patterns (start) (count)]\n\
+	[O: Optimaze best threads (count)]\n\
 	[I: List base pow index (powbase) (start) (end)]\n\
 	[L: List multi gptk (start) (end/count) (step)]\n";
 
 static const char* const HelpUse = "\n\
 	All command/config as follow:\n\
-	B, B e9 e10 123\n\
+	B, B e9 e10 0123\n\
 	C31, C128000\n\
 	K41, K52, KK26, KK268 T2-32\n\
 	H, Hk, A, D, S, R\n\
 	U, U 1000 012, U 1000+2 2\n\
-	N 120000*1000\n\
-	I 2 10 20\n\
+	N 2e8+20 100\n\
+	M0-30, O E11 1-31\n\
+	N 120000*1000 100\n\
+	K0 2^31 012, K2 2e10*3\n\
+	K1 10^11*2 0-3, K32 400000000+100\n\
 	L 2e9-100 1000 10\n\
+	I 2 10 20\n\
 	L e9-100 2e9*2 1e8+2";
 
 static const char* const Kpattern = "\n\
+	k01 0\n\
 	k11 0\n\
 	k21 2\n\
 	k31 2 6\n\
@@ -193,6 +212,7 @@ static const char* const Kpattern = "\n\
 
 static const char* const KtupletName[] =
 {
+	"Goldbach partition",
 	"Prime numbers",
 	"Twin primes",
 	"Prime triplets",
@@ -204,9 +224,9 @@ static const char* const KtupletName[] =
 	"Prime nonuplets"
 };
 
-static const char* const TaskFormat =
+static const char* const TaskDataFormat =
 "[Task]\n\
-Ptk = %d\n\
+Gptk = %d\n\
 Kgap = %d\n\
 Wheel = %d\n\
 Patterns = %d\n\
@@ -216,53 +236,42 @@ Pendi = %d\n\
 N = %lld\n\
 Result = %lld";
 
+static const char* const ConfigDataFormat =
+	"[Cpu]\nWork thread = %d\nCpu L2Size = %d\nCmd = %s\n";
+
 static const char* const PrintFormat[] =
 {
 #if _MSC_VER == 1200
+	"G(%I64d) = %I64d",
 	"PI(%I64d) = %I64d",
 	"PI2(%I64d) = %I64d",
 	"PI%d(%I64d) = %I64d"
 #else
+	"G(%lld) = %lld",
 	"PI(%lld) = %lld",
 	"PI2(%lld) = %lld",
 	"PI%d(%lld) = %lld"
 #endif
 };
 
-enum EFLAG
-{
-	PRINT_RET = 1 << 30,
-	PRINT_TIME = 1 << ('P' - 'A'),
-	PRINT_LOG = 1 << ('D' - 'A'),
-	SAVE_RESUTL = 1 << ('F' - 'A'),
-	CHCECK_PATTERN = 1 << ('R' - 'A'),
-	SAVE_TASK = 1 << ('A' - 'A'),
-};
-
 enum CAMODE
 {
-	PI1N = 0, //prime number
-	PI2N = 1, //twin prime
-	PIKN = 2, //ktuplet prime
+	GP0N = 0, //goldbach partition
+	PI1N = 1, //prime number
+	PI2N = 2, //twin prime
+	PIKN = 3, //ktuplet prime
 };
 
 /************************************/
-# define PRIME_NUMS (5761455 + 160)
+# define PRIME_NUMS 5761455 + 160
 //prime difference in [0, 10^8]
-#define PRIME_DIFF 1
-#if PRIME_DIFF
-	static uchar Prime[PRIME_NUMS];
-	#define PRIME_NEXT(p, j) p += Prime[++j]
-#else
-	static int Prime[PRIME_NUMS];
-	#define PRIME_NEXT(p, j) p += Prime[++j]
-#endif
+static uchar Prime[PRIME_NUMS];
 
-//the smallest Moudle[i] * wheel % Prime[i] = 1
-static uint Moudle[PRIME_NUMS];
+//the smallest Startp[i] * wheel % Prime[i] = 1
+static uint Startp[PRIME_NUMS];
 
-typedef uchar ptype;
-static ptype* Pattern = NULL; //[1658880 * 22 + 10];
+typedef ushort ptype;
+static ptype Pattern[47713050 + 10];
 
 //table of ktuplet
 static uint64 Ktable[10000];
@@ -273,71 +282,82 @@ static utype CrossedTpl[(SEGMENT_SIZE >> (BSHIFT + 1)) + 100];
 //bit 1 left most table
 static uchar LeftMostBit1[1 << 16];
 
-//number of bits 1 binary representation table
-#if POPCNT == 0 && TREE2 == 0
+//number of bits 1 binary representation table in Range[0-2^16)
 static uchar WordNumBit1[1 << 16];
-#endif
 
-#if WORD_REVERSE
-//table of binary representation reverse (i < 2^16 = 65536)
+//WordReverse[i] is equal to the bit reverse of i (i < 2^16)
 static ushort WordReverse[1 << 16];
-#endif
 
 //the first 10 even prime numbers
 static const uchar SmallPrime[ ] =
 {
-	2, 3, 5, 7, 11, 13,
+	3, 5, 7, 11, 13,
 	17, 19, 23, 29, 31
+};
+
+enum EFLAG
+{
+	PRINT_RET = 1 << 1,
+	PRINT_TIME = 1 << ('P' - 'A'),
+	PRINT_LOG = 1 << ('D' - 'A'),
+	SAVE_RESUTL = 1 << ('F' - 'A'),
+	CHCECK_PATTERN = 1 << ('R' - 'A'),
+	SAVE_TASK = 1 << ('A' - 'A'),
 };
 
 //config
 static struct
 {
-	uint Flag;
+	int Flag;
 
-	//flag for PI2(n), PI(n), Pik(n)
-	int Ptk;
+	//flag for G(n), PI2(n), PI(n), Pik(n)
+	int Gptk;
 	//ktuplet pattern gap, 2 for twin
 	int Kgap;
 	//cpu L1/L2 size
 	uint CpuL1Size;
 	uint CpuL2Size;
 	//work threads
-	uint Threads;
+	int Threads;
 	//print the progress gap
 	uint PrintGap;
 }
 Config =
 {
-	PRINT_RET | PRINT_TIME, PI2N, 2, MAX_L1SIZE, 1300, 4, (1 << 9) - 1
+	PRINT_RET | PRINT_TIME,
+	0, 2, MAX_L1SIZE, 1100, 4, (1 << 9) - 1
 };
 
 static struct
 {
 	int Wheel;
+	int SieveCache;
 
-	int Factorial;
+	int firstSievedIndex;
+
 	int SqrtN;
 	int Patterns;
-	int firstIndex;
+	int Factorial;
 	int PatternDiff;
 
 	bool UseKtable;
 	int Kpattern[16];
 	uint64 N;
-	uint64 S;
 }
 KData =
 {
-	0, 8, 0, 0,
+	0, 0, 8, 0, 0,
 	0, 0, 0, {4, 2, 6, 8},
+	100000
 };
 
-static struct Task
+static struct TaskConfig
 {
-	int Ptk;
+	int Gptk;
+	int Kgap;
+
 	int Wheel;
-//	int Patterns;
+	int Patterns;
 
 	int Tasks;
 
@@ -345,9 +365,12 @@ static struct Task
 	int Pendi;
 
 	uint64 N;
-	uint64 S;
 	uint64 Result;
-} LastTask;
+}
+LastTask =
+{
+	0, -1, -1, 0, 4
+};
 
 static struct ThreadInfo
 {
@@ -356,7 +379,6 @@ static struct ThreadInfo
 	uint64 Result;
 } TData[MAX_THREADS];
 
-static bool excuteCmd(const char* cmd);
 static uint64 sievePattern(int, int);
 
 #ifdef _WIN32
@@ -394,6 +416,9 @@ static uint64 startWorkThread(int threads, int pbegi, int pendi)
 	if (threads > MAX_THREADS) {
 		threads = 4;
 	}
+	if (pendi - pbegi < threads) {
+		threads = 1;
+	}
 
 	devideTaskData(threads, pbegi, pendi);
 
@@ -403,8 +428,10 @@ static uint64 startWorkThread(int threads, int pbegi, int pendi)
 	for (i = 0; i < threads; i++) {
 		thandle[i] = CreateThread(NULL, 0, threadProc,
 			(LPVOID)(&TData[i]), 0, &tid[i]);
+//		Sleep(1);
+
 		if (thandle[i] == NULL) {
-			printf("create win32 thread error %ld\n", GetLastError());
+			printf("create win32 thread error %ld\n", GetLastError( ));
 		}
 	}
 	for (i = 0; i < threads; i++) {
@@ -432,7 +459,7 @@ static uint64 startWorkThread(int threads, int pbegi, int pendi)
 }
 
 //us
-static double getTime()
+static double getTime( )
 {
 #ifdef WIN32
 	LARGE_INTEGER s_freq;
@@ -466,8 +493,8 @@ function extended_gcd(a, b)
     if a mod b = 0
         return {0, 1}
     else
-        x, y := extended_gcd(b, a mod b)
-        return y, x-y*(a / b)
+        {x, y} := extended_gcd(b, a mod b)
+        return {y, x-y*(a / b)}
 */
 //get min Result y: ay % b = 1
 //and param a, b : gcd(a, b) = 1
@@ -500,17 +527,6 @@ static uint64 ipow(uint64 x, uint n)
 	}
 
 	return result;
-}
-
-static int ilog10(uint64 n)
-{
-	int powbase = 0;
-	while (n / 10 > 0) {
-		powbase ++;
-		n /= 10;
-	}
-
-	return powbase;
 }
 
 //convert str to uint64 ((x)*E(y)+-*(z))
@@ -729,7 +745,7 @@ $set:
 static uint64
 set2BitArray(utype bitarray[], const uint64 start, const int step, const int bitleng)
 {
-	int s2 = (int)(start >> 32);
+	int s2 = start >> 32;
 	int s1 = (int)start;
 
 	if (s1 > s2) {
@@ -850,21 +866,39 @@ $loop2:
 	return start;
 }
 
+//all old number in range[start, statr + leng] which
+//is multiple of factor will be crossed
+//out and the bitarray will the bit position 1
+//the ith bit of bitarray is map to number start + 2 * i + 1
+/**
+static void crossOutEvenFactor(utype bitarray[], const uint64 start,
+						int leng, const int factor)
+{
+	int offset = factor - start % factor;
+	if (offset % 2 == 0) {
+		offset += factor;
+	} else if (start <= factor) {
+		offset += 2 * factor;
+	}
+
+	const int bits = leng >> 1;
+	for (offset >>= 1; offset <= bits; offset += factor) {
+		SET_BIT(bitarray, offset);
+	}
+}*/
+
 //the ith bit of bitarray is map to start + 2 * i + 1
 //it's difference with crossOutEvenFactor, only
 //6k + 1, 6k + 5 number which is multiple of factor will be crossed out
 //and gain performance 1/3 improvement
-static void crossOutFactor(utype bitarray[], const uint64 start, const int leng, int factor)
+static void crossOutFactor(utype bitarray[], const uint64 start,
+						const int leng, int factor)
 {
-	int s1 = factor - (int)(start % factor);
+	int s1 = factor - start % factor;
 	if (s1 % 2 == 0) {
 		s1 += factor;
 	} else if (start <= factor) {
 		s1 += 2 * factor;
-	}
-
-	if (s1 > leng) {
-		return ;
 	}
 
 	const int bits = leng >> 1;
@@ -874,7 +908,6 @@ static void crossOutFactor(utype bitarray[], const uint64 start, const int leng,
 		}
 		return ;
 	}
-
 
 #if 0
 	const int mrid6 = ((start + s1) / factor) % 6;
@@ -931,7 +964,7 @@ static void sieveWheelFactor(utype bitarray[], const uint64 start, const int len
 {
 	assert(wheel % 6 == 0);
 
-	for (int i = 2, p = 3; wheel % p == 0; PRIME_NEXT(p, i)) {
+	for (int i = 2, p = 3; wheel % p == 0; p += Prime[++i]) {
 		crossOutFactor(bitarray, start, leng, p);
 		if (start <= p) {
 			SET_BIT(bitarray, (p - start) / 2);
@@ -940,28 +973,35 @@ static void sieveWheelFactor(utype bitarray[], const uint64 start, const int len
 }
 
 //sieve prime in [start, start + leng]
-static void segmentedSieve1(utype bitarray[], const uint64 start, const int leng)
+static void segmentedEratoSieve1(utype bitarray[], const uint64 start, const int leng, bool initzero)
 {
 	const int sqrtn = (int)(sqrt((double)start + leng) + 0.1) + 1;
-	memset(bitarray, 0, (leng >> 4) + 1);
 
-	for (int i = 2, p = 3; p < sqrtn; PRIME_NEXT(p, i)) {
+	if (initzero)
+		memset(bitarray, 0, (leng >> 4) + 1);
+
+	for (int i = 2, p = 3; p < sqrtn; p += Prime[++i]) {
 		crossOutFactor(bitarray, start, leng, p);
 	}
-
 	if (start == 0) {
 		*(ushort*)bitarray = 0x3491;
 	}
 }
 
 //another algorithm for sieve prime in [start, start + leng]
-static void segmentedSieve2(utype bitarray[], const uint64 start, const int leng)
+static void segmentedEratoSieve2(utype bitarray[], const uint64 start, const int leng, bool initzero)
 {
-	assert(start % SEGMENT_SIZE == 0 && SEGMENT_SIZE % 19);
 	const int sqrtn = (int)(sqrt((double)start + leng) + 0.1) + 1;
-	memcpy(bitarray, CrossedTpl, (leng >> 4) + 1);
 
-	for (int i = 8, p = 19; p < sqrtn; PRIME_NEXT(p, i)) {
+	assert(start % SEGMENT_SIZE == 0 && SEGMENT_SIZE % 19);
+
+	if (initzero) {
+		memcpy(bitarray, CrossedTpl, (leng >> 4) + 1);
+	} else {
+	//		bitarray[i] |= CrossedTpl[i];
+	}
+
+	for (int i = 8, p = 19; p < sqrtn; p += Prime[++i]) {
 		crossOutFactor(bitarray, start, leng, p);
 	}
 
@@ -972,7 +1012,6 @@ static void segmentedSieve2(utype bitarray[], const uint64 start, const int leng
 }
 
 //reverse bit order of a byte with binary representation
-//c = ((c * 0x80200802ULL) & 0x0884422110ULL) * 0x0101010101ULL >> 32;
 static uchar reverseByte(const uchar c)
 {
 	uchar n =
@@ -982,21 +1021,7 @@ static uchar reverseByte(const uchar c)
 	return n;
 }
 
-static int reverseWord(ushort n)
-{
-#if WORD_REVERSE
-	return WordReverse[n];
-#else
-//	return reverseByte(n >> 8) | (reverseByte(n) << 8);
-	n = (n & 0x5555) << 1 | (n & 0xAAAA) >> 1;
-	n = (n & 0x3333) << 2 | (n & 0xCCCC) >> 2;
-	n = (n & 0x0F0F) << 4 | (n & 0xF0F0) >> 4;
-	n = (n & 0x00FF) << 8 | (n & 0xFF00) >> 8;
-	return n;
-#endif
-}
-
-static inline int countBitOnes(uint64 n)
+static inline int countBit1s(uint64 n)
 {
 #if POPCNT
 	//popcnt instruction : INTEL i7/SSE4.2, AMD Phonem/SSE4A
@@ -1006,7 +1031,7 @@ static inline int countBitOnes(uint64 n)
 	return _mm_popcnt_u32(n) + _mm_popcnt_u32(n >> 32);
 	#endif
 #elif TREE2 == 0
-	uint hig = (int)(n >> 32), low = (uint)n;
+	uint hig = n >> 32, low = (uint)n;
 	return WordNumBit1[(ushort)low] + WordNumBit1[low >> 16] +
 		WordNumBit1[(ushort)hig] + WordNumBit1[hig >> 16];
 #else
@@ -1022,17 +1047,17 @@ static inline int countBitOnes(uint64 n)
 
 //count number of bit 0 in binary representation
 //!!! buffer of bitarray after position bitleng packeked with bit 1
-static int countBitZeros(utype bitarray[], const int bitleng)
+static int countZeroBitsArray(utype bitarray[], const int bitleng)
 {
+	int bit1s = 0;
 	int loops = bitleng >> 6;
-	int bit0s = (1 + loops) << 6;
 
 	packQwordBit1(bitarray, bitleng);
 	for (uint64* psbuf = (uint64*) bitarray; loops >= 0; loops--) {
-		bit0s -= countBitOnes(*psbuf++);
+		bit1s += countBit1s(*psbuf++);
 	}
 
-	return bit0s;
+	return ((1 + (bitleng >> 6)) << 6) - bit1s;
 }
 
 //reverse word array bitarray with length = bitleng
@@ -1043,15 +1068,15 @@ static void reverseByteArray(ushort bitarray[], const int bitleng)
 	ushort* pe = (ushort*)((uchar*)ps + bitleng / 8 - 2);
 
 	while (ps < pe) {
-		ushort tmp = reverseWord(*ps);
-		*ps++ = reverseWord(*pe);
+		ushort tmp = WordReverse[*ps];
+		*ps++ = WordReverse[*pe];
 		*pe-- = tmp;
 	}
 
 	if (ps == pe) {
-		*ps = reverseWord(*ps);
+		*ps = WordReverse[*ps];
 	} else if ((uchar*)pe + 1 == (uchar*)ps) {
-		*((uchar*)ps) = reverseWord(*ps) >> 8;
+		*((uchar*)ps) = WordReverse[*ps] >> 8;
 	}
 }
 
@@ -1084,6 +1109,27 @@ static void reverseBitArray(utype bitarray[], const int bitleng)
 	}
 	packQwordBit1(bitarray, bitleng);
 }
+
+/**
+static inline int test_and_set_bit(int nr, volatile void *addr)
+{
+	int oldbit;
+	asm volatile("bts %2,%1\n\t"
+			"sbb %0,%0"
+			: "=r" (oldbit), ADDR
+			: "Ir" (nr) : "memory");
+	return oldbit;
+}
+
+static inline int test_and_clear_bit(int nr, volatile void *addr)
+{
+	int oldbit;
+	asm volatile("btr %2,%1\n\t"
+			"sbb %0,%0"
+			: "=r" (oldbit), ADDR
+			: "Ir" (nr) : "memory");
+	return oldbit;
+}*/
 
 //make sure no divide overflow
 //improvement of 100%
@@ -1180,6 +1226,7 @@ asmMulDivSub(const uint startp, const uint pattern, uint p, const uint bitleng)
 the classic sieve of Eratosthenes implementation by bit packing
 all prime less than sqrt(n) will be saved in Prime[] by difference
 Prime[1] = 2, Prime[2] = 3 - 2 = 1, Prime[3] = 5 - 3, ....
+Prime[i] is the difference of the adjacent prime:
 Prime[i] = (ith Prime) - ((i-1) th Prime);
 */
 static int simpleEratoSieve(const uint sqrtn)
@@ -1209,21 +1256,17 @@ static int simpleEratoSieve(const uint sqrtn)
 	//pack the last two number
 	Prime[primes + 0] = Prime[primes + 1] = 255;
 
-	if (0 && CHECK_FLAG(PRINT_LOG)) {
-		printf("Prime[%d] = %d\n", primes, lastprime);
-	}
-
 	return primes;
 }
 
 //init bit tables
-static void initBitTable()
+static void initBitTable( )
 {
 	//1. init WordNumBit1 table in 0-2^16, can use popcnt replace it
-	int i, nsize;
+	int nsize = sizeof(WordNumBit1) / sizeof(WordNumBit1[0]);
+	int i;
 
-#if 0 == POPCNT && 0 == TREE2
-	nsize = sizeof(WordNumBit1) / sizeof(WordNumBit1[0]);
+#if 0 == POPCNT
 	WordNumBit1[0] = 0;
 	for (i = 1; i < nsize; i++) {
 		WordNumBit1[i] = WordNumBit1[i >> 1] + (i & 1);
@@ -1231,71 +1274,96 @@ static void initBitTable()
 #endif
 
 	//2. init bit WordReverse table
-#if WORD_REVERSE
 	uchar bytereverse[256] = {0};
+	nsize = sizeof(WordReverse) / sizeof(WordReverse[0]);
 	//reverse bit order of byte(with 8 bit) in [0, 2^8)
 	for (i = 1; i < (1 << 8); i++) {
 		bytereverse[i] = reverseByte((uchar)i);
 	}
 	//reverse bit order of short(with 16 bit) in [0, 2^16)
-	for (i = 1; i < (1 << 16); i++) {
+	for (i = 1; i < nsize; i++) {
 		WordReverse[i] = bytereverse[i >> 8] | (bytereverse[i & 255] << 8);
 	}
-#endif
+
+	//3. init LeftMostBit1 table
+	for (int m = 2; m < (1 << 16); m += 2) {
+		LeftMostBit1[m + 0] = LeftMostBit1[m >> 1] + 1;
+		LeftMostBit1[m + 1] = 0;
+	}
 
 #if 0 == FAST_CROSS
-	//3. init CrossedTpl table, pre sieve the factor in array sievefactor
+	//4. init CrossedTpl table, pre sieve the factor in array sievefactor
 	sieveWheelFactor(CrossedTpl, 0, sizeof(CrossedTpl) * 16, SEGMENT_SIZE);
 #endif
 }
 
 //
-static int savePi1Pattern(const utype bitarray[], int leng, ptype pattern[])
+static int savePrimeDiff(const utype bitarray[], const int start,
+						const int bitleng, uchar primediff[])
 {
-	int pn = 0, lastpattern = 0;
-	int diff = pattern[0];
+	int primes = 0;
+	static int lastprime = 2;
+	if (start == 0) {
+		lastprime = 2;
+	}
+
+	for (int p = 1; p < bitleng; p += 2) {
+		if (!TST_BIT2(bitarray, p)) {
+			primediff[primes++] = start + p - lastprime;
+			lastprime = start + p;
+		}
+	}
+
+	return primes;
+}
+
+static int savePi1Pattern(const utype bitarray[], int start, int leng,
+		int& lastpattern, ptype pi1pattern[])
+{
+	int pi1n = 0;
 
 	for (int p = 1; p < leng; p += 2) {
 		if (!TST_BIT2(bitarray, p)) {
-			pattern[pn++] = p - lastpattern;
-			lastpattern = p;
+			if (pi1pattern) {
+				pi1pattern[pi1n] = p + start - lastpattern;
+				lastpattern = p + start;
+/*				if (CHECK_FLAG(CHCECK_PATTERN)) {
+					assert(gcd(lastpattern, KData.Wheel) == 1);
+				} */
+//				printf("p[%d] = %d\n", pi1n, lastpattern);
+			}
+			pi1n++;
 		}
 	}
 
-	pattern[0] += diff;
-	pattern[pn] = leng - lastpattern;
-
-	return pn;
+	return pi1n;
 }
 
-static int savePi2Pattern(const utype bitarray[], int leng, ptype pattern[])
+static int savePi2Pattern(const utype bitarray[], int start, int leng,
+		int& lastpattern, ptype pi2pattern[])
 {
-	int pn = 0, lastpattern = 0;
-	int diff = pattern ? pattern[0] : 0;
+	int pi2n = 0;
 
 	for (int p = 1; p < leng; p += 2) {
 		if (!TST_BIT2(bitarray, p) && !TST_BIT2(bitarray, p + Config.Kgap)) {
-			if (pattern) {
-				pattern[pn] = p - lastpattern;
-				lastpattern = p;
+			if (pi2pattern) {
+				pi2pattern[pi2n] = p + start - lastpattern;
+				lastpattern = p + start;
+				//printf("p2[%d] = %d\n", pi2n, lastpattern);
 			}
-			pn++;
+			pi2n++;
 		}
 	}
 
-	if (pattern) {
-		pattern[0] += diff;
-		pattern[pn] = leng - lastpattern;
-	}
-
-	return pn;
+	return pi2n;
 }
 
-static int savePikPattern(const utype bitarray[], int leng, ptype pattern[])
+static int savePikPattern(const utype bitarray[], int start, int leng,
+		int& lastpattern, ptype pikpattern[])
 {
-	int pn = 0, lastpattern = 0;
-	int diff = pattern ? pattern[0] : 0;
+	int pikn = 0;
 	const int pis = KData.Kpattern[0];
+	const int maxpd = 1 << (8 * sizeof(ptype));
 
 	for (int p = 1; p < leng; p += 2) {
 		if (TST_BIT2(bitarray, p))
@@ -1310,46 +1378,49 @@ static int savePikPattern(const utype bitarray[], int leng, ptype pattern[])
 		}
 
 		if (pasp == 0) {
-			if (pattern) {
-				pattern[pn] = p - lastpattern;
-				lastpattern = p;
-				assert(p - lastpattern > 1 << (8 * sizeof(ptype)));
+			if (pikpattern) {
+				assert(p - lastpattern < maxpd);
+				pikpattern[pikn] = p + start - lastpattern;
+				lastpattern = p + start;
+				//printf("pk[%d] = %d\n", pikn, lastpattern);
 			}
-			pn++;
+			pikn++;
 		}
 	}
 
-	if (pattern) {
-		pattern[0] += diff;
-		pattern[pn] = leng - lastpattern;
-	}
-
-	return pn;
+	return pikn++;
 }
 
 //
 static int getPi2Pattern(const int factorial, ptype pi2pattern[])
 {
+	int lastpattern = 0;
 	int sleng = SEGMENT_SIZE, patterns = 0;
 
 	for (int start = 0; start < factorial; start += sleng) {
 		utype bitarray[(SEGMENT_SIZE + 1000) >> (BSHIFT + 1)];
 		if (start + sleng >= factorial)
-			sleng = (int)(factorial - start);
+			sleng = (int)(factorial - start + 1);
 
-		memset(bitarray, 0, (sleng >> 4) + 1 + (Config.Kgap >> 4));
+		memset(bitarray, 0, (sleng >> 4) + 1 + (LastTask.Kgap >> 4));
 		//memset(bitarray, 0, (sleng >> 4) + 1);
-		sieveWheelFactor(bitarray, start, sleng + Config.Kgap, factorial);
+
+		sieveWheelFactor(bitarray, start, sleng + Config.Kgap, KData.Wheel);
 		if (pi2pattern)
-			patterns += savePi2Pattern(bitarray, sleng, pi2pattern + patterns);
+			patterns += savePi2Pattern(bitarray, start, sleng,
+						lastpattern, pi2pattern + patterns);
 		else
-			patterns += savePi2Pattern(bitarray, sleng, 0);
+			patterns += savePi2Pattern(bitarray, start, sleng, lastpattern, 0);
 	}
 
 	if (pi2pattern) {
 		if (CHECK_FLAG(PRINT_LOG)) {
 			printf("factorial pattern pi2n = %d\n", patterns);
 		}
+		assert(patterns < sizeof(Pattern));
+		KData.PatternDiff = factorial - lastpattern;
+		pi2pattern[patterns] = 0;
+		patterns *= KData.Wheel / factorial;
 	}
 
 	return patterns;
@@ -1358,25 +1429,31 @@ static int getPi2Pattern(const int factorial, ptype pi2pattern[])
 //
 static int getPi1Pattern(const int factorial, ptype pi1pattern[])
 {
+	int lastpattern = 0;
 	int sleng = SEGMENT_SIZE, patterns = 0;
+
 	for (int start = 0; start < factorial; start += sleng) {
 		utype bitarray[(SEGMENT_SIZE + 1000) >> (BSHIFT + 1)];
 		if (start + sleng >= factorial)
-			sleng = (int)(factorial - start);
+			sleng = (int)(factorial - start + 1);
 
 		memset(bitarray, 0, (sleng >> 4) + 1);
-		sieveWheelFactor(bitarray, start, sleng, factorial);
+
+		sieveWheelFactor(bitarray, start, sleng, KData.Wheel);
 		if (pi1pattern)
-			patterns += savePi1Pattern(bitarray, sleng, pi1pattern + patterns);
+			patterns += savePi1Pattern(bitarray, start, sleng,
+						lastpattern, pi1pattern + patterns);
 		else
-			patterns += countBitZeros(bitarray, sleng / 2);
+			patterns += savePi1Pattern(bitarray, start, sleng, lastpattern, 0);
 	}
 
 	if (pi1pattern) {
 		if (CHECK_FLAG(PRINT_LOG)) {
 			printf("factorial pattern pi1n = %d\n", patterns);
 		}
-		assert(1 == pi1pattern[0] && pi1pattern[patterns] == 1);
+		KData.PatternDiff = factorial - lastpattern;
+		pi1pattern[patterns] = 0;
+		patterns *= KData.Wheel / factorial;
 	}
 
 	return patterns;
@@ -1385,31 +1462,81 @@ static int getPi1Pattern(const int factorial, ptype pi1pattern[])
 //
 static int getPikPattern(const int factorial, ptype pikpattern[])
 {
+	int lastpattern = 0;
 	int sleng = SEGMENT_SIZE, patterns = 0;
 
 	for (int start = 0; start < factorial; start += sleng) {
 		utype bitarray[(SEGMENT_SIZE + 1000) >> (BSHIFT + 1)];
 		if (start + sleng >= factorial)
-			sleng = (int)(factorial - start);
+			sleng = (int)(factorial - start + 1);
 
-		memset(bitarray, 0, (sleng >> 4) + 1 + (Config.Kgap >> 4));
-		sieveWheelFactor(bitarray, start, sleng + Config.Kgap, factorial);
-		if (pikpattern) {
-			patterns += savePikPattern(bitarray, sleng, pikpattern + patterns);
-		} else {
-			patterns += savePikPattern(bitarray, sleng, 0);
-		}
+		memset(bitarray, 0, (sleng >> 4) + 1 + (LastTask.Kgap >> 4));
+
+		sieveWheelFactor(bitarray, start, sleng + LastTask.Kgap, KData.Wheel);
+		if (pikpattern)
+			patterns += savePikPattern(bitarray, start, sleng,
+						lastpattern, pikpattern + patterns);
+		else
+			patterns += savePikPattern(bitarray, start, sleng, lastpattern, 0);
 	}
 
 	if (pikpattern) {
 		if (CHECK_FLAG(PRINT_LOG)) {
 			printf("factorial pattern pi%d = %d\n", KData.Kpattern[0], patterns);
 		}
+		KData.PatternDiff = factorial - lastpattern;
+		pikpattern[patterns] = 0;
+		patterns *= KData.Wheel / factorial;
 	}
 
 	return patterns;
 }
 
+//min prime in range [start, sum / 2]
+static int getSegpattern(const int sum, int start, ptype pattern[])
+{
+	int gpn = 0;
+	int lastpattern = start;
+	const int bitleng = sum / 2 + ((sum / 2) & 1);
+
+	for (int sleng = SEGMENT_SIZE; start < bitleng; start += sleng) {
+		utype bitarray[(SEGMENT_SIZE + 1000) >> (BSHIFT + 1)];
+		if (sleng >= bitleng - start) {
+			sleng = bitleng - start;
+		}
+
+		memset(bitarray, 0, (sleng >> 4) + 1);
+
+		sieveWheelFactor(bitarray, sum - start - sleng, sleng + 16, KData.Wheel);
+		reverseBitArray(bitarray, sleng >> 1);
+		sieveWheelFactor(bitarray, start, sleng + 16, KData.Wheel);
+
+		gpn += savePi1Pattern(bitarray, start, sleng, lastpattern, pattern + gpn);
+	}
+
+	return gpn;
+}
+
+//optimize for memory
+static int getGppattern(const uint64 n, const int factorial, ptype gppattern[])
+{
+	const int sumgp1 = n % factorial;
+	const int sumgp2 = sumgp1 + factorial;
+
+	int gppn = getSegpattern(sumgp1, 0, gppattern);
+	gppattern[gppn++] = 0;
+	KData.PatternDiff = sumgp1;
+	gppn += getSegpattern(sumgp2, sumgp1, gppattern + gppn);
+	gppn --;
+
+	if (CHECK_FLAG(PRINT_LOG)) {
+		printf("factorial pattern gppn = %d\n", gppn);
+	}
+
+	return gppn;
+}
+
+//
 static int initFirstPos(int s[], int startp, int p, int bitleng)
 {
 	int ns = KData.Kpattern[0];
@@ -1447,23 +1574,23 @@ static int initFirstPos(int s[], int startp, int p, int bitleng)
 static int sievePi1L1(utype bitarray[], const uint pattern, int bitleng, int& p)
 {
 	const int minp = KData.SqrtN < Config.CpuL1Size ? KData.SqrtN : Config.CpuL1Size;
-	int k = KData.firstIndex + 1;
+	int k = KData.firstSievedIndex;
 	int spos[MAX_L1SIZE / 11];
 
-	for (; p <= minp; PRIME_NEXT(p, k)) {
-		spos[k] = asmMulDiv(Moudle[k], pattern, p);
+	for (; p <= minp; p += Prime[++k]) {
+		spos[k] = asmMulDiv(Startp[k], pattern, p);
 	}
 	//		assert(k < sizeof(spos));
 	for (int start = 0, sleng = Config.CpuL1Size; start < bitleng; start += Config.CpuL1Size) {
 
-		k = KData.firstIndex;
-		p = SmallPrime[k++];
+		k = KData.firstSievedIndex;
+		p = SmallPrime[k - 2];
 
 		if (start + Config.CpuL1Size > bitleng) {
 			sleng = bitleng - start;
 		}
 
-		for (; p <= minp; PRIME_NEXT(p, k)) {
+		for (; p <= minp; p += Prime[++k]) {
 			int npos = spos[k];
 			if (npos < sleng) {
 				npos = setBitArray(bitarray + (start >> BSHIFT), npos, p, sleng);
@@ -1475,29 +1602,68 @@ static int sievePi1L1(utype bitarray[], const uint pattern, int bitleng, int& p)
 	return k;
 }
 
-#if 1
-static int sievePi2L1(utype bitarray[], const uint pattern1, const uint pattern2, int bitleng, int& p)
+static int sieveGPnL1(utype bitarray[], const uint pattern1, int bitleng, int& p)
 {
+	int pattern2 = LastTask.Kgap - pattern1;
+	if (pattern2 < 0) {
+		pattern2 += KData.Wheel;
+	}
+	int k = KData.firstSievedIndex;
 	const int minp = KData.SqrtN < Config.CpuL1Size ? KData.SqrtN : Config.CpuL1Size;
-	int k = KData.firstIndex + 1;
+
+	//186k
 	uint64 spos[MAX_L1SIZE / 11];
 
-	for (; p <= minp; PRIME_NEXT(p, k)) {
-		const uint s1 = asmMulDiv(Moudle[k], pattern1, p);
-		const uint s2 = asmMulDiv(Moudle[k], pattern2, p);
-		spos[k] = (uint64)s2 << 32 | s1;
+	for (; p <= minp; p += Prime[++k]) {
+		spos[k] = asmMulDiv(Startp[k], pattern1, p);
+		//assert(spos[k][0] * wheel + pattern1 % p == 0)
+		int s2 = bitleng - asmMulDivSub(Startp[k], pattern2, p, bitleng);
+		if (s2 < 0)
+			s2 += p;
+		spos[k] |= (uint64)s2 << 32;
 	}
 
 	for (int start = 0, sleng = Config.CpuL1Size; start < bitleng; start += Config.CpuL1Size) {
 
-		k = KData.firstIndex;
-		p = SmallPrime[k++];
+		k = KData.firstSievedIndex;
+		p = SmallPrime[k - 2];
 
 		if (start + Config.CpuL1Size > bitleng) {
 			sleng = bitleng - start;
 		}
 
-		for (; p <= minp; PRIME_NEXT(p, k)) {
+		//40%
+		for (; p <= minp; p += Prime[++k]) {
+			spos[k] = set2BitArray(bitarray + (start >> BSHIFT), spos[k], p, sleng);
+		}
+	}
+
+	return k;
+}
+
+#if 1
+static int sievePi2L1(utype bitarray[], const uint pattern1, const uint pattern2, int bitleng, int& p)
+{
+	const int minp = KData.SqrtN < Config.CpuL1Size ? KData.SqrtN : Config.CpuL1Size;
+	int k = KData.firstSievedIndex;
+	uint64 spos[MAX_L1SIZE / 11];
+
+	for (; p <= minp; p += Prime[++k]) {
+		const uint s1 = asmMulDiv(Startp[k], pattern1, p);
+		const uint s2 = asmMulDiv(Startp[k], pattern2, p);
+		spos[k] = (uint64)s2 << 32 | s1;
+	}
+
+	for (int start = 0, sleng = Config.CpuL1Size; start < bitleng; start += Config.CpuL1Size) {
+
+		k = KData.firstSievedIndex;
+		p = SmallPrime[k - 2];
+
+		if (start + Config.CpuL1Size > bitleng) {
+			sleng = bitleng - start;
+		}
+
+		for (; p <= minp; p += Prime[++k]) {
 			spos[k] = set2BitArray(bitarray + (start >> BSHIFT), spos[k], p, sleng);
 		}
 	}
@@ -1508,17 +1674,17 @@ static int sievePi2L1(utype bitarray[], const uint pattern1, const uint pattern2
 static int sievePi2L1(utype bitarray[], const uint pattern1, const uint pattern2, int bitleng, int& p)
 {
 	const int minp = KData.SqrtN < Config.CpuL1Size ? KData.SqrtN : Config.CpuL1Size;
-	int k = KData.firstIndex + 1;
+	int k = KData.firstSievedIndex;
 	int sleng = Config.CpuL1Size;
 	uint64 spos[MAX_L1SIZE / 11];
 
-	for (; p <= minp; PRIME_NEXT(p, k)) {
-		int s1 = asmMulDivSub(Moudle[k], pattern1, p, bitleng);
+	for (; p <= minp; p += Prime[++k]) {
+		int s1 = asmMulDivSub(Startp[k], pattern1, p, bitleng);
 		if (s1 > bitleng) {
 			s1 -= p;
 		}
 
-		int s2 = asmMulDivSub(Moudle[k], pattern2, p, bitleng);
+		int s2 = asmMulDivSub(Startp[k], pattern2, p, bitleng);
 		if (s2 > bitleng) {
 			s2 -= p;
 		}
@@ -1531,13 +1697,13 @@ static int sievePi2L1(utype bitarray[], const uint pattern1, const uint pattern2
 
 	for (int start = bitleng; start > 0; start -= sleng) {
 
-		k = KData.firstIndex;
-		p = SmallPrime[k++];
+		k = KData.firstSievedIndex;
+		p = SmallPrime[k - 2];
 
 		if (start < sleng) {
 			start = sleng;
 		}
-		for (; p <= minp; PRIME_NEXT(p, k)) {
+		for (; p <= minp; p += Prime[++k]) {
 			spos[k] = setBitArray(bitarray + ((start - sleng) >> BSHIFT), spos[k], -p, sleng);
 		}
 	}
@@ -1548,7 +1714,7 @@ static int sievePi2L1(utype bitarray[], const uint pattern1, const uint pattern2
 
 static int sievePikL1(utype bitarray[], const uint pattern, int bitleng, int& p)
 {
-	int k = KData.firstIndex + 1;
+	int k = KData.firstSievedIndex;
 #if 1
 	int ns = KData.Kpattern[0];
 	if (ns & 1) {
@@ -1556,9 +1722,10 @@ static int sievePikL1(utype bitarray[], const uint pattern, int bitleng, int& p)
 		ns -= 1;
 	}
 	for (int j = ns; j > 0; j -= 2) {
-		k = KData.firstIndex;
-		p = SmallPrime[k++];
-		k = sievePi2L1(bitarray, pattern + KData.Kpattern[j], pattern + KData.Kpattern[j - 1], bitleng, p);
+		k = KData.firstSievedIndex;
+		p = SmallPrime[k - 2];
+		k = sievePi2L1(bitarray, pattern + KData.Kpattern[j],
+				pattern + KData.Kpattern[j - 1], bitleng, p);
 	}
 #else
 
@@ -1566,10 +1733,10 @@ static int sievePikL1(utype bitarray[], const uint pattern, int bitleng, int& p)
 	const int ns = KData.Kpattern[0];
 	int spos[MAX_L1SIZE / 11][8];
 
-	for (; p <= minp; PRIME_NEXT(p, k)) {
-		spos[k][1] = asmMulDiv(Moudle[k], pattern, p);
+	for (; p <= minp; p += Prime[++k]) {
+		spos[k][1] = asmMulDiv(Startp[k], pattern, p);
 		for (int j = 1; j < ns; j ++) {
-			spos[k][j + 1] = asmMulDiv(Moudle[k], KData.Kpattern[j] + pattern, p);
+			spos[k][j + 1] = asmMulDiv(Startp[k], KData.Kpattern[j] + pattern, p);
 		}
 	}
 
@@ -1580,9 +1747,9 @@ static int sievePikL1(utype bitarray[], const uint pattern, int bitleng, int& p)
 		}
 
 		for (int j = 1; j <= ns; j++) {
-			k = KData.firstIndex;
-			p = SmallPrime[k++];
-			for (; p <= minp; PRIME_NEXT(p, k)) {
+			k = KData.firstSievedIndex;
+			p = SmallPrime[k - 2];
+			for (; p <= minp; p += Prime[++k]) {
 				int npos = spos[k][j];
 				if (npos < sleng) {
 					npos = setBitArray(bitarray + (start >> BSHIFT), npos, p, sleng);
@@ -1600,12 +1767,11 @@ static int sievePikL1(utype bitarray[], const uint pattern, int bitleng, int& p)
 //30%
 static int sievePi1(utype bitarray[], const int pattern)
 {
-	const int bitleng = 1 + (int)((KData.N - KData.S + KData.S % pattern - pattern) / KData.Wheel);
-//	const int bitleng2 = (int)((KData.S) / KData.Wheel);
+	const int bitleng = 1 + (int)((KData.N - pattern) / KData.Wheel);
 	const int sqrtn = KData.SqrtN;
 
-	int k = KData.firstIndex;
-	int p = SmallPrime[k++];
+	int k = KData.firstSievedIndex;
+	int p = SmallPrime[k - 2];
 
 #if OPT_L1CACHE
 	// performance improvement from 100 -> 61
@@ -1613,14 +1779,13 @@ static int sievePi1(utype bitarray[], const int pattern)
 		k = sievePi1L1(bitarray, pattern, bitleng, p);
 #endif
 
-	for (; p <= sqrtn; PRIME_NEXT(p, k)) {
+	for (; p <= sqrtn; p += Prime[++k]) {
 #if 0
-		int s1 = asmMulDiv(Moudle[k], pattern, p);
+		int s1 = asmMulDiv(Startp[k], pattern, p);
 		if (s1 < bitleng)
 			setBitArray(bitarray, s1, p, bitleng);
 #else
-		//int s1 = (((uint64)Moudle[k]) * pattern - bitleng) % p + bitleng - bitleng2;
-		int s1 = asmMulDivSub(Moudle[k], pattern, p, bitleng);
+		int s1 = asmMulDivSub(Startp[k], pattern, p, bitleng);
 		if (s1 > bitleng) {
 			s1 -= p; //			if (s1 >= bitleng) s1 -= p;
 		}
@@ -1641,25 +1806,24 @@ static int sievePi2(utype bitarray[], const uint pattern)
 	const int bitleng = 1 + ((KData.N - kgap - pattern) / KData.Wheel);
 	const int sqrtn = KData.SqrtN;
 
-	int k = KData.firstIndex;
-	int p = SmallPrime[k++];
+	int k = KData.firstSievedIndex;
+	int p = SmallPrime[k - 2];
 
-#if OPT_L1CACHE
+#if MAX_L1SIZE
 	//performance improvement from 10 -> 72
 	if (bitleng > Config.CpuL1Size) {
 		k = sievePi2L1(bitarray, pattern, pattern + kgap, bitleng, p);
 	}
 #endif
 
-	for (; p <= sqrtn; PRIME_NEXT(p, k)) {
-		int moudle = Moudle[k];
-		int s1 = asmMulDivSub(moudle, pattern, p, bitleng);
+	for (; p <= sqrtn; p += Prime[++k]) {
+		int s1 = asmMulDivSub(Startp[k], pattern, p, bitleng);
 		if (s1 > bitleng) {
 			s1 -= p;
 		}
-		int s2 = s1 + moudle * 2;
+		int s2 = s1 + Startp[k] * 2;
 		if (kgap > 2) {
-			s2 = s1 + moudle * kgap % p;
+			s2 = s1 + Startp[k] * kgap % p;
 		} else if (s2 >= bitleng) {
 			s2 -= p;
 		}
@@ -1676,25 +1840,24 @@ static int sievePik(utype bitarray[], const uint pattern)
 	const int bitleng = 1 + (KData.N - Config.Kgap - pattern) / KData.Wheel;
 
 	const int sqrtn = KData.SqrtN;
-	int k = KData.firstIndex;
-	int p = SmallPrime[k++];
+	int k = KData.firstSievedIndex;
+	int p = SmallPrime[k - 2];
 	int s[16];
 
 #if OPT_L1CACHE
 	// performance improvement from 100 -> 61
-	if (bitleng > Config.CpuL1Size) {
+	if (bitleng > Config.CpuL1Size)
 		k = sievePikL1(bitarray, pattern, bitleng, p);
-	}
 #endif
 
-	for (; p <= sqrtn; PRIME_NEXT(p, k)) {
-		int s1 = asmMulDivSub(Moudle[k], pattern, p, bitleng);
+	for (; p <= sqrtn; p += Prime[++k]) {
+		int s1 = asmMulDivSub(Startp[k], pattern, p, bitleng);
 		if (s1 > bitleng) {
 			s1 -= p;
 		}
 
 		s[1] = s1;
-		int ns = initFirstPos(s, Moudle[k], p, bitleng);
+		int ns = initFirstPos(s, Startp[k], p, bitleng);
 		if (ns & 1)
 			setBitArray(bitarray, s[ns--], -p);
 		for (int j = ns; j > 0; j -= 2) {
@@ -1705,8 +1868,46 @@ static int sievePik(utype bitarray[], const uint pattern)
 	return bitleng;
 }
 
+//set goldbach partition (k*wheel + pattern1) with pattern = pattern1
+static int sieveGpn(utype bitarray[], const int pattern1)
+{
+	int pattern2 = LastTask.Kgap - pattern1;
+	if (pattern2 < 0) {
+		pattern2 += KData.Wheel;
+	}
+	int bitleng = (int)((KData.N - pattern1 - pattern2) / KData.Wheel);
+
+	const int sqrtn = KData.SqrtN;
+
+	int k = KData.firstSievedIndex;
+	int p = SmallPrime[k - 2];
+
+#if OPT_L1CACHE
+	//performance improvement from 100 -> 72
+	if (bitleng > Config.CpuL1Size)
+		k = sieveGPnL1(bitarray, pattern1, bitleng, p);
+#endif
+
+	for (; p <= sqrtn; p += Prime[++k]) {
+		int s2 = bitleng - asmMulDiv(Startp[k], pattern2, p);
+		//int s1 = bitleng - asmMulDivSub(Startp[k], pattern2, p, 0);
+		int s1 = asmMulDivSub(Startp[k], pattern1, p, bitleng);
+		if (s1 > bitleng) {
+			s1 -= p;
+		}
+		set2BitArray(bitarray, s1, s2, -p);
+	}
+
+	if (pattern2 == pattern1) {
+		bitleng = 1 + bitleng / 2;
+	}
+
+	return bitleng;
+}
+
 //bad performance !!!!
-static int countKtable(const ushort bitarray[], const int bitleng, const int pattern, uint64 tdata[])
+static int countKtable(const ushort bitarray[], const int bitleng,
+		const int pattern, uint64 tdata[])
 {
 	const uint64 base = atoint64(TABLE_GAP, 0);
 	const int wordleng = bitleng / 16;
@@ -1727,22 +1928,27 @@ static int countKtable(const ushort bitarray[], const int bitleng, const int pat
 	return ktupels;
 }
 
-static ptype* getNextPattern(int& pattern, ptype* pnext)
+//
+static int getNextPattern(int pattern, ptype** pnext)
 {
-	ptype pdiff = *pnext++;
-	pattern += pdiff;
-	if (pdiff == 0) {
-		pattern += KData.PatternDiff;
-		pnext = Pattern + 1;
+	if (**pnext != 0) {
+		pattern += **pnext;
+	} else if (GP0N == Config.Gptk) {
+		pattern = KData.PatternDiff + *(++*pnext);
+	} else {
+		pattern += KData.PatternDiff + Pattern[0];
+		*pnext = Pattern;
 	}
 
-	return pnext;
+	(*pnext)++;
+
+	return pattern;
 }
 
 static void printProgress(const int tid, const double tstart, int aves, int pcnt)
 {
 	double currper = 100.0 * pcnt / KData.Patterns;
-	double totaltime = (getTime() - tstart) / (10 * currper);
+	double totaltime = (getTime( ) - tstart) / (10 * currper);
 	static uint64 lastValue = 0;
 	if (pcnt <= Config.PrintGap) {
 		lastValue = 0;
@@ -1750,13 +1956,13 @@ static void printProgress(const int tid, const double tstart, int aves, int pcnt
 
 	printf("thread(%d) %.2lf%%, ~= ", tid, currper);
 	if (totaltime < 10000) {
-		printf("%.2lf sec", totaltime);
+		printf("%.2lf s", totaltime);
 	} else {
-		printf("%.2lf hour", totaltime / 3600);
+		printf("%.2lf h", totaltime / 3600);
 	}
 
 	uint64 curValue = ((uint64)aves) * KData.Patterns;
-	printf(", %s ~= %lld", KtupletName[Config.Ptk], curValue);
+	printf(", %s ~= %lld", KtupletName[Config.Gptk], curValue);
 	if (lastValue > 0) {
 		printf(", err ~= %.4lf%%%%",
 				(curValue - lastValue) * 10000.0 / lastValue);
@@ -1773,6 +1979,7 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 	static int stid = 0;
 	static int scnt = 0;
 
+	double tstart = getTime( );
 	if (pbegi == 0) {
 		stid = scnt = 0;
 	}
@@ -1780,52 +1987,59 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 	int tid = ++stid;
 
 	uint64 gpts = 0;
-	double tstart = getTime();
 
-	const uint sieve_byte = ((KData.N - KData.S) / KData.Wheel) / 8 + 1024 / 4;
-	utype* bitarray = (utype*)malloc(sieve_byte);
-	assert(bitarray && Pattern);
-
+	utype sbuffer[(256 << 13) >> BSHIFT];
+	utype* bitarray = sbuffer;
 	uint64 *tdata = 0;
 	if (KData.UseKtable) {
 		tdata = (uint64*)malloc(100000 * sizeof(uint64));
 		memset(tdata, 0, sizeof(tdata[0]) * 100000);
 	}
 
+	if (KData.SieveCache > sizeof(sbuffer) / sizeof(sbuffer[0])) {
+		bitarray = (utype*)malloc((KData.SieveCache << (BSHIFT - 3)) + 100);
+	}
+
 	ptype* pnext = Pattern;
 	int pattern = 0;
 	for (int i = 0; i < pbegi; i++) {
-		pnext = getNextPattern(pattern, pnext);
+		pattern = getNextPattern(pattern, &pnext);
 	}
 
 	if (CHECK_FLAG(PRINT_LOG)) {
-		printf("thread %d : pattern %d - %d\n", tid, pbegi, pendi);
+		printf("thread %d : pattern %d - %d\n",
+				tid, pbegi, pendi);
 	}
 
 	for (int pcuri = pbegi; pcuri < pendi; pcuri++) {
 
-		pnext = getNextPattern(pattern, pnext);
-#if 1
+		pattern = getNextPattern(pattern, &pnext);
+#if 0
 		if (CHECK_FLAG(CHCECK_PATTERN)) {
 			if (gcd(KData.Wheel, pattern) != 1)
 				printf("error pattern = %d\n", pattern);
 			continue;
 		}
 #endif
-		memset(bitarray, 0, sieve_byte);
+		memset(bitarray, 0, 8 + KData.SieveCache * sizeof(bitarray[0]));
+//		memset(bitarray, 0xA0A0A0A0, 8 + KData.SieveCache * sizeof(bitarray[0]));
+
 		int bitleng = 0;
-		if (PI2N == Config.Ptk) {
+		if (GP0N == Config.Gptk) {
+			bitleng = sieveGpn(bitarray, pattern);
+		} else if (PI2N == Config.Gptk) {
 			bitleng = sievePi2(bitarray, pattern);
-		} else if (PI1N == Config.Ptk) {
+		} else if (PI1N == Config.Gptk) {
 			bitleng = sievePi1(bitarray, pattern);
 		} else {
 			bitleng = sievePik(bitarray, pattern);
 		}
 
-		bitarray[0] |= 1;
-		gpts += countBitZeros(bitarray, bitleng);
-
-		if (tdata) {
+		{
+			bitarray[0] |= 1;
+			gpts += countZeroBitsArray(bitarray, bitleng);
+		}
+		if (KData.UseKtable) {
 			countKtable((ushort*)bitarray, bitleng, pattern, tdata);
 		}
 
@@ -1839,9 +2053,11 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 		}
 	}
 
-	free(bitarray);
+	if (bitarray != sbuffer) {
+		free(bitarray);
+	}
 
-	if (tdata) {
+	if (KData.UseKtable) {
 		for (int i = 0; tdata[i]; i++) {
 			Ktable[i] += tdata[i];
 		}
@@ -1849,7 +2065,8 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 	}
 
 	if (CHECK_FLAG(PRINT_LOG)) {
-		printf("Thread %d: pattern[%3d - %3d] = %lld\n", tid, pbegi, pendi, gpts);
+		printf("Thread %d: pattern[%3d - %3d] = %lld\n",
+				tid, pbegi, pendi, gpts);
 	}
 
 	return gpts;
@@ -1858,12 +2075,23 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 //factorial of prime factor of wheel
 static int getFactorial(const int wheel)
 {
-	int factorial = 1;
+	int factorial = 2;
 	for (int i = 0, p = SmallPrime[i]; wheel % p == 0; p = SmallPrime[++i]) {
 		factorial *= p;
 	}
 
 	return factorial;
+}
+
+//get the frist prime index in Prime which is not a factor of wheel
+static int getFirstPrime(const int wheel)
+{
+	int sievePrimeIndex = 1;
+	for (int p = 2; wheel % p == 0; p += Prime[++sievePrimeIndex]) {
+
+	}
+
+	return sievePrimeIndex;
 }
 
 //
@@ -1873,7 +2101,7 @@ static int countKpattern(int wheel, const int kgap)
 	if (kgap == 1) {
 		patterns = 8;
 	}
-	for (int i = 3, p = SmallPrime[i]; wheel % p == 0; p = SmallPrime[++i]) {
+	for (int i = 2, p = SmallPrime[i]; wheel % p == 0; p = SmallPrime[++i]) {
 		wheel /= p;
 		patterns *= p - kgap;
 	}
@@ -1881,66 +2109,82 @@ static int countKpattern(int wheel, const int kgap)
 	return patterns * (wheel / 30);
 }
 
-//get the frist prime index in Prime which is not a factor of wheel
-static int getFirstPrime(const int wheel)
-{
-	int i = 0;
-	for (int p = SmallPrime[i]; wheel % p == 0; p = SmallPrime[++i]) {
-
-	}
-	return i;
-}
-
 //16 bits number p1, p2 and gcd((p1 + p2), factorial) = 1
 // ---------- gp ------------------*/
-static int initPattern(const int factorial, const int wheel)
+static int initPattern(const uint64 n, const int wheel)
 {
-	double ts = getTime();
-	int pns = countKpattern(factorial, 1);
-	Pattern = (ptype*)malloc(10000 + (sizeof(ptype) * (pns + 1) >> Config.Ptk));
-	Pattern[0] = 0;
+	int pns = KData.Patterns;
+	double ts = getTime( );
 
-	if (PI1N == Config.Ptk) {
-		pns = getPi1Pattern(factorial, Pattern);
-	} else if (PI2N == Config.Ptk) {
-		pns = getPi2Pattern(factorial, Pattern);
-		assert(pns == countKpattern(factorial, 2) && Config.Kgap < 6);
+	if (GP0N == Config.Gptk) {
+		if (LastTask.Wheel != wheel ||
+			LastTask.Kgap != n % wheel ||
+			LastTask.Gptk != Config.Gptk) {
+			LastTask.Kgap = n % wheel;
+			pns = getGppattern(n, wheel, Pattern);
+		}
+	} else if (PI1N == Config.Gptk) {
+		if (LastTask.Wheel != wheel ||
+			LastTask.Gptk != Config.Gptk) {
+			pns = getPi1Pattern(KData.Factorial, Pattern);
+			if (pns > 10) {
+				assert(pns == countKpattern(wheel, 1));
+			}
+		}
+	} else if (PI2N == Config.Gptk) {
+		if (LastTask.Wheel != wheel ||
+			LastTask.Kgap != Config.Kgap ||
+			LastTask.Gptk != Config.Gptk) {
+			LastTask.Kgap = Config.Kgap;
+			pns = getPi2Pattern(KData.Factorial, Pattern);
+			if (Config.Kgap < 6 && pns > 10) {
+				assert(pns == countKpattern(wheel, 2));
+			}
+		}
 	} else {
-		pns = getPikPattern(factorial, Pattern);
+		LastTask.Kgap = KData.Kpattern[KData.Kpattern[0] - 1];
+		pns = getPikPattern(KData.Factorial, Pattern);
 	}
-
-	KData.PatternDiff = Pattern[pns] + Pattern[0];
 
 	if (CHECK_FLAG(PRINT_LOG)) {
-		const int ns = KData.Kpattern[0];
+		const int ns = Config.Gptk == GP0N ? 2 : KData.Kpattern[0];
 		printf("init pattern time use %.2lf ms, count %.3lf, %.2lf fast than pi\n",
-				getTime() - ts, 100.0 * pns * ns / factorial,
-				1.0 * countKpattern(factorial, 1) / (pns * ns));
-	}
-	if (CHECK_FLAG(CHCECK_PATTERN)) {
-		printf("wheel pattern = %d\n", pns);
+				getTime( ) - ts, 100.0 * pns * ns / wheel,
+				1.0 * countKpattern(wheel, 1) / (pns * ns));
 	}
 
-	Pattern[pns] = 0;
-	pns *= wheel / factorial;
+	if (CHECK_FLAG(CHCECK_PATTERN)) {
+		printf("wheel multiple = %d\n", pns);
+		if (GP0N == Config.Gptk)
+			assert(pns < sizeof(Pattern));
+	}
+
 	return pns;
 }
 
-static void initMoudle(const int wheel, int maxp, uint Moudle[])
+static void initStartp(const int wheel)
 {
-	double ts = getTime();
+	const int sqrtn = KData.SqrtN + 10;
+	if (wheel == LastTask.Wheel && Startp[1] >= sqrtn) {
+		return;
+	}
 
-	for (int j = 1, p = 2; p < maxp; PRIME_NEXT(p, j)) {
+	double ts = getTime( );
+
+	for (int j = 1, p = 2; Prime[j] && p < sqrtn; p += Prime[++j]) {
 		int y = 0;
 		y = extendedEuclid(-wheel % p, p, y);
 		if (y < 0) {
 			y += p;
 		}
-		Moudle[j] = y;
+		Startp[j] = y;
+		//		assert(Startp[j] < p && Startp[j] >= 0);
 	}
 
+	Startp[1] = sqrtn;
+
 	if (CHECK_FLAG(PRINT_LOG)) {
-		printf("init startp time use %.2lf ms\n", getTime() - ts);
+		printf("init startp time use %.2lf ms\n", getTime( ) - ts);
 	}
 }
 
@@ -1951,7 +2195,7 @@ static uint getDefaultWheel(const uint64 n)
 		return wheel;
 	}
 
-	wheel = 1;
+	wheel = 2;
 	for (int i = 0; SmallPrime[i] <= KData.Wheel && SmallPrime[i] < 24;) {
 		wheel *= SmallPrime[i++];
 	}
@@ -1960,7 +2204,7 @@ static uint getDefaultWheel(const uint64 n)
 		return wheel;
 	}
 
-	const int powten = ilog10(n);
+	const int powten = (int)(log((double)n) / log(10.0) + 0.1);
 	if (powten <= 6) {
 		wheel = 30;
 	} else if (powten <= 8) {
@@ -1976,7 +2220,7 @@ static uint getDefaultWheel(const uint64 n)
 	} else if (powten <= 17) {
 		wheel = 9699690 * 23;
 	} else {
-		wheel = 223092870ul * 29;
+		wheel = 223092870u * 29;
 	}
 
 	return wheel;
@@ -2008,27 +2252,27 @@ static int getWheel(const uint64 n)
 
 //get prime number with diff Result in array Prime
 //segmented sieve of EratoSieve to enum prime number
-static int getPrime(const int s, const int n, uchar prime[])
+static int getPrime(const int n, uchar prime[])
 {
 	int pi1n = 1;
 	if (prime) {
-		prime[2] = 1 - 3;
+		prime[1] = 2;
 	}
 
-	for (int start = s, sleng = SEGMENT_SIZE; start < n; start += sleng) {
+	for (int start = 0, sleng = SEGMENT_SIZE ; start < n; start += sleng) {
 		utype bitarray[(SEGMENT_SIZE >> (BSHIFT + 1)) + 100];
 		if (sleng >= n - start) {
 			sleng = n - start;
 		}
 #if FAST_CROSS
-		segmentedSieve1(bitarray, start, sleng + 16);
+		segmentedEratoSieve1(bitarray, start, sleng + 16, true);
 #else
-		segmentedSieve2(bitarray, start, sleng + 16);
+		segmentedEratoSieve2(bitarray, start, sleng + 16, true);
 #endif
 		if (prime) {
-			pi1n += savePi1Pattern(bitarray, sleng, prime + pi1n + 1);
+			pi1n += savePrimeDiff(bitarray, start, sleng, prime + pi1n + 1);
 		} else {
-			pi1n += countBitZeros(bitarray, sleng / 2);
+			pi1n += countZeroBitsArray(bitarray, sleng >> 1);
 		}
 	}
 
@@ -2040,102 +2284,193 @@ static int getPrime(const int s, const int n, uchar prime[])
 	return pi1n;
 }
 
-static int getSegKtuplet(const int s, const int n)
+static int getSegKtuplet(const int n)
 {
-	int ret = 0;
+	int pi2n = 0;
 
 #if (OMP)
 	omp_set_num_threads(Config.Threads);
-	#pragma omp parallel for reduction(+:ret) if (n >= MINN * 3)
+	#pragma omp parallel for reduction(+:pi2n) if (n >= MINN * 3)
 #endif
-	for (int start = s; start < n; start += SEGMENT_SIZE) {
+	for (int start = 0; start < n; start += SEGMENT_SIZE) {
 		utype bitarray[(SEGMENT_SIZE >> (BSHIFT + 1)) + 100];
 		int sleng = SEGMENT_SIZE;
 		if (sleng >= n - start) {
 			sleng = n - start;
 		}
 #if FAST_CROSS
-		segmentedSieve1(bitarray, start, sleng + 16);
+		segmentedEratoSieve1(bitarray, start, sleng + 16, true);
 #else
-		segmentedSieve2(bitarray, start, sleng + 16);
+		segmentedEratoSieve2(bitarray, start, sleng + 16, true);
 #endif
-		if (PI2N == Config.Ptk)
-			ret += savePi2Pattern(bitarray, sleng, 0);
+		if (PI2N == Config.Gptk)
+			pi2n += savePi2Pattern(bitarray, start, sleng, sleng, 0);
 		else
-			ret += savePikPattern(bitarray, sleng, 0);
+			pi2n += savePikPattern(bitarray, start, sleng, sleng, 0);
 	}
 
-	return ret;
+	return pi2n;
+}
+
+//bad performance!!!
+static int getSegPartition(const uint64 sum, int bitleng)
+{
+	int gp = 0;
+	if (bitleng > sum / 2) {
+		bitleng = sum / 2;
+	}
+
+	bitleng += bitleng & 1;
+
+#if (OMP)
+	omp_set_num_threads(Config.Threads);
+	#pragma omp parallel for if (sum >= MINN * 3)
+#endif
+	for (int start = 0; start < bitleng; start += SEGMENT_SIZE) {
+		utype bitarray[(SEGMENT_SIZE >> (BSHIFT + 1)) + 100];
+		int sleng = SEGMENT_SIZE;
+		if (sleng >= bitleng - start) {
+			sleng = bitleng - start;
+		}
+		segmentedEratoSieve1(bitarray, start, sleng + 16, true);
+		reverseBitArray(bitarray, sleng >> 1);
+		segmentedEratoSieve1(bitarray, sum - start - sleng, sleng + 16, false);
+
+		gp += countZeroBitsArray(bitarray, (sleng >> 1));
+	}
+
+	return gp;
 }
 
 //get small parathion or ktuplet prime in range[0 - min(Wheel, sqrt(n))]
 //if n is less than a small fix value MIN
-static int getSmallGpt(const uint64 s, const uint64 n)
+static int getSmallGpt(const uint64 n)
 {
-	double ts = getTime();
+	double ts = getTime( );
 
 	//adjust leng for last few number
 	int leng = 0;
 	if (n < MINN) {
-		if (PI1N == Config.Ptk) {
+		if (GP0N == Config.Gptk) {
+			leng = n / 2;
+		} else if (PI1N == Config.Gptk) {
 			leng = n;
-		} else if (PI2N >= Config.Ptk) {
+		} else if (PI2N >= Config.Gptk) {
 			leng = n - (Config.Kgap - 1);
 		}
 	} else {
 		leng = KData.SqrtN;
 		if (leng < KData.Wheel) {
 			leng = KData.Wheel;
-		} else if (PI2N <= Config.Ptk) {
+		} else if (PI2N <= Config.Gptk) {
 			leng += 1;
 		}
 	}
 
 	int ret = 0;
-	if (PI1N == Config.Ptk) {
-		ret = getPrime(s ,leng + 1, 0);
-	} else if (PI2N <= Config.Ptk) {
-		ret = getSegKtuplet(s, leng);
+	if (GP0N == Config.Gptk) {
+		ret = getSegPartition(n, leng);
+	} else if (PI1N == Config.Gptk) {
+		ret = getPrime(leng + 1, 0);
+	} else if (PI2N <= Config.Gptk) {
+		ret = getSegKtuplet(leng);
 	}
 
 	if (CHECK_FLAG(PRINT_LOG)) {
 		printf("sieve small n = %lld, leng = %d", n, leng);
-		printf("\nand small ret = %d, and time use %.lf ms\n", ret, getTime() - ts);
+		printf("\nand small ret = %d, and time use %.lf ms\n", ret, getTime( ) - ts);
 	}
 
 	return ret;
 }
 
-//init Prime, Pattern, Moudle
-static int initParam(const uint64 s, const uint64 n)
+//init Prime, Pattern, Startp
+static int initParam(const uint64 n)
 {
-	const int wheel = getWheel(n - s);
 	KData.N = n;
-	KData.S = s;
-	KData.Wheel = wheel;
+
 	KData.SqrtN = (int)sqrt((double)n + 0.1);
 
+#if TEST_BENCHMARK
+	if (n > atoint64("e12", 1000000) && Config.Gptk == GP1N)
+		n = 1000000000;
+#endif
+
+	const int wheel = getWheel(n);
+
+	KData.Wheel = wheel;
+
+	KData.SieveCache = ((n / wheel) >> BSHIFT) + 1;
+
 	const int factorial = getFactorial(wheel);
+
 	KData.Factorial = factorial;
-	KData.firstIndex = getFirstPrime(wheel);
-	KData.Patterns = initPattern(factorial, wheel);
 
-	initMoudle(wheel, KData.SqrtN + 10, Moudle);
+	KData.firstSievedIndex = getFirstPrime(wheel);
 
-	LastTask.Ptk = Config.Ptk;
+	KData.Patterns = initPattern(n, wheel);
+
+	initStartp(wheel);
+
+	LastTask.Gptk = Config.Gptk;
 	LastTask.Wheel = KData.Wheel;
 	LastTask.N = KData.N;
-	LastTask.S = KData.S;
+	LastTask.Patterns = KData.Patterns;
 
 	if (CHECK_FLAG(PRINT_LOG)) {
-		printf("wheel = %d * %d, ", factorial, wheel /factorial);
-		printf("cachesize = %d k\n", (n / wheel) >> 13);
+		printf("wheel = %d * %d, ",
+				factorial, wheel /factorial);
+		printf("cachesize = %d k\n", (KData.SieveCache << BSHIFT) >> 13);
 	}
 
 	return wheel;
 }
 
-static void saveTask(struct Task& curtask)
+static bool excuteCmd(const char*);
+//
+static int loadConfig(const char* configName)
+{
+	char linebuf[400];
+	char configdata[400] = {0};
+	char cmd[400];
+
+	if (!freopen(configName, "rb", stdin)) {
+		printf("create a default config file %s\n", configName);
+		freopen(configName, "wb", stdout);
+		printf(ConfigDataFormat, Config.Threads, Config.CpuL2Size, "E10 012");
+		freopen(CONSOLE, "w", stdout);
+		freopen(CONSOLE, "r", stdin);
+		remove(configName);
+		return 0;
+	}
+
+	while (gets(linebuf)) {
+		strcat(configdata, strcat(linebuf, "\n"));
+	}
+
+	if (sscanf(configdata, ConfigDataFormat,
+				&Config.Threads, &Config.CpuL2Size, cmd) != 3) {
+		printf("invalid config data format: \n%s\n%s\n",
+				configdata, ConfigDataFormat);
+		puts(configdata);
+		freopen(CONSOLE, "r", stdin);
+		return 1;
+	}
+	//read last task data
+	if (CHECK_FLAG(PRINT_LOG)) {
+		puts(configdata);
+	}
+
+	if (cmd[0]) {
+		excuteCmd(cmd);
+	}
+
+	freopen(CONSOLE, "r", stdin);
+
+	return 0;
+}
+
+static void saveCurrentTask(struct TaskConfig& curtask)
 {
 	if (freopen("prime.ta", "rb", stdin)) {
 		freopen(CONSOLE, "r", stdin);
@@ -2156,8 +2491,8 @@ static void saveTask(struct Task& curtask)
 		curtask.Pendi = KData.Patterns;
 	}
 
-	printf(TaskFormat, curtask.Ptk,
-			Config.Kgap, curtask.Wheel, KData.Patterns,
+	printf(TaskDataFormat, curtask.Gptk,
+			curtask.Kgap, curtask.Wheel, curtask.Patterns,
 			curtask.Tasks, curtask.Pbegi, curtask.Pendi,
 			curtask.N, curtask.Result);
 
@@ -2165,7 +2500,7 @@ static void saveTask(struct Task& curtask)
 	freopen(CONSOLE, "w", stdout);
 }
 
-static int readTaskData(struct Task &curtask)
+static int readTaskData(struct TaskConfig &curtask)
 {
 	int ret = 0;
 	char linebuf[400] = {0};
@@ -2177,72 +2512,86 @@ static int readTaskData(struct Task &curtask)
 	}
 
 	//read last task data
-	struct Task tmp = {0};
-	if (sscanf(taskdata, TaskFormat, &tmp.Ptk,
-		&Config.Kgap, &tmp.Wheel, &KData.Patterns,
-		&curtask.Tasks,	&curtask.Pbegi, &curtask.Pendi,
-		&tmp.N, &curtask.Result) != 9) {
-		printf("invalid task data format: %s : %s\n", taskdata, TaskFormat);
+	struct TaskConfig tmp = {0};
+	if (sscanf(taskdata, TaskDataFormat, &tmp.Gptk,
+		&tmp.Kgap, &tmp.Wheel, &tmp.Patterns,
+		&tmp.Tasks,	&tmp.Pbegi, &tmp.Pendi,
+		&tmp.N, &tmp.Result) != 9) {
+		printf("invalid task data format: %s : %s\n", taskdata, TaskDataFormat);
 		ret = -1;
 	}
 
 	//check task data
-	if (curtask.N != tmp.N ||
-		curtask.Wheel != tmp.Wheel ||
-		curtask.Ptk != tmp.Ptk) {
+	if (curtask.N != tmp.N || curtask.Wheel != tmp.Wheel ||
+		curtask.Gptk != tmp.Gptk || curtask.Kgap != tmp.Kgap) {
 		printf("last task \n%s is not match with current task\n", taskdata);
 		ret = -2;
 	}
 
-	freopen(CONSOLE, "r", stdin);
+	if (ret == 0) {
+		curtask = tmp;
+	}
 
+	freopen(CONSOLE, "r", stdin);
 	return ret;
 }
 
 //
-static int loadTask(struct Task &curtask)
+static int loadLastTask(struct TaskConfig &curtask)
 {
 	int ret = 0;
 	if (!freopen("prime.ta", "rb", stdin)) {
 		puts("create a default task file prime.ta\n");
-		saveTask(curtask);
+		saveCurrentTask(curtask);
 	}
 
-	if (readTaskData(curtask) != 0) {
+	struct TaskConfig tmp = curtask;
+	if (readTaskData(tmp) != 0) {
 		curtask.Result = curtask.Pbegi = curtask.Pendi = 0;
-		saveTask(curtask);
+		saveCurrentTask(curtask);
+		tmp = curtask;
 	}
 
-	if (curtask.Tasks > 0) {
-		curtask.Pendi = curtask.Pbegi + KData.Patterns / curtask.Tasks + 1;
+	curtask.Result = tmp.Result;
+	curtask.Pbegi = tmp.Pbegi;
+	if (tmp.Tasks > 0) {
+		curtask.Pendi = tmp.Pbegi + tmp.Patterns / tmp.Tasks + 1;
+	} else {
+		curtask.Pendi = tmp.Pendi;
 	}
+
+	curtask.Tasks = tmp.Tasks;
 
 	if (curtask.Pendi > KData.Patterns) {
 		curtask.Pendi = KData.Patterns;
 	}
 
 	if (CHECK_FLAG(PRINT_LOG)) {
-		printf("load last Task Data with pattern[%d - %d] ok\n", curtask.Pbegi, curtask.Pendi);
+		printf("load last Task Data with pattern[%d - %d] ok\n",
+				curtask.Pbegi, curtask.Pendi);
 	}
 
 	freopen(CONSOLE, "r", stdin);
-
 	return ret;
 }
 
 //
-static uint64 getGpKtPn(const uint64 s, const uint64 n, int pn, bool addsmall)
+static uint64 getGpKtPn(const uint64 n, int pn, bool addsmall)
 {
-	assert(n < atoint64(MAXN, 100) + 1000 && s < n);
-	assert(Config.Ptk >= 0 && Config.Ptk < 10);
+	assert(n < atoint64(MAXN, 100) + 1000);
+	assert(Config.Gptk >= 0 && Config.Gptk < 10);
+
+	if (GP0N == Config.Gptk) {
+		assert(n % 2 == 0);
+	}
 
 	if (n >= MINN) {
-		initParam(s, n);
+		initParam(n);
 	}
 
 	uint64 sgn = 0, gptn = 0;
 	if (addsmall) {
-		sgn = getSmallGpt(s, n);
+		sgn = getSmallGpt(n);
 		if (KData.UseKtable) {
 			Ktable[0] += sgn;
 		}
@@ -2256,7 +2605,7 @@ static uint64 getGpKtPn(const uint64 s, const uint64 n, int pn, bool addsmall)
 		int pendi = pn;
 
 		//load Last Task
-		if (CHECK_FLAG(SAVE_TASK) && loadTask(LastTask) >= 0) {
+		if (CHECK_FLAG(SAVE_TASK) && loadLastTask(LastTask) >= 0) {
 			pbegi = LastTask.Pbegi;
 			pendi = LastTask.Pendi;
 			gptn = LastTask.Result;
@@ -2285,13 +2634,8 @@ static uint64 getGpKtPn(const uint64 s, const uint64 n, int pn, bool addsmall)
 		if (CHECK_FLAG(SAVE_TASK) && pbegi < pendi) {
 			LastTask.Pbegi = pendi;
 			LastTask.Result = gptn;
-			saveTask(LastTask);
+			saveCurrentTask(LastTask);
 		}
-	}
-
-	if (Pattern) {
-		free(Pattern);
-		Pattern = NULL;
 	}
 
 	KData.Wheel = 0;
@@ -2310,14 +2654,19 @@ static void printResult(const uint64 n, uint64 gptn, double ts)
 		}
 	}
 
-	if (Config.Ptk < PIKN) {
-		printf(PrintFormat[Config.Ptk], n, gptn);
+	if (Config.Gptk < PIKN) {
+		printf(PrintFormat[Config.Gptk], n, gptn);
 	} else {
 		printf(PrintFormat[PIKN], KData.Kpattern[0], n, gptn);
 	}
 
 	if (CHECK_FLAG(PRINT_TIME)) {
-		printf(" (%.2lf sec)", (getTime() - ts) / 1000);
+		double timeuse = getTime( ) - ts;
+		if (timeuse > 10000) {
+			printf(", time use %.3lf sec", timeuse / 1000);
+		} else {
+			printf(", time use %.2lf ms", timeuse);
+		}
 	}
 
 	//		if (CHECK_FLAG(PRINT_LOG)) {
@@ -2326,45 +2675,47 @@ static void printResult(const uint64 n, uint64 gptn, double ts)
 	putchar('\n');
 }
 
-//get twin primes, or ktuplet
-static uint64 ktprime(const uint64 s, const uint64 n, int pn)
+//get goldbach partition, or twin primes, or ktuplet
+static uint64 Ktprime(const uint64 n, int pn)
 {
-	double ts = getTime();
+	double ts = getTime( );
 
 	uint64 gptn = 0;
+	bool addsmall = true;
 	if (KData.Patterns == 0) {
-		LastTask.Ptk = -1;
+		LastTask.Gptk = -1;
 	}
 
-	const int sqrtn = (int)sqrt((double)n + 0.1);
 	if (n > KData.N + 1000) {
-		getPrime(0, sqrtn + 1001, Prime);
+		const int sqrtn = (int)sqrt((double)n) + 1001;
+		getPrime(sqrtn, Prime);
 	}
 
-	int wheel = getWheel(n - s);
-	const int maxn = sqrtn > wheel ? sqrtn : wheel;
-	bool addsmall = s < maxn;
 	//optimize for Ktuplet prime with small n > e7
-	if (addsmall && n > atoint64("e13", 0)) {
+	if (Config.Gptk != GP0N && n > atoint64("e13", 0)) {
+		int sqrtn = (int)sqrt((double)n + 0.1);
+		int wheel = getWheel(n);
+		int maxn = sqrtn > wheel ? sqrtn : wheel;
 		wheel = KData.Wheel;
 		KData.Wheel = 0;
-		gptn = getGpKtPn(s, maxn + Config.Kgap - 1, 0, addsmall);
+		gptn = getGpKtPn(maxn + Config.Kgap - 1, 0, addsmall);
+		//restore the wheel
 		KData.Wheel = wheel;
 		if (CHECK_FLAG(PRINT_LOG)) {
 			//			printf("PI%d[%d] = %lld, and time use %.lf ms\n",
-			//					Config.Ptk, maxn, gptn, getTime() - ts);
+			//					Config.Gptk, maxn, gptn, getTime( ) - ts);
 		}
-		addsmall = false;
+		addsmall = !addsmall;
 	}
 
-	if (Config.Ptk == PIKN && pn == 0 && (n - s) > atoint64(TABLE_GAP, 0)) {
+	if (Config.Gptk == PIKN && pn == 0 && n > atoint64(TABLE_GAP, 0)) {
 		memset(Ktable, 0, sizeof(Ktable));
 		KData.UseKtable = true;
 	} else {
 		KData.UseKtable = false;
 	}
 
-	gptn += getGpKtPn(s, n, pn, addsmall);
+	gptn += getGpKtPn(n, pn, addsmall);
 
 	if (CHECK_FLAG(PRINT_RET)) {
 		printResult(n, gptn, ts);
@@ -2377,13 +2728,13 @@ static uint64 ktprime(const uint64 s, const uint64 n, int pn)
 static int startTest(int tesecase, bool rwflag)
 {
 	srand((uint)time(NULL));
-	double ts = getTime();
+	double ts = getTime( );
 	const char* dataFile[ ] = {"prime.gp", "prime.pi", "prime.pi2", "prime.pik"};
-	printf("-----------start %s test -----------\n", dataFile[Config.Ptk]);
+	printf("-----------start %s test -----------\n", dataFile[Config.Gptk]);
 
 	if (rwflag) {
-		if (!(freopen(dataFile[Config.Ptk], "rb", stdin))) {
-			printf("can not read test data file %s\n", dataFile[Config.Ptk]);
+		if (!(freopen(dataFile[Config.Gptk], "rb", stdin))) {
+			printf("can not read test data file %s\n", dataFile[Config.Gptk]);
 			freopen(CONSOLE, "r", stdin);
 			SET_FLAG(PRINT_RET);
 			return -1;
@@ -2391,7 +2742,7 @@ static int startTest(int tesecase, bool rwflag)
 		CLR_FLAG(PRINT_RET | PRINT_LOG);
 		Config.PrintGap = 0;
 	} else {
-		if (!(freopen(dataFile[Config.Ptk], "wb", stdout))) {
+		if (!(freopen(dataFile[Config.Gptk], "wb", stdout))) {
 			puts("can not write test data file");
 			freopen(CONSOLE, "r", stdin);
 			SET_FLAG(PRINT_RET);
@@ -2404,17 +2755,17 @@ static int startTest(int tesecase, bool rwflag)
 	int fails = 0;
 	for (int i = 1; i <= tesecase; i++) {
 		if (!rwflag) {
-			uint64 n = rand() * rand();
+			uint64 n = rand( ) * rand( );
 			n = (n + 4) * 2 + 0;
 			if (n < 1000000) {
 				n = 4 * n + 1000000;
 			}
-			ktprime(0, n, 0);
+			Ktprime(n, 0);
 		} else {
 			uint64 res, n;
 			char linebuf[256] = {0};
 			gets(linebuf);
-			if (sscanf(linebuf, PrintFormat[Config.Ptk], &n, &res) != 2) {
+			if (sscanf(linebuf, PrintFormat[Config.Gptk], &n, &res) != 2) {
 				printf("line %d is wrong data\n", i);
 				if (fails++ > 30) {
 					break;
@@ -2423,10 +2774,10 @@ static int startTest(int tesecase, bool rwflag)
 				}
 			}
 
-			uint64 gptn = ktprime(0, n, 0);
+			uint64 gptn = Ktprime(n, 0);
 			if (gptn != res) {
 				printf("case %d with wrong result %lld, ", i, gptn);
-				printf(PrintFormat[Config.Ptk], n, res);
+				printf(PrintFormat[Config.Gptk], n, res);
 				putchar('\n');
 			}
 		}
@@ -2435,7 +2786,7 @@ static int startTest(int tesecase, bool rwflag)
 		}
 	}
 
-	printf("test case time use %.lf ms\n", getTime() - ts);
+	printf("test case time use %.lf ms\n", getTime( ) - ts);
 
 	SET_FLAG(PRINT_RET);
 	freopen(CONSOLE, "w", stdout);
@@ -2444,13 +2795,13 @@ static int startTest(int tesecase, bool rwflag)
 	return 0;
 }
 
-//list Ptk by the input Result start, end, step
+//list Gptk by the input Result start, end, step
 static void listDiffGpt(const char cmdparams[][80], int cmdi)
 {
-	double ts = getTime();
+	double ts = getTime( );
 
 	int ni = 1, step = 2;
-	uint64 start = ipow(10, 9), end = start + 1000;
+	uint64 start = 1000000000, end = start + 1000;
 	uint64 buf[ ] = {0, start, end, step, 0};
 
 	for (int i = cmdi; cmdparams[i][0] && ni < sizeof(buf) / sizeof(buf[0]); i++) {
@@ -2472,7 +2823,7 @@ static void listDiffGpt(const char cmdparams[][80], int cmdi)
 		end = start + end * step - 1;
 	}
 
-	printf("calculating %s\n", KtupletName[Config.Ptk]);
+	printf("calculating %s\n", KtupletName[Config.Gptk]);
 
 	if (CHECK_FLAG(SAVE_RESUTL)) {
 		Config.PrintGap = 0;
@@ -2489,16 +2840,20 @@ static void listDiffGpt(const char cmdparams[][80], int cmdi)
 		if (isdigit(cmdparams[4][0])) {
 			printf("%d ", pcnt);
 		}
-		allSum += ktprime(0, n, 0);
+		allSum += Ktprime(n, 0);
 	}
 
-	printf("all case time use %.lf ms\n", getTime() - ts);
+	if (GP0N == Config.Gptk) {
+		printf("average = %lld, ", allSum / pcnt);
+	}
+
+	printf("all case time use %.lf ms\n", getTime( ) - ts);
 	freopen(CONSOLE, "w", stdout);
 }
 
 static void listPowGpt(const char cmdparams[][80], int cmdi)
 {
-	printf("calculating %s ", KtupletName[Config.Ptk]);
+	printf("calculating %s ", KtupletName[Config.Gptk]);
 
 	int m = atoint64(cmdparams[cmdi + 1], 10);
 	int startindex = atoint64(cmdparams[cmdi + 2], 5);
@@ -2522,23 +2877,11 @@ static void listPowGpt(const char cmdparams[][80], int cmdi)
 	CLR_FLAG(PRINT_RET);
 	for (uint64 i = startindex; i <= endindex; i++) {
 		uint64 n = (uint64)(pow((double)m, (int)i) + 0.01);
-		uint64 r = ktprime(0, n, 0);
-		printf(PrintFormat[Config.Ptk], m, i, r);
+		uint64 r = Ktprime(n, 0);
+		printf(PrintFormat[Config.Gptk], m, i, r);
 		putchar('\n');
 	}
 	SET_FLAG(PRINT_RET);
-}
-
-static void listPatterns(uint64 start, int count)
-{
-	getPrime(0, (int)sqrt((double)start) + count * 4 + 2000, Prime);
-	int wheel = getWheel(start);
-	printf("wheel = %d\n", wheel);
-	for (int i = 0; i < count; i++) {
-		int patterns = 0;
-		printf("pattern(%lld) = %d\n", start, patterns);
-		start += 2;
-	}
 }
 
 //benchMark
@@ -2547,7 +2890,7 @@ static void benchMark(const char cmdparams[][80])
 	SET_FLAG(PRINT_RET);
 	uint64 start = atoint64("e10", 1000000);
 	uint64 n = atoint64("e10", 0);
-	char gptk[20] = {'0', '1', '2'};
+	char gptk[20] = {'0', '1', '2', '3'};
 
 	for (int i = 0, ni = 1; cmdparams[i][0]; i++) {
 		char c = cmdparams[i][0];
@@ -2555,7 +2898,7 @@ static void benchMark(const char cmdparams[][80])
 			uint64 tmp = atoint64(cmdparams[i], 0);
 			if (ni++ == 1) {
 				start = tmp;
-			} else if (ni == 2) {
+			} else if (ni == 3) {
 				n = tmp;
 			} else if (tmp < 222) {
 				strcpy(gptk, cmdparams[i]);
@@ -2571,8 +2914,8 @@ static void benchMark(const char cmdparams[][80])
 	for (; start * 10 <= n; ) {
 		for (int j = 0; j < 9; j++) {
 			for (int k = 0; gptk[k]; k++) {
-				Config.Ptk = gptk[k] - '0';
-				ktprime(0, (j + 1) * gap, 0);
+				Config.Gptk = gptk[k] - '0';
+				Ktprime((j + 1) * gap, 0);
 			}
 			puts("");
 		}
@@ -2583,8 +2926,62 @@ static void benchMark(const char cmdparams[][80])
 	freopen(CONSOLE, "w", stdout);
 }
 
+//auto set best threads
+static void benchMarkByThreads(const uint64 n, int threads)
+{
+	int mints = 1234567890;
+	int bestthreads = 4;
+	SET_FLAG(PRINT_RET);
+	for (int i = 1; i <= threads; i++) {
+		Config.Threads = i;
+		double ts = getTime();
+		Ktprime(n, 1000);
+		ts = getTime() - ts;
+		if (mints > ts) {
+			bestthreads = Config.Threads;
+			mints = ts;
+		}
+	}
+	Config.Threads = bestthreads;
+	printf("best thread = %d\n", bestthreads);
+}
+
 //test pi, pi2, gp function
-static void testPik()
+static void testGpt( )
+{
+	const char* const gtpdata[][6] =
+	{
+		{"e07", "210",   "000", "00038807",  "00664579",  "00058980"},
+		{"e14", "19",    "080", "14385672",  "78519928",  "14446361"},
+		{"e08", "210",   "000", "00291400",  "05761455",  "00440312"},
+		{"e09", "2310",  "000", "02274205",  "50847534",  "03424506"},
+		{"e10", "30030", "000", "18200488",  "455052511", "27412679"},
+		{"e11", "30030", "100", "15059883",  "71518765",  "15114393"},
+		{"e12", "17",    "200", "16756829",  "81689179",  "16801492"},
+		{"e13", "17",    "060", "14200452",  "75326388",  "14236925"},
+		{"e15", "19",    "060", "14693072",  "90213054",  "14892236"}
+	};
+
+	Config.CpuL2Size = 1 << 10;
+	Config.PrintGap = 0;
+	SET_FLAG(PRINT_TIME);
+
+	for (int i = 0; i < sizeof(gtpdata) / sizeof(gtpdata[0]); i++) {
+		uint64 n = atoint64(gtpdata[i][0], 0);
+		int psize = atoi(gtpdata[i][2]);
+		for (int j = 0; j < 3; j ++) {
+			KData.Wheel = atoi(gtpdata[i][0 + 1]);
+			Config.Gptk = j;
+			if (atoi(gtpdata[i][j + 3]) != Ktprime(n, psize)) {
+				printf("%s : %s fail !!!\n", gtpdata[i][0], gtpdata[i][j + 3]);
+			}
+		}
+		putchar('\n');
+	}
+}
+
+//test pi, pi2, gp function
+static void testPik( )
 {
 	const char* const pidata[][5] =
 	{
@@ -2608,7 +3005,7 @@ static void testPik()
 		for (int j = 1; j < sizeof(pidata[i])/sizeof(pidata[i][0]); j ++) {
 			uint64 n = atoint64(pidata[i][j], 100);
 			uint64 r = atoint64(pidata[i][j] + 3, 0);
-			if (r != ktprime(0, n, 0)) {
+			if (r != Ktprime(n, 0)) {
 				printf("%s != %lld fail\n", pidata[i][j], r);
 			}
 		}
@@ -2617,7 +3014,7 @@ static void testPik()
 }
 
 //test pi2 function
-static void testPi2()
+static void testPi2( )
 {
 	//twin Cousin Sexty prime data from
 	//Formeln zur Berechnung der Anzahl
@@ -2647,7 +3044,7 @@ static void testPi2()
 
 	Config.PrintGap = 0;
 	CLR_FLAG(PRINT_TIME);
-	Config.Ptk = PI2N;
+	Config.Gptk = PI2N;
 
 	for (int i = 0; i < sizeof(pi2data) / sizeof(pi2data[0]); i++) {
 		const char* pdata = pi2data[i];
@@ -2662,7 +3059,7 @@ static void testPi2()
 				pdata++;
 
 			uint64 ret = atoint64(pdata, 0);
-			uint64 cal = ktprime(0, n, 0);
+			uint64 cal = Ktprime(n, 0);
 			if (cal != ret) {
 				printf("error: PI2_%d(%lld), cal = %lld, table ret = %lld\n",
 						Config.Kgap, n, cal, ret);
@@ -2728,13 +3125,12 @@ static int getCpuInfo()
 	} else {
 		Config.CpuL1Size = 32 << 13;
 	}
+//	Config.CpuL2Size = cpuinfo[2] >> 16;
 
-//	Config.CpuL2Size = 256 << 13;
-
-	return cpuinfo[2] >> 16;
+	return cpuinfo[2] >> 16 ;
 }
 
-static int getSystemInfo()
+static int getSystemInfo( )
 {
 #ifdef _WIN32
 	SYSTEM_INFO si;
@@ -2755,16 +3151,17 @@ static int getSystemInfo()
 	return Config.Threads;
 }
 
-//print the Ptk info
-static void printInfo()
+//print the Gptk info
+static void printInfo( )
 {
 	puts("---------------------------------------------------------------");
 	puts("---------------------------------------------------------------");
 
 	printf("\
-	1.%s %s PI(n)\n \
-	2.Twin/Cousin/Sexy/p, p+2n/ prime pairs PI2(n)\n \
-	3.Ktuplet prime PIk(n)\n (n < %s) version %s\n",
+	1.%s G(n)\n \
+	2.%s PI(n)\n \
+	3.Twin/Cousin/Sexy/p, p+2n/ prime pairs PI2(n)\n \
+	4.Ktuplet prime PIk(n)\n (n < %s) version %s\n",
 	KtupletName[0], KtupletName[1], MAXN, KVERSION);
 
 	puts("Copyright (c) by Huang Yuanbing 2008 - 2013 bailuzhou@163.com");
@@ -2772,7 +3169,8 @@ static void printInfo()
 #ifdef _MSC_VER
 	printf("Compiled by MS/vc++ %d", _MSC_VER);
 #else
-	printf("Compiled by g++ %d.%d.%d", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+	printf("Compiled by Mingw g++ %d.%d.%d",
+			__GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
 #endif
 
 #if _M_AMD64 || __x86_64__
@@ -2783,7 +3181,7 @@ static void printInfo()
 	getSystemInfo();
 	getCpuInfo();
 
-	printf("Work threads = %d, POPCNT = %d, ASM_X86 = %d\n",
+	printf("Work threads = %d, POPCNT = %d, ASM_X86 = %d\n", \
 			Config.Threads, POPCNT, ASM_X86);
 	printf("L1 Size = %d k, OPT_L1CACHE = %d, BIT BSHIFT = %d\n",
 			 Config.CpuL1Size >> 13, OPT_L1CACHE, BSHIFT);
@@ -2811,39 +3209,37 @@ static bool setKpattern(const char* pstr)
 			}
 			KData.Kpattern[j] = dig;
 		}
-		KData.Kpattern[0] = ns - 1;
+		KData.Kpattern[0] = ns;
 		KData.Kpattern[ns] = 0;
 		return true;
 	}
 
-	for (int j = 2, k = 1; pstr[j]; j++) {
+	for (int j = 2, k = 2; pstr[j]; j++) {
 		char dig = pstr[j] - '0';
 		if (dig <= 0 || dig > 9) {
 			continue;
 		}
-		int kdata = 0;
 		if (dig % 2 == 0 && j < 8) {
-			kdata = dig;
+			KData.Kpattern[k - 1] = dig;
 		} else {
-			kdata = dig * 10 + pstr[++j] - '0';
+			KData.Kpattern[k - 1] = dig * 10 + pstr[++j] - '0';
 		}
-		assert(kdata % 2 == 0);
+		assert(KData.Kpattern[k - 1] % 2 == 0);
 		if (CHECK_FLAG(PRINT_LOG)) {
-			printf("%d\n", kdata);
+			printf("%d\n", KData.Kpattern[k - 1] );
 		}
-		KData.Kpattern[k] = kdata;
 		KData.Kpattern[0] = k++;
 	}
 
 	return true;
 }
 
-static void printKpattern()
+static void printKpattern( )
 {
 	Config.Kgap = KData.Kpattern[1];
-	Config.Ptk = KData.Kpattern[0];
+	Config.Gptk = KData.Kpattern[0];
 
-	int ktuplets = Config.Ptk;
+	int ktuplets = KData.Kpattern[0];
 	if (ktuplets < PIKN) {
 		puts(KtupletName[ktuplets]);
 	} else {
@@ -2855,9 +3251,6 @@ static void printKpattern()
 		for (int i = 1; i < ktuplets; i++) {
 			int kp = KData.Kpattern[i];
 			printf(", p + %d", kp);
-			if (kp % 2 != 0 || (i > 1 && kp <= KData.Kpattern[i - 1])) {
-				printf(" : invalid pattern[%d] %d\n", i, kp);
-			}
 		}
 		putchar('\n');
 	}
@@ -2874,7 +3267,7 @@ static void doCompile()
 	}
 
 	const char* const cxxflag =
-#ifdef _MSC_VER
+#if _MSC_VER
 		"cl /O2 /Oi /Ot /Oy /GT /GL %s %s";
 #else
 		"g++ -mpopcnt -mtune=native -O3 -s -pipe -fomit-frame-pointer -lpthread %s -o %s";
@@ -2911,10 +3304,10 @@ static int parseCmd(char cmdparams[][80])
 			case 'P':
 			case 'S':
 			case 'R':
-				Config.Flag ^= (1 << (c - 'A'));
+				Config.Flag ^= (1 << c - 'A');
 				break;
 			case 'C':
-				if (tmp <= (MAX_L1SIZE >> 13) && tmp > 15) {
+				if (tmp <= MAX_L1SIZE && tmp > 15) {
 					Config.CpuL1Size = tmp << 13;
 				} else if (tmp < 4000) {
 					Config.CpuL2Size = tmp;
@@ -2944,11 +3337,6 @@ static int parseCmd(char cmdparams[][80])
 					Config.PrintGap >>= 1;
 				}
 				break;
-			case 'H':
-				puts(HelpConfig);
-				puts(HelpCmd);
-				puts(HelpUse);
-				break;
 			default:
 				cmdi = i;
 				break;
@@ -2959,7 +3347,7 @@ static int parseCmd(char cmdparams[][80])
 }
 
 //split cmd to cmdparams[] by white space and ';'
-static int splitCmd(const char* ccmd, char cmdparams[][80])
+static int splitCmdParams(const char* ccmd, char cmdparams[][80])
 {
 	int ncmds = 0;
 
@@ -2998,7 +3386,7 @@ static bool excuteCmd(const char* cmd)
 		char* pcmd = (char*) strchr(cmd, ';');
 		char cmdparams[8][80] = {0};
 
-		if (splitCmd(cmd, cmdparams) <= 0) {
+		if (splitCmdParams(cmd, cmdparams) <= 0) {
 			return false;
 		}
 
@@ -3023,31 +3411,57 @@ static bool excuteCmd(const char* cmd)
 			benchMark(cmdparams);
 		} else if (cmdc == 'U') {
 			if (cmdparams[cmdi + 1][0] == 0) {
-				testPi2();
-				testPik();
+				testPi2( );
+				testGpt( );
+				testPik( );
 			}
 			for (int i = 0; cmdparams[cmdi + 2][i]; i++) {
-				Config.Ptk = cmdparams[cmdi + 2][i] - '0';
+				Config.Gptk = cmdparams[cmdi + 2][i] - '0';
 				bool rwflag = true;
-				if (Config.Ptk < 3 && Config.Ptk >= 0) {
+				if (Config.Gptk < 4 && Config.Gptk >= 0) {
 					startTest(atoint64(cmdparams[cmdi + 1]), rwflag);
 				}
 			}
+		} else if (cmdc == 'O') {
+			puts("------start optimize threads -----------");
+			uint64 n = atoint64(cmdparams[cmdi + 1], 2000000000);
+			int count = atoint64(cmdparams[cmdi + 2], MAX_THREADS / 4);
+			benchMarkByThreads(n, count);
 		} else if (cmdc == 'L') {
-			puts("-----start list PI2(n)/PI(n) ------");
+			puts("-----start list G(n)/PI2(n)/PI(n) ------");
 			listDiffGpt(cmdparams, cmdi);
 		} else if (cmdc == 'I') {
-			puts("-------list pow PI2(n)/PI(n) ------");
+			puts("-------list pow G(n)/PI2(n)/PI(n) ------");
 			listPowGpt(cmdparams, cmdi);
 		} else if (cmdc == 'N') {
+			puts("---------start list patterns -----------");
 			uint64 n = atoint64(cmdparams[cmdi + 1], 1000000000);
-			initParam(0, n);
-			printf("patterns %lld = %d\n", n, KData.Patterns);
+			int count = atoint64(cmdparams[cmdi + 2], 100);
+			for (int i = 0; i < 2 * count; i += 2) {
+				initParam(n + i);
+				printf("patterns %lld = %d\n", n + i, KData.Patterns);
+				if (KData.Patterns > sizeof(Pattern)) {
+					puts("error : patterns size is small");
+				}
+			}
 			KData.Wheel = 0;
 		} else if (cmdc == 'E' || isdigit(cmdc)) {
+			puts("---------start G(n)/PI2(n)/PI(n) -------");
 			uint64 n = atoint64(cmdparams[cmdi], 1000000000);
-			int pattern = atoint64(cmdparams[cmdi + 1], 0);
-			ktprime(0, n, pattern);
+			bool retry = true;
+			for (int i = 0; cmdparams[cmdi + 1][i]; i++) {
+				Config.Gptk = cmdparams[cmdi + 1][i] - '0';
+				if (Config.Gptk < 4 && Config.Gptk >= 0) {
+					int pattern = atoint64(cmdparams[cmdi + 2], 0);
+					Ktprime(n, pattern);
+					retry = false;
+				} else {
+					Config.Gptk = GP0N;
+				}
+			}
+			if (retry) {
+				Ktprime(n, 0);
+			}
 		} else if (cmdc == 'Q') {
 			return false;
 		}
@@ -3063,36 +3477,47 @@ static bool excuteCmd(const char* cmd)
 }
 
 //
-static void initCache()
+static void initCache( )
 {
-	initBitTable();
+	double ts = getTime( );
+
 	simpleEratoSieve(10000);
-	getSystemInfo();
-	getCpuInfo();
+
+	initBitTable( );
+
+	KData.N = atoint64("e12", 0);
+	const int sqrtn = (int)sqrt((double)KData.N) + 1001;
+	int primes = getPrime(sqrtn, Prime);
+
+	if (CHECK_FLAG(PRINT_LOG)) {
+		printf("init Pi(%d) = %d, table use %.2lf ms\n",
+				sqrtn, primes, getTime( ) - ts);
+	}
 }
 
 int main(int argc, char* argv[])
 {
-	initCache();
-
 	if (argc < 2) {
-		printInfo();
+		printInfo( );
 	}
 
+	initCache( );
+
 	for (int i = 1; i < argc; i++) {
-		if (argv[i][0] == 'm')
+		if (argv[i][0] == 'c')
+			loadConfig("Kconfig.ini");
+		else if (argv[i][0] == 'm')
 			doCompile();
 		else
 			excuteCmd(argv[i]);
 	}
 
-	excuteCmd("k1 e10");
-	ktprime(1e15, 1e15+1e9, 0);
-//	excuteCmd("k21 e10");
+	excuteCmd("1e10 01");
+//	excuteCmd("d 1e15 0 t4");
 
 	char ccmd[256] = {0};
 	while (true) {
-		printf("\n>> ");
+		printf("\n[input command] : ");
 		if (!gets(ccmd) || !excuteCmd(ccmd))
 			break;
 	}
@@ -3131,17 +3556,33 @@ BLOCKSIZE  PI        PI2       PI3      PI4      PI5     PI6     PI7     PI8
 ********************************************************************************
 
 PI(1e13) = 346065536839, time use 1681.128 s
+G(1e14) = 90350630388, gcc 4.6.1 0510 -march=native -O2 time use 6481.020 s AMD X4 820
+G(1e15) = 783538341852, time use 44.17h -->32h -->24
+
+  n     G(10^n)      PI2(10^n)
+  7     38807        664579
+  8     291400       5761455
+  9     2274205      3424506
+  10    18200488     27412679
+  11    149091160    224376048
+  12    1243722370   1870585220
+  13    10533150855  15834664872
+  14    90350630388  135780321665
+  15    783538341852
+  16
 
 feature:
+  12. calculate range [e16, e16+ e9] !!!!
+  13. Goldbach partitions split from the code
   14. win32 gui
   15. remove unused marco
 
 Linux g++:
-  g++ -Wall -msse4 -O3 -march=native -s -pipe -ffunction-sections -fomit-frame-pointer -lpthread ktprime.cpp
+  g++ -Wall -msse4 -O3 -march=native -s -pipe -ffunction-sections -fomit-frame-pointer -lpthread Ktprime.cpp
 Mingw/g++:
-  g++ -Wall -mpopcnt -mtune=native -O2 -s -pipe -fomit-frame-pointer ktprime.cpp
+  g++ -Wall -mpopcnt -mtune=native -O2 -s -pipe -fomit-frame-pointer Ktprime.cpp
 MS vc++:
-  cl /O2 /Os ktprime.cpp
+  cl /O2 /Os Ktprime.cpp
 
 command:
 	D t2 C2000 M5 e15
@@ -3149,3 +3590,4 @@ command:
 c1600 m5 d t4 e15 0 1000
 need 28h amd phoenm x4 830
  ****************************************************/
+
