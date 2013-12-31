@@ -1,8 +1,4 @@
 /************************************************************
-copyright (C) 2009 - 2013 by Huang Yuanbing
-mail : bailuzhou@163.com
-free use for non-commercial purposes
-
 	this programming is the most fast algorithm for count
 goldbach partition, performance and throughput improvement by minimizing cache conflicts and misses
 in the last level caches of multi-cores processors.
@@ -21,27 +17,20 @@ http://numbers.computation.free.fr/Constants/Primes/twin.html.
 # include <math.h>
 # include <assert.h>
 
-# define KVERSION       "2.0"
+# define GVERSION       "2.1"
 # define MAXN           "1e16"
 # define MINN           10000000
 
 # define MAX_L1SIZE     (64 << 13)
-# define MAX_L2SIZE     (256 << 13)
-# define SEGMENT_SIZE   (510510 * 19 * 1)
+# define SEGMENT_SIZE   (510510 * 19)
 # define MAX_THREADS    32
 
 //SSE4a popcnt instruction, make sure cpu support it
 #if _MSC_VER > 1400
 	# define POPCNT      1
 	# include <intrin.h>
-
-//	# pragma warning(disable: 4996 4244 4127 4505 4018)
-	#if _MSC_VER > 1200
-	# pragma warning (disable:6328 6031)
-	#endif
-
 #elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44)
-	# define POPCNT      0
+	# define POPCNT      1
 	# include <popcntintrin.h>
 #else
 	# define POPCNT      0
@@ -49,7 +38,6 @@ http://numbers.computation.free.fr/Constants/Primes/twin.html.
 
 //#pragma pack (16)
 
-# define OMP             0
 # if OMP
 	#include <omp.h>
 # endif
@@ -57,9 +45,9 @@ http://numbers.computation.free.fr/Constants/Primes/twin.html.
 # define FAST_CROSS      0
 # define OPT_L1CACHE     1
 # define OPT_L2CACHE     1
-# define PRIME_DIFF      0
+# define PRIME_DIFF      1
 # define TREE2           0
-# define OPT_L1_SIEVE    1
+# define OPT_SEG_SIEVE   1
 
 #if _MSC_VER && _M_AMD64
 # define NO_ASM_X86      1
@@ -180,6 +168,9 @@ static ptype* Pattern = NULL;//[99532800 + 10];
 static utype CrossedTpl[(SEGMENT_SIZE >> (BSHIFT + 1)) + 100];
 #endif
 
+//bit 1 left most table
+static uchar LeftMostBit1[1 << 16];
+
 //number of bits 1 binary representation table
 #if POPCNT == 0 && TREE2 == 0
 static uchar WordNumBit1[1 << 16];
@@ -273,7 +264,7 @@ static void devideTaskData(int threads, int pbegi, int pendi)
 static uint64 startWorkThread(int threads, int pbegi, int pendi)
 {
 	int i;
-	assert(pendi >= pbegi && pbegi >= 0);
+	//assert(pendi >= pbegi && pbegi >= 0);
 	if (threads > MAX_THREADS) {
 		threads = 4;
 	}
@@ -283,13 +274,7 @@ static uint64 startWorkThread(int threads, int pbegi, int pendi)
 	HANDLE thandle[MAX_THREADS];
 	DWORD tid[MAX_THREADS];
 	for (i = 0; i < threads; i++) {
-		thandle[i] = CreateThread(NULL, 0, threadProc,
-			(LPVOID)(&TData[i]), 0, &tid[i]);
-//		Sleep(1);
-
-		if (thandle[i] == NULL) {
-			printf("create win32 thread error %ld\n", GetLastError( ));
-		}
+		thandle[i] = CreateThread(NULL, 0, threadProc, (LPVOID)(&TData[i]), 0, &tid[i]);
 	}
 	for (i = 0; i < threads; i++) {
 		WaitForSingleObject(thandle[i], INFINITE);
@@ -298,10 +283,7 @@ static uint64 startWorkThread(int threads, int pbegi, int pendi)
 #else
 	pthread_t tid[MAX_THREADS];
 	for (i = 0; i < threads; i++) {
-		int error = pthread_create(&tid[i], NULL, threadProc, &TData[i]);
-		if (error != 0) {
-			printf("create posix thread error %d\n", error);
-		}
+		pthread_create(&tid[i], NULL, threadProc, &TData[i]);
 	}
 	for (i = 0; i < threads; i++) {
 		pthread_join(tid[i], NULL);
@@ -317,7 +299,7 @@ static uint64 startWorkThread(int threads, int pbegi, int pendi)
 }
 
 //us
-static double getTime( )
+static double getTime()
 {
 #ifdef WIN32
 	LARGE_INTEGER s_freq;
@@ -372,19 +354,14 @@ static int extendedEuclidean(int a, int b, int &y)
 	return x;
 }
 
-static uint64 ipow(uint64 x, uint n)
+static uint64 ipow(const uint x, uint n)
 {
-	uint64 result = 1;
-	while (n != 0) {
-		if (n & 1) {
-			result *= x;
-			n -= 1;
-		}
-		x *= x;
-		n >>= 1;
+	uint64 pown = 1;
+	while (n --) {
+		pown *= x;
 	}
 
-	return result;
+	return pown;
 }
 
 static int ilog10(uint64 n)
@@ -447,7 +424,7 @@ static uint64 atoint64(const char* str, uint64 defaultn = 0)
 //the last Qword(64 bit integer) which the leng poisition is filled with bit 1
 static void packQwordBit1(utype* bitarray, const int leng)
 {
-	uint64* mem= (uint64*)bitarray + leng / 64;
+	uint64* mem = (uint64*)bitarray + leng / 64;
 	mem[0] |= ~(((uint64)1 << (leng % 64)) - 1);
 	mem[1] = (uint64)(~0);
 }
@@ -531,14 +508,14 @@ static void crossOutFactor(utype bitarray[], const uint64 start, const int leng,
 	}
 
 	if (s1 > leng)
-		return ;
+		return;
 
 	const int bits = leng >> 1;
 	if (factor < 7) {
 		for (s1 >>= 1; s1 <= bits; s1 += factor) {
 			SET_BIT(bitarray, s1);
 		}
-		return ;
+		return;
 	}
 
 #if 1
@@ -863,12 +840,11 @@ static int simpleEratoSieve(const uint sqrtn)
 static void initBitTable( )
 {
 	//1. init WordNumBit1 table in 0-2^16, can use popcnt replace it
-	int i, nsize;
+	int i;
 
 #if 0 == POPCNT && 0 == TREE2
-	nsize = sizeof(WordNumBit1) / sizeof(WordNumBit1[0]);
 	WordNumBit1[0] = 0;
-	for (i = 1; i < nsize; i++) {
+	for (i = 1; i < sizeof(WordNumBit1) / sizeof(WordNumBit1[0]); i++) {
 		WordNumBit1[i] = WordNumBit1[i >> 1] + (i & 1);
 	}
 #endif
@@ -881,10 +857,16 @@ static void initBitTable( )
 		bytereverse[i] = reverseByte((uchar)i);
 	}
 	//reverse bit order of short(with 16 bit) in [0, 2^16)
-	for (i = 1; i < (1 << 16); i++) {
+	for (i = 1; i < sizeof(WordReverse) / sizeof(WordReverse[0]); i++) {
 		WordReverse[i] = bytereverse[i >> 8] | (bytereverse[i & 255] << 8);
 	}
 #endif
+
+	//4. init LeftMostBit1 table
+	for (int m = 2; m < sizeof(LeftMostBit1) / sizeof(LeftMostBit1[0]); m += 2) {
+		LeftMostBit1[m + 0] = LeftMostBit1[m >> 1] + 1;
+		LeftMostBit1[m + 1] = 0;
+	}
 
 #if FAST_CROSS
 	//3. init CrossedTpl table, pre sieve the factor in array sievefactor
@@ -984,7 +966,7 @@ static uint64 sieveGpL1(utype bitarray[], const int pattern1, const int pattern2
 
 	for (; p <= minp; PRIME_NEXT(p, k)) {
 		const int moudle = Moudle[k];
-#if OPT_L1_SIEVE
+#if OPT_SEG_SIEVE
 		int s1 = asmMulDiv(moudle, pattern1, p);
 		//assert(s1 * wheel + pattern1 % p == 0)
 		int s2 = leng - asmMulDivSub(moudle, pattern2, p, leng);
@@ -1000,7 +982,7 @@ static uint64 sieveGpL1(utype bitarray[], const int pattern1, const int pattern2
 		spos[k] = ((uint64)s2 << 32) | s1;
 	}
 
-#if OPT_L1_SIEVE
+#if OPT_SEG_SIEVE
 	for (int start = 0; start < leng; start += sleng) {
 		if (start + sleng > leng) {
 			sleng = leng - start;
@@ -1014,7 +996,7 @@ static uint64 sieveGpL1(utype bitarray[], const int pattern1, const int pattern2
 		//40%
 		for (; p <= minp; PRIME_NEXT(p, k)) {
 			utype* pstart = bitarray + (start >> BSHIFT);
-#if	OPT_L1_SIEVE
+#if OPT_SEG_SIEVE
 			set2BitArray(pstart, spos[k], p, sleng);
 #else
 			set3BitArray(pstart, spos[k], -p, sleng);
@@ -1061,7 +1043,8 @@ static int sieveGp(utype bitarray[], const int pattern1)
 		int s2 = leng - asmMulDivSub(moudle, pattern2, p, leng);
 		if (s2 < 0)
 			s2 += p;
-		set2BitArray(bitarray, ((uint64)s1 << 32) | s2, p, leng);
+		uint64 start = ((uint64)s1 << 32) | s2;
+		set2BitArray(bitarray, start, p, leng);
 #endif
 	}
 
@@ -1137,7 +1120,7 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 	}
 
 	int tid = ++stid;
-
+	
 	double tstart = getTime( );
 
 	const int sieve_byte = (int)(Gp.N / Gp.Wheel / 8) + 1;
@@ -1156,9 +1139,8 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 	uint64 gpn = 0;
 
 	for (int pcuri = pbegi; pcuri < pendi; pcuri++) {
-
 		pnext = getNextPattern(pattern, pnext);
-#if 1
+#ifdef CHECK_PATTERNS
 		if (CHECK_FLAG(CHECK_PATTERN)) {
 			if (gcd(Gp.Wheel, pattern) != 1)
 				printf("error pattern = %d\n", pattern);
@@ -1174,7 +1156,7 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 #else
 		scnt++;
 #endif
-		if ((scnt & Config.PrintGap) == Config.PrintGap - 1) {
+		if ((scnt & Config.PrintGap) == 7) {
 			printProgress(tid, getTime() - tstart, (int)(gpn / (1 + pcuri - pbegi)), scnt);
 		}
 	}
@@ -1182,7 +1164,7 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 	free(bitarray);
 
 	if (CHECK_FLAG(PRINT_LOG)) {
-//		printf("thread %d: pattern[%3d - %3d] = %lld\n", tid, pbegi, pendi, gpn);
+		printf("thread %d: pattern[%3d - %3d] = %lld\n", tid, pbegi, pendi, gpn);
 	}
 
 	return gpn;
@@ -1365,8 +1347,9 @@ static int getPartition(const uint64 n, int maxn)
 	omp_set_num_threads(Config.Threads);
 	#pragma omp parallel for if (n >= MINN * 3)
 #endif
-	for (int start = 0, sleng = SEGMENT_SIZE; start < maxn; start += sleng) {
+	for (int start = 0; start < maxn; start += SEGMENT_SIZE) {
 		utype bitarray[(SEGMENT_SIZE >> (BSHIFT + 1)) + 100];
+		int sleng = SEGMENT_SIZE;
 		if (sleng >= maxn - start) {
 			sleng = maxn - start;
 		}
@@ -1529,7 +1512,7 @@ static int loadTask(struct Task &curtask)
 //
 static uint64 getGp(const uint64 n, int pn)
 {
-	assert(n < atoint64(MAXN) + 1000 && n % 2 == 0);
+	assert(n % 2 == 0);
 
 	if (n >= MINN) {
 		double ts = getTime( );
@@ -1770,7 +1753,7 @@ static void listPowGp(const char params[][80], int cmdi)
 	for (uint64 i = startindex; i <= endindex; i++) {
 		uint64 n = ipow(m, i);
 		uint64 r = getGp(n, 0);
-		printf(PrintFormat, m, i, r);
+		printf(PrintFormat, i, r);
 		putchar('\n');
 	}
 	SET_FLAG(PRINT_RET);
@@ -1945,8 +1928,8 @@ static void printInfo( )
 	puts(sepator);
 	puts(sepator);
 
-	printf("Goldbach partition (n < %s) version %s\n", MAXN, KVERSION);
-	puts("Copyright (c) by Huang Yuanbing 2008 - 2013 bailuzhou@163.com");
+	printf("Goldbach partition (n < %s) version %s\n", MAXN, GVERSION);
+	puts("Copyright (c) by Huang Yuanbing 2008 - 2014 bailuzhou@163.com");
 
 #ifdef _MSC_VER
 	printf("Compiled by MS/vc++ %d", _MSC_VER);
@@ -2161,7 +2144,7 @@ int main(int argc, char* argv[])
 	}
 
 	excuteCmd("1e10;1e11");
-//	excuteCmd("t1 d m7 1e14 200; e15 100");
+	excuteCmd("t1 d m7 1e14 200; e15 100");
 //	excuteCmd("d m7 1e15");
 
 	char ccmd[256] = {0};
