@@ -1,6 +1,4 @@
 /******************************************************************
-copyright (C) 2009 - 2013 by Huang Yuan bing
-mail to: bailuzhou@163.com
 free use for non-commercial purposes
 
 G[10^9] to G[10^9 + 2e4]
@@ -55,16 +53,16 @@ http://graphics.stanford.edu/~seander/bithacks.html
 # define OMP             0
 
 # define SSE2            0
-# define BIT_SCANF       1
-# define PRIME_DIFF      1
+# define BIT_SCANF       0
+# define PRIME_DIFF      0
 
 //use of the SSE4.2/ SSE4a POPCNT instruction for fast bit counting.
 #if _MSC_VER > 1300
 	# define POPCNT      1
 	# include <intrin.h>
 #elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44)
-	# define POPCNT      1
-	# include <popcntintrin.h>
+	# define POPCNT      0
+	//# include <popcntintrin.h>
 	//# include <immintrin.h>
 #else
 	# define POPCNT      0
@@ -110,15 +108,13 @@ typedef unsigned int uint;
 #endif
 
 //intel 4, amd 3
-# define BSHIFT 5
+# define BSHIFT 4
 # if BSHIFT == 3
 	typedef uchar utype;
 # elif BSHIFT == 4
 	typedef ushort utype;
 # elif BSHIFT == 5
 	typedef uint utype;
-# elif BSHIFT == 6
-	typedef uint64 utype;
 # endif
 
 #if __x86_64__ || _M_AMD64 || __amd64__
@@ -746,8 +742,6 @@ inline static int countBit1(uint64 n)
 	#else
 	return _mm_popcnt_u32(n) + _mm_popcnt_u32(n >> 32);
 	#endif
-#elif __GNUC__
-	return __builtin_popcountll(n);
 #elif 1
 	uint hig = n >> 32, low = (uint)n;
 	return WordNumBit1[(ushort)low] + WordNumBit1[low >> 16] +
@@ -822,17 +816,16 @@ static uint countBit0ArrayOr64(const uint64* data1, const uint64* data2, const i
 	const uint64 h01 = 0x0101010101010101;
 
 	uint bitCount = 0;
-	uint64 count1, count2, half1, acc;
 	const uint size = bitleng >> 6;
 	const uint limit30 = size - size % 30;
 
 	// 64-bit tree merging (merging3)
 	for (int i = 0; i < limit30; i += 30) {
-		acc = 0;
+		uint64 acc = 0;
 		for (uint j = 0; j < 10; j ++) {
-			count1  =  *data1++ | *data2++;
-			count2  =  *data1++ | *data2++;
-			half1   =  *data1++ | *data2++;
+			uint64 count1  =  *data1++ | *data2++;
+			uint64 count2  =  *data1++ | *data2++;
+			uint64 half1   =  *data1++ | *data2++;
 			count1 -= (count1 >> 1) & m1;
 			count2 -= (count2 >> 1) & m1;
 			count1 +=  half1 & m1;
@@ -980,7 +973,7 @@ inline static int countBit0ArrayOr(const uchar bitarray1[], const uchar bitarray
 	return countBit0ArrayOrAvx2(bitarray1, bitarray2, bitleng);
 #elif SSE2
 	return countBit0ArrayOrSSE2(bitarray1, bitarray2, bitleng);
-#elif POPCNT || __GNUC__
+#elif POPCNT
 	return countBit0ArrayOrPopcnt((uint64*)bitarray1, (uint64*)bitarray2, bitleng);
 #elif X86_64
 	return countBit0ArrayOr64((uint64*)bitarray1, (uint64*)bitarray2, bitleng);
@@ -1397,7 +1390,7 @@ inline static void
 sieveGp(uchar bitarray[], const uchar* pend, const uint p, uint offset, uint multiples)
 {
 	uint mask0 = 0;
-#if	1
+#if 1
 	uchar* ps0 = NULL;
 	for (int m = 0; m < 8; m++) {
 		const uchar wordmask = 1 << WheelIndex[offset % WHEEL];
@@ -1481,8 +1474,8 @@ sieveSmall2(uchar dstarray[][BUFFER_SIZE8], const uint sleng, const uint p, uint
 inline static void
 sieveSmall3(uchar dstarray[][BUFFER_SIZE8], const uint sleng, const uint p, uint offset, uint multiples)
 {
+	const uint mapi = WheelIndex[offset % WHEEL];
 	for (int k = 0; k < 8; k++) {
-		uint mapi = WheelIndex[offset % WHEEL];
 		if (Config.GpMask & (1 << mapi)) {
 			utype* ps = (utype*)dstarray[mapi];
 			for (uint s = offset / WHEEL; s < sleng; s += p) {
@@ -1861,8 +1854,8 @@ static int startTestGp(const int checkloops, int gpcount)
 			continue;
 		}
 
-		setSieveSize(rand() % 40 + 24);
-		Config.Algorithm = rand() % 3 + 1;
+		setSieveSize(rand() % 64 + 32);
+		Config.Algorithm = rand() % 2 + 2;
 		Config.Threads = rand() % 4 + 1;
 
 		getGp2(minn, gcount2, GP);
@@ -2092,17 +2085,17 @@ static int segmentedGp02(const uint64 start1, const uint64 start2, uint sievesiz
 	for (int i = byteleng2 - 1, j = 0; i >= 0; j += 2) {
 		const uint gmask = *(uint*)(bitarray2 + (i -= 2));
 		*(ushort*)(bitarray1 + j) |=
-			(PatternMask[(ushort)(gmask >> CHAR_BIT)]) |
-			(PatternMask[(ushort)gmask] << CHAR_BIT);
+			(PatternMask[(ushort)(gmask >> CHAR_BIT)] | PatternMask[(ushort)gmask] << CHAR_BIT);
 	}
 
+	//add small prime 3 and 5
 	if (start1 == 0) {
-		//add small prime 3 and 5
 		gps = addOneGp35(start2 + sievesize - 4);
 	}
 
 	if (Config.PrintGppair) {
-		gps += savePrime(start1, byteleng1 / 2, (ushort*)bitarray1, NULL);
+		gps += dumpGp(start1, sievesize >> 5, (ushort*)bitarray1);
+		//gps += savePrime(start1, byteleng1 / 2, (ushort*)bitarray1, NULL);
 	} else {
 		gps += countBit0Array((uint64*)bitarray1, byteleng1 * CHAR_BIT);
 	}
@@ -2304,7 +2297,7 @@ static void initPatternMask(const uint wheelmod)
 <------------------------------------------------------------------------------
 loop move gpcount bit
 **/
-static void getGp1(const uint64 minn, const uint gpcount, const uint gstep, uint64 gp[])
+static void getGp1(const uint64 minn, const uint gpcount, const uint gstep)
 {
 	if (Config.SaveResult) {
 		Config.PrintGap = 0;
@@ -2317,31 +2310,29 @@ static void getGp1(const uint64 minn, const uint gpcount, const uint gstep, uint
 	assert(minn >= 6 && minn % 2 == gstep % 2);
 
 	if (minn / Config.Maxp > Config.Maxp) {
-		eratoSieve(isqrt(minn) + MAX_GPCOUNT);
+		eratoSieve(isqrt(minn + gpcount * 2) + 10);
 	}
 
 	uint64 begin = minn;
 
 	for (int i = 0; i < gpcount; i++) {
-
 		const double ts = getTime();
 		const uint64 half = begin / 2;
 		uint64 sgp = 0;
 		int step = Config.SieveSize;
+		if (step > half) step = (int)half;
 		initPatternMask(begin % WHEEL);
 
-		if (step > half)
-			step = (int)half;
 #if (OMP)
 		omp_set_num_threads(Config.Threads);
 		#pragma omp parallel for reduction(+:sgp) \
 		schedule(dynamic) if (minn > 10000000)
 #endif
 		for (uint64 start = 0; start < half; start += step) {
-			if (start > half - step)
+			if (start + step > half)
 				step = half - start;
-			if ((start & Config.PrintGap) == 1)
-				printf("finish ... %02d%%\r", (int)(100 * start / half));
+//			if ((start & Config.PrintGap) == 1)
+//				printf("finish ... %02d%%\r", (int)(100 * start / half));
 			if (Config.Advanced)
 				sgp += segmentedGp02(start, begin - start - step, step + 1);
 			else
@@ -2350,13 +2341,10 @@ static void getGp1(const uint64 minn, const uint gpcount, const uint gstep, uint
 
 		if (Config.PrintRet) {
 			printf(GPFORMAT, begin, sgp);
-			if (Config.PrintTime && begin > 1000000)
-				printf(" time use %.3f sec", (getTime() - ts) / 1000);
-			putchar('\n');
+			if (Config.PrintTime)
+				printf("use %.3f sec\n", (getTime() - ts) / 1000);
 		}
 
-		if (gp && i < MAX_GPCOUNT)
-			gp[i] = sgp;
 		begin += gstep;
 	}
 
@@ -2371,7 +2359,6 @@ static void getGp1(const uint64 minn, const uint gpcount, const uint gstep, uint
 //thread proc
 static void coreSieve2(uint64 minn, const int gpcount, const uint64 first, uint64 gp[])
 {
-	const uint64 half = minn / 2;
 	const int gstep = Config.Threads * Config.SieveSize;
 	uint sievesize = Config.SieveSize;
 
@@ -2379,6 +2366,7 @@ static void coreSieve2(uint64 minn, const int gpcount, const uint64 first, uint6
 	if (minn > Maxn + 2 * MAX_GPCOUNT)
 		minn = Maxn;
 
+	const uint64 half = minn / 2;
 	memset(gp, 0, sizeof(gp[0]) * gpcount);
 	sieve_func func[] = {segmentedGp1, segmentedGp2, segmentedGp3};
 	sieve_func segmentedGp = func[Config.Algorithm - 1];
@@ -2402,8 +2390,9 @@ static void coreSieve2(uint64 minn, const int gpcount, const uint64 first, uint6
 		} else {
 			segmentedGp1(start, segment, sievesize + 1, gpcount, gp);
 		}
-#endif
+#else
 		segmentedGp(start, minn - start - sievesize, sievesize + 1, gpcount, gp);
+#endif
 	}
 
 	if (first == 0) {
@@ -2507,7 +2496,7 @@ static void printInfo( )
 {
 	puts("---------------------------------------------------------------");
 	printf("Count Multi Goldbach Partition in [6, 1e14], version %s\n", VERSION);
-	puts("Copyright @ by Huang Yuanbing 2011 - 2013 bailuzhou@163.com\n"
+	puts("Copyright @ by Huang Yuanbing 2011 - 2014 bailuzhou@163.com\n"
 	"Code:<https://github.com/ktprime/ktprime/blob/master/FastGn.cpp>\n"
 	"CXXFLAG:g++ -march=native -mpopcnt -funroll-loops -O3 -s -pipe");
 
@@ -2659,7 +2648,7 @@ static bool excuteCmd(const char* cmd)
 			uint64 minn = atoint64(cmdparams[cmdi + 1], 1000000000);
 			int gpcount = (int)atoint64(cmdparams[cmdi + 2], 10);
 			int step = (int)atoint64(cmdparams[cmdi + 3], 2);
-			getGp1(minn, gpcount, step, 0);
+			getGp1(minn, gpcount, step);
 		} else {
 			char d = cmdparams[cmdi][0];
 			if (isdigit(d) || toupper(d) == 'E') {
@@ -2707,7 +2696,9 @@ int main(int argc, char* argv[])
 		}
 	}
 
-	excuteCmd("t1 E9 1E3");
+	excuteCmd("t1 E9 1E2");
+//	excuteCmd("g2 E9 1");
+//	excuteCmd("g3 E9 1");
 
 	char ccmd[255] = {0};
 	while (true) {
@@ -2729,6 +2720,8 @@ e12  37607912018   1243722370
 e13  346065536839  10533150855
 e14  3204941750802 90350630388
 e15                783538341852
+ 
+http://dalkescientific.com/writings/diary/archive/2011/11/02/fast_popcount_update.html
 http://code.google.com/p/pcxprj/wiki/CompilerAndLinkerSwitchGuide
 -fprofile-generate
 -fprofile-use
