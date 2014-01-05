@@ -1,2 +1,38 @@
   the most fastest prime number sieving algorithm for n < 2^64,
 each file is a useful tool and it'is easy to be tested.
+
+MINGW: gcc 4.7.3
+CXXFLAG:g++ -march=native -funroll-loops -O3 -s -pipe
+Windows 7 x64,              AMD X4 641 2.8G / Intel i3 350M 2.26G
+pi(1e11, 1e11+1e10) = 394050419        4.68 / 5.25
+pi(1e12, 1e12+1e10) = 361840208        5.70 / 6.31
+pi(1e13, 1e13+1e10) = 334067230        7.13 / 7.66
+pi(1e14, 1e14+1e10) = 310208140        8.84 / 9.49
+pi(1e15, 1e15+1e10) = 289531946        10.52/11.41
+pi(1e16, 1e16+1e10) = 271425366        12.15/13.35
+pi(1e17, 1e17+1e10) = 255481287        14.28/15.58
+pi(1e18, 1e18+1e10) = 241272176        17.50/18.95
+pi(1e19, 1e19+1e10) = 228568014        24.20/25.60
+
+pi(1e18, 1e18+1e6) = 24280              1.16/0.72
+pi(1e18, 1e18+1e8) = 2414886            1.80/1.54
+pi(1e18, 1e18+1e9) = 24217085           3.81/3.80
+pi(1e18, 1e18+1e12)= 24127637783        1556/1640
+pi(1e16, 1e16+1e12)= 27143405794        1206/1310
+pi(1e14, 1e14+1e12)= 31016203073        880 /
+
+vc++
+	cl /O2 /Oi /Ot /Oy /GT /GL PrimeNumber.cpp
+gcc
+	amd:	g++ -march=native -O2 -ftree-vectorize -floop-parallelize-all -ftree-parallelize-loops=4 -funroll-loops -s -pipe PrimeNumber.cpp -o PrimeNumber
+	intel:	g++ -march=native -O3 -funroll-loops -s -pipe PrimeNumber.cpp -o PrimeNumber
+
+	CFLAGS="-O2 -march=native -fomit-frame-pointer -pipe -ftree-vectorize -floop-parallelize-all -ftree-parallelize-loops=4
+-flto"
+
+	-fprofile-use -flto -fprofile-generate
+doc:
+	http://www.ieeta.pt/~tos/software/prime_sieve.html
+	http://code.google.com/p/primesieve/wiki/Links
+	Cache optimized linear sieve
+***/
