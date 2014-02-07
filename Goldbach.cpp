@@ -42,7 +42,7 @@ http://numbers.computation.free.fr/Constants/Primes/twin.html.
 	#include <omp.h>
 # endif
 
-# define FAST_CROSS      0
+# define FAST_CROSS      1
 # define OPT_L1CACHE     1
 # define OPT_L2CACHE     1
 # define PRIME_DIFF      1
@@ -136,14 +136,14 @@ Patterns = %d\n\
 Tasks = %d\n\
 Pbegi = %d\n\
 Pendi = %d\n\
-N = %lld\n\
-Result = %lld";
+N = %llu\n\
+Result = %llu";
 
 static const char* const PrintFormat =
 #if _MSC_VER == 1200
 	"G(%I64d) = %I64d";
 #else
-	"G(%lld) = %lld";
+	"G(%llu) = %llu";
 #endif
 
 /************************************/
@@ -576,8 +576,7 @@ static void sieveWheelFactor(utype bitarray[], const uint64 start, const int len
 	for (int i = 2, p = 3; wheel % p == 0; PRIME_NEXT(p, i)) {
 		crossOutFactor(bitarray, start, leng, p);
 		if (start <= p) {
-			assert(start == 0);
-			SET_BIT(bitarray, p / 2);
+			SET_BIT(bitarray, (p - start) / 2);
 		}
 	}
 }
@@ -946,7 +945,7 @@ static int getGppattern(const uint64 n, const uint wheel, ptype pattern[])
 	}
 	gpn += getSegpattern(moudle + wheel, moudle, wheel, pattern);
 	if (pattern) {
-		pattern[-1] = 0;
+		*(pattern - 1) = 0;
 	}
 
 	return gpn;
@@ -1105,7 +1104,7 @@ static void printProgress(int tid, double time_use, int aves, int pcnt)
 		printf("%.2lf hour", totaltime / 3600);
 	}
 
-	printf(", goldbach partition ~= %lld\n", (uint64)aves * Gp.Patterns);
+	printf(", goldbach partition ~= %llu\n", (uint64)aves * Gp.Patterns);
 }
 
 //thread call: get result form pattern pbegi to pendi
@@ -1120,7 +1119,7 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 	}
 
 	int tid = ++stid;
-	
+
 	double tstart = getTime( );
 
 	const int sieve_byte = (int)(Gp.N / Gp.Wheel / 8) + 1;
@@ -1164,7 +1163,7 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 	free(bitarray);
 
 	if (CHECK_FLAG(PRINT_LOG)) {
-		printf("thread %d: pattern[%3d - %3d] = %lld\n", tid, pbegi, pendi, gpn);
+		printf("thread %d: pattern[%3d - %3d] = %llu\n", tid, pbegi, pendi, gpn);
 	}
 
 	return gpn;
@@ -1385,7 +1384,7 @@ static int getSmallGp(const uint64 n)
 	int ret = getPartition(n, leng);
 
 	if (CHECK_FLAG(PRINT_LOG)) {
-		printf("sieve small n = %lld, leng = %d", n, leng);
+		printf("sieve small n = %llu, leng = %d", n, leng);
 		printf("\nand small ret = %d, and time use %.lf ms\n", ret, getTime( ) - ts);
 	}
 
@@ -1582,7 +1581,7 @@ static void printResult(const uint64 n, uint64 gpn, double ts)
 {
 	int pow10 = ilog10(n);
 	if (n % ipow(10, pow10) == 0) {
-		printf("G(%de%d) = %lld", (int)(n / ipow(10, pow10)), pow10, gpn);
+		printf("G(%de%d) = %llu", (int)(n / ipow(10, pow10)), pow10, gpn);
 	} else {
 		printf(PrintFormat, n, gpn);
 	}
@@ -1657,7 +1656,7 @@ static int startTest(int tesecase, bool rwflag)
 
 			uint64 gpn = getGp(n, 0);
 			if (gpn != res) {
-				printf("case %d with wrong result %lld, ", i, gpn);
+				printf("case %d with wrong result %llu, ", i, gpn);
 				printf(PrintFormat, n, res);
 				putchar('\n');
 			}
@@ -1710,7 +1709,7 @@ static void listDiffGp(const char params[][80], int cmdi)
 		freopen("batch.txt", "wb", stdout);
 	}
 
-	printf("%lld:%d:%d\n\n", start, (int)(2 + end - start) / 2, step);
+	printf("%llu:%d:%d\n\n", start, (int)(2 + end - start) / 2, step);
 
 	int pcnt = 0;
 	uint64 allSum = 0;
@@ -1722,7 +1721,7 @@ static void listDiffGp(const char params[][80], int cmdi)
 		allSum += GPartiton(n, 0);
 	}
 
-	printf("average = %lld, ", allSum / pcnt);
+	printf("average = %llu, ", allSum / pcnt);
 
 	printf("all case time use %.lf ms\n", getTime( ) - ts);
 	freopen(CONSOLE, "w", stdout);
@@ -1767,7 +1766,7 @@ static void listPatterns(uint64 start, int count)
 	printf("wheel = %u\n", wheel);
 	for (int i = 0; i < count; i++) {
 		int patterns = getGppattern(start, wheel, 0);
-		printf("pattern(%lld) = %d\n", start, patterns);
+		printf("pattern(%llu) = %d\n", start, patterns);
 		start += 2;
 	}
 }
@@ -2143,8 +2142,8 @@ int main(int argc, char* argv[])
 			excuteCmd(argv[i]);
 	}
 
-	excuteCmd("1e10;1e11");
-	excuteCmd("t1 d m7 1e14 200; e15 100");
+	excuteCmd("1e10;1e8+112");
+//	excuteCmd("t1 d m7 1e14 200; e15 100");
 //	excuteCmd("d m7 1e15");
 
 	char ccmd[256] = {0};
