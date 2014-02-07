@@ -1,38 +1,3 @@
-/******************************************************************
-copyright (C) 2009 - 2013 by Huang Yuan bing
-mail to: bailuzhou@163.com
-free use for non-commercial purposes
-
-G[10^9] to G[10^9 + 2e4]
-
-2.00G AMD  K8 3600+ 20.0 seconds
-2.80G AMD  X4  820  5.25 seconds SSE4A x86
-2.80G AMD  X4  641  2.80 seconds SSE4A x64
-2.80G AMD  X4  641  5.05 seconds SSE4A x86
-
-3.00G Intel PD 930  19.0 seconds
-2.66G Intel I5 560M 8.30 seconds SSE4.2 x86
-2.26G Intel I3 350M 7.90 seconds SSE4.2 x86
-2.26G Intel I3 350M 5.80 seconds SSE4.2 x64
-
-G[10^9] to G[10^9 + 2e3]
-popcnt64 : 1620
-popcnt32 : 2063
-tree3    : 2600
-table16  : 3560
-
-Optimization for G(n)
-1. use wheel 30 segmented sieve algorithm
-2. X86 popcnt instruction
-3.
-
-New feature in plan:
-1. Optimization for large number
-
-http://graphics.stanford.edu/~seander/bithacks.html
-*******************************************************************
-*******************************************************************/
-
 # include <stdio.h>
 # include <memory.h>
 # include <stdlib.h>
@@ -361,8 +326,7 @@ typedef void (*sieve_func)(const uint64 , const uint64 , const uint , const int 
 static double getTime( )
 {
 #ifdef _WIN32
-	LARGE_INTEGER s_freq;
-	LARGE_INTEGER performanceCount;
+	LARGE_INTEGER s_freq, performanceCount;
 	QueryPerformanceFrequency(&s_freq);
 	QueryPerformanceCounter(&performanceCount);
 	return 1000. * performanceCount.QuadPart / (double)s_freq.QuadPart;
@@ -505,7 +469,7 @@ static void cpuid(int cpuinfo[4], int id)
 #endif
 }
 
-// http://msdn.microsoft.com/en-us/library/hskdteyh%28v=vs.80%29.aspx
+//http://msdn.microsoft.com/en-us/library/hh977022%28v=vs.110%29.aspx
 static int getCpuInfo()
 {
 	char cpuName[255] = {-1};
@@ -1180,13 +1144,18 @@ static void splitToBitArray(uchar srcarray[], const int bitleng, uchar dstarray[
 #if 0
 	for (int i = 0; i < 8; i++) {
 //		if (Config.GpMask & (1 << i)) {
+			uchar* prc = dstarray[i];
 			for (int j = 0; j < bitleng; j += 8) {
 				utmp.mask = (*(uint64*)(srcarray + j) >> i) & (0x0101010101010101);
-				dstarray[i][j / 8] =
+#if BMI2
+				*prc++ = _pext_u64(utmp.mask, 0x0101010101010101);//avx2
+#else
+				*prc++ =
 					  (utmp.word[0] | (utmp.word[0] >> 7)) << 0
 					| (utmp.word[1] | (utmp.word[1] >> 7)) << 2
 					| (utmp.word[2] | (utmp.word[2] >> 7)) << 4
 					| (utmp.word[3] | (utmp.word[3] >> 7)) << 6;
+#endif
 			}
 //		}
 	}
@@ -1195,17 +1164,22 @@ static void splitToBitArray(uchar srcarray[], const int bitleng, uchar dstarray[
 		uint64 bqword = *(uint64*)(srcarray + j * 8);
 		for (int i = 0; i < 8; i++) {
 			utmp.mask = bqword & 0x0101010101010101;
+#if BMI2
+			dstarray[i][j] = _pext_u64(bqword, 0x0101010101010101);//avx2
+#else
 			dstarray[i][j] =
 				(utmp.word[0] | (utmp.word[0] >> 7)) << 0 |
 				(utmp.word[1] | (utmp.word[1] >> 7)) << 2 |
 				(utmp.word[2] | (utmp.word[2] >> 7)) << 4 |
 				(utmp.word[3] | (utmp.word[3] >> 7)) << 6;
+#endif
 			bqword >>= 1;
 		}
 	}
 #endif
-	for (int i = 0; i < 8; i++)
-		packQword(dstarray[i], bitleng);
+
+	for (int k = 0; k < 8; k++)
+		packQword(dstarray[k], bitleng);
 }
 
 //get prime from bit buffer
@@ -1310,7 +1284,7 @@ static int setSieveTpl2(uint64 start, const uint sievesize, uchar bitarray[][BUF
 	}
 
 	//
-	for (int j = 0; start < WHEEL && j < 8; j++) {
+	for (int j = 0; j < 8; j++) {
 		if (start <= Pattern[j] && start + sievesize > Pattern[j]) {
 			CLR_BIT(bitarray[j], 0);
 			SET_BIT(bitarray[0], 0);
@@ -1338,22 +1312,21 @@ crossOutFactor4(uchar* pbeg[], const uchar* pend, const uint mask, const uint st
 	uchar* ps2 = pbeg[2], *ps3 = pbeg[3];
 
 	while (ps3 <= pend) {
-#if 1
+#if 0
 		*ps0 |= umask.bmask[0]; ps0 += step;
 		*ps1 |= umask.bmask[1]; ps1 += step;
 		*ps2 |= umask.bmask[2]; ps2 += step;
 		*ps3 |= umask.bmask[3]; ps3 += step;
 #else
-		uint mask32 = mask;
-		*ps0 |= mask32 >>= 0; ps0 += step;
-		*ps1 |= mask32 >>= 8; ps1 += step;
-		*ps2 |= mask32 >>= 8; ps2 += step;
-		*ps3 |= mask32 >>= 8; ps3 += step;
+		*ps0 |= mask >> 0; ps0 += step;
+		*ps1 |= mask >> 8; ps1 += step;
+		*ps2 |= mask >> 16; ps2 += step;
+		*ps3 |= mask >> 24; ps3 += step;
 #endif
 	}
 
 	if (ps0 <= pend)
-		*ps0 |= mask;
+		*ps0 |= mask >> 0;
 	if (ps1 <= pend)
 		*ps1 |= mask >> 8;
 	if (ps2 <= pend)
@@ -1395,20 +1368,19 @@ inline static void
 sieveGp(uchar bitarray[], const uchar* pend, const uint p, uint offset, uint multiples)
 {
 	uint mask0 = 0;
-#if	1
+#if 1
 	uchar* ps0 = NULL;
 	for (int m = 0; m < 8; m++) {
 		const uchar wordmask = 1 << WheelIndex[offset % WHEEL];
-		if (!(Config.GpMask & wordmask)) {
-			continue;
-		}
-		uchar* ps1 = bitarray + offset / WHEEL;
-		if (mask0 == 0) {
-			mask0 = wordmask;
-			ps0 = ps1;
-		} else {
-			crossOutFactor2(ps0, ps1, pend, wordmask << CHAR_BIT | mask0, p);
-			mask0 = 0;
+		if (Config.GpMask & wordmask) {
+			uchar* ps1 = bitarray + offset / WHEEL;
+			if (mask0 == 0) {
+				mask0 = wordmask;
+				ps0 = ps1;
+			} else {
+				crossOutFactor2(ps0, ps1, pend, wordmask << CHAR_BIT | mask0, p);
+				mask0 = 0;
+			}
 		}
 		offset += (multiples % 4) * 2 * p; multiples /= 4;
 	}
@@ -1861,7 +1833,7 @@ static int startTestGp(const int checkloops, int gpcount)
 
 		setSieveSize(rand() % 40 + 24);
 		Config.Algorithm = rand() % 3 + 1;
-		Config.Threads = rand() % 4 + 1;
+		Config.Threads = rand() % 3 + 2;
 
 		getGp2(minn, gcount2, GP);
 		for (int j = 0; j < gcount2; j++) {
@@ -2694,20 +2666,20 @@ int main(int argc, char* argv[])
 			doCompile( );
 		} else if (c == 'u') {
 			excuteCmd("f r 30 e4; u e4 3; u e3 20");
-			excuteCmd("f 3e5 e4; u 10000 10; u 1000 5000");
-			excuteCmd("a f 6e6 10000; u 1000 3000; u 1000 600");
-			excuteCmd("a f 5e7 2200; g1 u 2000 120; g2 u 200 1000l; g3 u 200 100");
-			excuteCmd("f 2^27+2 1000; g2 u 120 100; u 200 600");
-			excuteCmd("g2 f 10^9 500; u 100 30; g3 u 100 500");
-			excuteCmd("g3 f 2^32 500; u 100 30; g2 u 100 500");
-			excuteCmd("g3 f 1e10 300; g2 u 100 200");
+			excuteCmd("f 3e5 e4; u 10000 100; u 1000 5000");
+			for (int i = 20; i < 32; i++) {
+				char cmd[100];
+				sprintf(cmd, "f 2^%d 10000; u %d %d;", i, 1000, rand() % 1000 + 100);
+				excuteCmd(cmd);
+			}
+			excuteCmd("g3 f 1e10 300; u 100 200");
 		} else {
 			excuteCmd(argv[i]);
 		}
 	}
 
+	excuteCmd("E9 1E4");
 	excuteCmd("t1 E9 1E3");
-	excuteCmd("t4 E9 1E4");
 
 	char ccmd[255] = {0};
 	while (true) {
@@ -2719,7 +2691,40 @@ int main(int argc, char* argv[])
 	return 0;
 }
 
-/*
+/******************************************************************
+copyright (C) 2009 - 2014 by Huang Yuan bing
+mail to: bailuzhou@163.com
+free use for non-commercial purposes
+
+G[10^9] to G[10^9 + 2e4]
+
+2.00G AMD  K8 3600+ 20.0 seconds
+2.80G AMD  X4  820  5.25 seconds SSE4A x86
+2.80G AMD  X4  641  2.80 seconds SSE4A x64
+2.80G AMD  X4  641  4.80 seconds SSE4A x86
+
+3.00G Intel PD 930  19.0 seconds
+2.66G Intel I5 560M 8.30 seconds SSE4.2 x86
+2.26G Intel I3 350M 7.90 seconds SSE4.2 x86
+2.26G Intel I3 350M 5.80 seconds SSE4.2 x64
+
+G[10^9] to G[10^9 + 2e3]
+popcnt64 : 1620
+popcnt32 : 2063
+tree3    : 2600
+table16  : 3560
+
+Optimization for G(n)
+1. use wheel 30 segmented sieve algorithm
+2. X86 popcnt instruction
+3.
+
+New feature in plan:
+1. Optimization for large number
+
+http://graphics.stanford.edu/~seander/bithacks.html
+*******************************************************************
+
 n    pi(n)         g(n)
 e08  5761455       291400
 e09  50847534      2274205
@@ -2744,4 +2749,4 @@ gcc:
 build by vc++
 	cl /O2 FastGp.cpp
 
-******************************/
+************************************************************************/
