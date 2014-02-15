@@ -1,5 +1,5 @@
-  the most  fastest sieving algorithm for n < 2^64,
-each file is a useful tool and it'is easy to be tested.
+  the most fastest sieving prime algorithm for n < 2^64,
+each file is a useful tool and it's easy to be tested.
 
 MINGW: gcc 4.7.3
 CXXFLAG:g++ -march=native -funroll-loops -O3 -s -pipe
