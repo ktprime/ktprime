@@ -14,7 +14,6 @@ http://numbers.computation.free.fr/Constants/Primes/twin.html.
 # include <stdlib.h>
 # include <time.h>
 # include <stdio.h>
-# include <math.h>
 # include <assert.h>
 
 # define GVERSION       "2.1"
@@ -83,9 +82,6 @@ typedef unsigned int   uint;
 
 # define MASK_N(n)          (1 << (n & MASK))
 # define SET_BIT(a, n)      a[n >> BSHIFT] |= MASK_N(n)
-//# define FLP_BIT (a, n)     a[(n) >> BSHIFT] ^= MASK_N(n)
-//# define CLR_BIT(a, n)      a[(n) >> BSHIFT] &= ~MASK_N(n)
-//# define TST_BIT(a, n)      (a[(n) >> BSHIFT] & MASK_N(n))
 # define TST_BIT2(a, n)     (a[(n / 2) >> BSHIFT] & MASK_N(n / 2))
 
 # define CHECK_FLAG(flag)   (Config.Flag & flag)
@@ -97,9 +93,9 @@ enum EFLAG
 	PRINT_RET = 1 << 30,
 	PRINT_TIME = 1 << ('P' - 'A'),
 	PRINT_LOG = 1 << ('D' - 'A'),
+	SAVE_TASK   = 1 << ('A' - 'A'),
 	SAVE_RESUTL = 1 << ('S' - 'A'),
 	CHECK_PATTERN = 1 << ('R' - 'A'),
-	SAVE_TASK = 1 << ('A' - 'A'),
 };
 
 static const char* const HelpConfig = "\
@@ -302,11 +298,10 @@ static uint64 startWorkThread(int threads, int pbegi, int pendi)
 static double getTime()
 {
 #ifdef WIN32
-	LARGE_INTEGER s_freq;
-	LARGE_INTEGER performanceCount;
-	QueryPerformanceFrequency(&s_freq);
-	QueryPerformanceCounter(&performanceCount);
-	return 1000 * performanceCount.QuadPart / (double)s_freq.QuadPart;
+	LARGE_INTEGER freq, count;
+	QueryPerformanceFrequency(&freq);
+	QueryPerformanceCounter(&count);
+	return 1000 * count.QuadPart / (double)freq.QuadPart;
 #else
 	struct timeval tmVal;
 	gettimeofday(&tmVal, NULL);
@@ -373,6 +368,28 @@ static int ilog10(uint64 n)
 	}
 
 	return powbase;
+}
+
+//x > 1
+static uint isqrt(const uint64 x)
+{
+	uint s = 1;
+	for (int i = 1; i < 64; i++) {
+		if (0 == ((x - 1) >> i)) {
+			s = i - 1;
+			break;
+		}
+	}
+
+	uint64 g0 = (uint64)1 << s;
+	uint64 g1 = (g0 + (x >> s)) >> 1;
+
+	while (g1 < g0) {
+		g0 = g1;
+		g1 = (g1 + x / g1) >> 1;
+	}
+
+	return (uint)g0;
 }
 
 //convert str to uint64 ((x)*E(y)+-*(z))
@@ -504,7 +521,7 @@ static void crossOutFactor(utype bitarray[], const uint64 start, const int leng,
 	if (s1 % 2 == 0) {
 		s1 += factor;
 	} else if (start <= factor) {
-		s1 += 2 * factor;
+		s1 += factor * 2;
 	}
 
 	if (s1 > leng)
@@ -584,7 +601,7 @@ static void sieveWheelFactor(utype bitarray[], const uint64 start, const int len
 //sieve prime in [start, start + leng]
 static void segmentedSieve(utype bitarray[], const uint64 start, const int leng, int first)
 {
-	const int sqrtn = (int)(sqrt((double)start + leng)) + 1;
+	const int sqrtn = isqrt(start + leng) + 1;
 	for (int i = first, p = SmallPrime[first - 1]; p < sqrtn; PRIME_NEXT(p, i)) {
 		crossOutFactor(bitarray, start, leng, p);
 	}
@@ -886,7 +903,7 @@ static int savePrime(const utype bitarray[], const int start, const int leng, in
 	return primes;
 }
 
-static int savePattern(const utype bitarray[], int leng, ptype pi1pattern[])
+static int savePattern(const utype bitarray[], const int leng, ptype pi1pattern[])
 {
 	int pi1n = 0, diff = pi1pattern[0];
 	int lastpattern = 0;
@@ -905,7 +922,7 @@ static int savePattern(const utype bitarray[], int leng, ptype pi1pattern[])
 }
 
 //min prime in range [start, n / 2]
-static int getSegpattern(const int n, int start, int wheel, ptype pattern[])
+static int getSegpattern(const int n, int start, const int wheel, ptype pattern[])
 {
 	int gpn = 0;
 	const int leng = n / 2 + ((n / 2) & 1);
@@ -971,8 +988,8 @@ static uint64 sieveGpL1(utype bitarray[], const int pattern1, const int pattern2
 		int s2 = leng - asmMulDivSub(moudle, pattern2, p, leng);
 		if (s2 < 0) s2 += p;
 #else
-		int s1 = leng - asmMulDiv(moudle, pattern2, p);
-		int s2 = asmMulDivSub(moudle, pattern1, p, leng);
+		int s1 = leng - asmMulDiv(moudle, pattern1, p);
+		int s2 = asmMulDivSub(moudle, pattern2, p, leng);
 		if (s2 > leng) s2 -= p;
 
 		s1 -= offset;
@@ -1220,7 +1237,7 @@ static int initPattern(const uint64 n, const int wheel, ptype pattern[])
 	return pns;
 }
 
-static void initStartp(const int wheel, int maxp, uint moudle[])
+static void initStartp(const int wheel, const int maxp, uint moudle[])
 {
 	double ts = getTime( );
 
@@ -1231,7 +1248,6 @@ static void initStartp(const int wheel, int maxp, uint moudle[])
 			y += p;
 		}
 		moudle[i] = y;
-		//assert(moudle[j] < p && moudle[j] >= 0);
 	}
 
 	if (CHECK_FLAG(PRINT_LOG)) {
@@ -1395,14 +1411,14 @@ static int getSmallGp(const uint64 n)
 static uint initGp(const uint64 n)
 {
 	if (n > Gp.N) {
-		getPrime((int)sqrt((double)n) + 2001);
+		getPrime(isqrt(n) + 2001);
 	}
 	const uint wheel = getWheel(n);
 
 	Gp.N = n;
 	Gp.Wheel = wheel;
 	Gp.Moudel = (uint)(n % wheel);
-	Gp.SqrtN = (uint)sqrt((double)n + 0.1);
+	Gp.SqrtN = isqrt(n);
 	Gp.FirstIndex = getFirstPrime(wheel);
 
 	Gp.Patterns = initPattern(n, wheel, 0);
@@ -1577,7 +1593,7 @@ static uint64 getGp(const uint64 n, int pn)
 	return gpn + sgn;
 }
 
-static void printResult(const uint64 n, uint64 gpn, double ts)
+static void printResult(const uint64 n, const uint64 gpn, double ts)
 {
 	int pow10 = ilog10(n);
 	if (n % ipow(10, pow10) == 0) {
@@ -1731,7 +1747,7 @@ static void listPowGp(const char params[][80], int cmdi)
 {
 	int m = atoint64(params[cmdi + 1], 10);
 	int startindex = atoint64(params[cmdi + 2], 5);
-	int endindex = atoint64(params[cmdi + 3], 10);
+	int endindex = atoint64(params[cmdi + 3], 11);
 
 	printf("in %d^%d - %d^%d\n", m, startindex, m, endindex);
 
@@ -1761,7 +1777,7 @@ static void listPowGp(const char params[][80], int cmdi)
 static void listPatterns(uint64 start, int count)
 {
 	Gp.Wheel = 0;
-	getPrime((int)sqrt((double)start) + count * 4 + 2000);
+	getPrime((int)isqrt(start) + count * 4 + 2000);
 	uint wheel = getWheel(start);
 	printf("wheel = %u\n", wheel);
 	for (int i = 0; i < count; i++) {
@@ -1809,7 +1825,7 @@ static void benchMark(const char params[][80])
 //test pi, pi2, gp function
 static void testGp( )
 {
-	const char* gpdata[][6] =
+	const char* gpdata[][4] =
 	{
 		{"1e07", "7",  "000", "00038807"},
 		{"1e08", "7",  "000", "00291400"},
@@ -1828,10 +1844,10 @@ static void testGp( )
 	SET_FLAG(PRINT_TIME);
 
 	for (int i = 0; i < sizeof(gpdata) / sizeof(gpdata[0]); i++) {
-		uint64 n = atoint64(gpdata[i][0], 0);
-		int psize = atoi(gpdata[i][2]);
+		const uint64 n = atoint64(gpdata[i][0], 0);
+		const int psize = atoi(gpdata[i][2]);
 		Gp.Wheel = atoi(gpdata[i][0 + 1]);
-		int gp = getGp(n, psize);
+		const int gp = getGp(n, psize);
 		if (atoi(gpdata[i][3]) != gp) {
 			printf("%s : %s ~= %d fail !!!\n", gpdata[i][0], gpdata[i][3], gp);
 		}
@@ -1893,30 +1909,7 @@ static int getCpuInfo()
 		Config.CpuL1Size = 32 << 13;
 	}
 
-//	Config.CpuL2Size = 256 << 13;
-
 	return cpuinfo[2] >> 16;
-}
-
-static int getSystemInfo( )
-{
-#ifdef _WIN32
-	SYSTEM_INFO si;
-	GetSystemInfo(&si);
-
-	Config.Threads = si.dwNumberOfProcessors;
-
-	if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
-		printf("Cpu arch = x86, ");
-#if PROCESSOR_ARCHITECTURE_AMD64
-	else if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
-		printf("Cpu arch = x86-64, ");
-#endif
-#else
-	Config.Threads = sysconf(_SC_NPROCESSORS_CONF);
-#endif
-
-	return Config.Threads;
 }
 
 //print the Gpk info
@@ -2123,7 +2116,6 @@ static void initCache( )
 {
 	simpleEratoSieve(10000);
 	initBitTable( );
-	getSystemInfo();
 	getCpuInfo();
 }
 
