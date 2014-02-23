@@ -16,7 +16,7 @@ http://en.wikipedia.org/wiki/Sophie_Germain_prime
 # include <stdio.h>
 # include <assert.h>
 
-# define SVERSION       "1.1"
+# define SVERSION       "1.2"
 # define MAXN           "1e16"
 # define MINN           10000000
 # define SGP            2
@@ -83,6 +83,7 @@ typedef unsigned int   uint;
 # define MASK_N(n)          (1 << (n & MASK))
 # define SET_BIT(a, n)      a[n >> BSHIFT] |= MASK_N(n)
 # define TST_BIT2(a, n)     (a[(n / 2) >> BSHIFT] & MASK_N(n / 2))
+# define NEXT_PAIR(n)       (n * SGP + SOF)
 
 # define CHECK_FLAG(flag)   (Config.Flag & flag)
 # define SET_FLAG(flag)     Config.Flag |= flag
@@ -137,9 +138,9 @@ Result = %llu";
 
 static const char* const PrintFormat =
 #if _MSC_VER == 1200
-	"G(%I64d) = %I64d";
+	"S(%I64d) = %I64d";
 #else
-	"G(%llu) = %llu";
+	"S(%llu) = %llu";
 #endif
 
 /************************************/
@@ -860,8 +861,8 @@ static int countPattern(const utype bitarray[], const int leng, ptype spattern[]
 {
 	int psn = 0, lastpattern = 0;
 
-	for (int p = 1; p * SGP + SOF <= leng; p += 2) {
-		int p2 = p * SGP + SOF;
+	for (int p = 1; NEXT_PAIR(p) <= leng; p += 2) {
+		int p2 = NEXT_PAIR(p);
 		if (!TST_BIT2(bitarray, p) && !TST_BIT2(bitarray, p2)) {
 			if (spattern)
 				spattern[psn] = p - lastpattern;
@@ -879,7 +880,7 @@ static int savePattern(const utype bitarray[], const int leng, ptype spattern[])
 	int diff = spattern ? spattern[0] : 0;
 
 	for (int p = 1; p <= leng; p += 2) {
-		int p2 = p * SGP + SOF;
+		int p2 = NEXT_PAIR(p);
 		if (p2 > leng)
 			p2 -= leng;
 		if (!TST_BIT2(bitarray, p) && !TST_BIT2(bitarray, p2)) {
@@ -930,7 +931,7 @@ static uint64 sieveGpL1(utype bitarray[], const int pattern1, const int pattern2
 	int k = Gp.FirstIndex;
 	int p = SmallPrime[k++];
 	int sleng = Config.CpuL1Size;
-	int sqrtn = Gp.SqrtN2;
+	const int sqrtn = Gp.SqrtN2;
 	const int minp = sqrtn < sleng ? sqrtn : sleng;
 	const int offset = leng - leng % sleng;
 	//343k
@@ -980,12 +981,16 @@ static uint64 sieveGpL1(utype bitarray[], const int pattern1, const int pattern2
 
 static int sieveGp(utype bitarray[], const int pattern1)
 {
-	int pattern2 = pattern1 * SGP + SOF;
-	int leng = 1 + (int)((Gp.N - pattern1) / Gp.Wheel);
+	const int pattern2 = NEXT_PAIR(pattern1);
+#if SGP > 1
+	const int leng = 1 + (int)((Gp.N - pattern1) / Gp.Wheel);
+#else
+	const int leng = 1 + (int)((Gp.N - pattern1 - SOF) / Gp.Wheel);
+#endif
 
+	const int sqrtn = Gp.SqrtN2;
 	int k = Gp.FirstIndex;
 	int p = SmallPrime[k++];
-	int sqrtn = Gp.SqrtN2;
 
 #if OPT_L1CACHE
 	//performance improvement from 100 -> 72
@@ -996,9 +1001,9 @@ static int sieveGp(utype bitarray[], const int pattern1)
 #endif
 
 #if OPT_L2CACHE
-	const uint minp = sqrtn < leng ? sqrtn : leng;
+	const int minp = sqrtn < leng ? sqrtn : leng;
 #else
-	const uint minp = sqrtn;
+	const int minp = sqrtn;
 #endif
 
 	for (; p <= minp; PRIME_NEXT(p, k)) {
@@ -1146,11 +1151,11 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 
 	for (int pcuri = pbegi; pcuri < pendi; pcuri++) {
 		pnext = getNextPattern(pattern, pnext);
-#ifdef CHECK_PATTERNS
+#ifndef CHECK_PATTERNS
 		if (CHECK_FLAG(CHECK_PATTERN)) {
 			if (
 					gcd(Gp.Wheel, pattern) != 1
-					|| gcd(Gp.Wheel * SGP, pattern * SGP + SOF) != 1
+					|| gcd(Gp.Wheel * SGP, NEXT_PAIR(pattern)) != 1
 			   )
 				printf("error pattern = %d\n", pattern);
 			continue;
@@ -1162,7 +1167,7 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 #else
 		const int leng = 1 + (int)((Gp.N - pattern) / Gp.Wheel);
 		sieveGp1(bitarray, pattern * 1 + 0, Gp.SqrtN2, leng, Moudle1);
-		sieveGp1(bitarray, pattern * SGP + SOF, Gp.SqrtN2, leng, Moudle2);
+		sieveGp1(bitarray, NEXT_PAIR(pattern), Gp.SqrtN2, leng, Moudle2);
 		gpn += countBitZeros(bitarray, leng);
 #endif
 
@@ -1249,7 +1254,7 @@ static void initStartp(const int wheel, const int maxp, uint moudle1[], uint mou
 		}
 		moudle1[i] = y;
 
-		y = extendedEuclidean(-wheel * 2 % p, p, y);
+		y = extendedEuclidean(-wheel * SGP % p, p, y);
 		if (y < 0) {
 			y += p;
 		}
@@ -1355,14 +1360,18 @@ static int getPrime(const int n)
 }
 
 //[0 - maxn] - [n - maxn, n]
-static int getPartition(const int n)
+static int getPartition(uint n)
 {
+	n = NEXT_PAIR(n);
 	const int sieve_byte = n >> 4;
 	utype* bitarray = (utype*)malloc(sieve_byte + 16);
 	memset(bitarray, 0, sieve_byte + 1);
 
 	segmentedSieve(bitarray, 0, n + 16, 2);
 	int gp = countPattern(bitarray, n, 0);
+	int p2 = NEXT_PAIR(2);
+	if (p2 % 2 == 1 && !TST_BIT2(bitarray, p2))
+		gp ++;
 
 	free(bitarray);
 
@@ -1382,7 +1391,7 @@ static int getSmallGp(const uint64 n)
 	}
 
 	//slow for large leng
-	int ret = getPartition(leng * SGP + SOF) + 1;
+	int ret = getPartition(leng);
 
 	if (CHECK_FLAG(PRINT_LOG)) {
 		printf("sieve small n = %llu, leng = %d", n, leng);
@@ -1396,14 +1405,14 @@ static int getSmallGp(const uint64 n)
 static uint initGp(const uint64 n)
 {
 	if (n > Gp.N) {
-		getPrime(isqrt(n * SGP + SOF) + 2001);
+		getPrime(isqrt(NEXT_PAIR(n)) + 2001);
 	}
 	const uint wheel = getWheel(n);
 
 	Gp.N = n;
 	Gp.Wheel = wheel;
 	Gp.SqrtN1 = isqrt(n * 1 + 0);
-	Gp.SqrtN2 = isqrt(n * SGP + SOF);
+	Gp.SqrtN2 = isqrt(NEXT_PAIR(n));
 	Gp.FirstIndex = getFirstPrime(wheel);
 
 	const int factorial = getFactorial(wheel);
@@ -1513,11 +1522,11 @@ static int loadTask(struct Task &curtask)
 static uint64 doGetGp(const uint64 n, int pn, bool addsmall)
 {
 	if (n < MINN && addsmall) {
-		uint64 gpn = getPartition(n * SGP + SOF) + (n >= 2 ? 1 : 0);
-		return gpn;
+		return getPartition(n);
 	}
 
 	double ts = getTime( );
+
 	initGp(n);
 	if (CHECK_FLAG(PRINT_LOG)) {
 		printf("initGp time %.2lf ms\n", getTime() - ts);
@@ -1582,7 +1591,7 @@ static uint64 getGp(const uint64 n, int pn)
 	bool addsmall = true;
 	//optimize for Ktuplet prime with small n > e7
 	if (n >= ipow(10, 14)) {
-		uint sqrtn2 = isqrt(n * SGP + SOF);
+		uint sqrtn2 = isqrt(NEXT_PAIR(n));
 		uint wheel = getWheel(n);
 		uint64 maxn = sqrtn2 > wheel ? sqrtn2 : wheel;
 		wheel = Gp.Wheel;
@@ -1602,7 +1611,7 @@ static void printResult(const uint64 n, const uint64 gpn, double ts)
 {
 	int pow10 = ilog10(n);
 	if (n % ipow(10, pow10) == 0) {
-		printf("G(%de%d) = %llu", (int)(n / ipow(10, pow10)), pow10, gpn);
+		printf("S(%de%d) = %llu", (int)(n / ipow(10, pow10)), pow10, gpn);
 	} else {
 		printf(PrintFormat, n, gpn);
 	}
