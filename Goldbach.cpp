@@ -57,7 +57,7 @@ typedef unsigned short ushort;
 typedef unsigned int   uint;
 
 #ifdef _WIN32
-	typedef __int64 uint64;
+	typedef unsigned __int64 uint64;
 	#define CONSOLE "CON"
 	#include <windows.h>
 #else
@@ -107,9 +107,7 @@ static const char* const HelpConfig = "\
 	[M: Monitor progress m(0 - 30)]\n\
 	[F: Factorial of whell prime factor f(7 - 29)]\n\
 	[T: Threads number t(2 - 64)]\n\
-	[C: Cpu L1/L2 data cache size c(L1:16-128, L2:128-1024)]\n";
-
-static const char* const HelpCmd = "\
+	[C: Cpu L1/L2 data cache size c(L1:16-128, L2:128-1024)]\n\
 	[B: Benchmark (start) (end)]\n\
 	[U: Unit test (1 - 10000)]\n\
 	[N: Number of patterns (start) (count)]\n\
@@ -1884,7 +1882,7 @@ static void cpuid(int cpuinfo[4], int id)
 #endif
 }
 
-// http://msdn.microsoft.com/en-us/library/hskdteyh%28v=vs.80%29.aspx
+// http://msdn.microsoft.com/en-us/library/hskdteyh%28v=vs.100%29.aspx
 static int getCpuInfo()
 {
 	char cpuName[255] = {-1};
@@ -1926,7 +1924,7 @@ static void printInfo( )
 #ifdef _MSC_VER
 	printf("Compiled by MS/vc++ %d", _MSC_VER);
 #else
-	printf("Compiled by g++ %d.%d.%d", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+	printf("Compiled by g++ %s", __VERSION__);
 #endif
 
 #if _M_AMD64 || __x86_64__
@@ -2018,7 +2016,6 @@ static int parseCmd(char params[][80])
 				break;
 			case 'H':
 				puts(HelpConfig);
-				puts(HelpCmd);
 				puts(HelpUse);
 				break;
 			default:
@@ -2062,7 +2059,7 @@ static int splitCmd(const char* ccmd, char params[][80])
 }
 
 //
-static bool excuteCmd(const char* cmd)
+static bool executeCmd(const char* cmd)
 {
 	while (cmd) {
 
@@ -2131,17 +2128,17 @@ int main(int argc, char* argv[])
 		if (argv[i][0] == 'm')
 			doCompile();
 		else
-			excuteCmd(argv[i]);
+			executeCmd(argv[i]);
 	}
 
-	excuteCmd("1e10;1e8+112");
-//	excuteCmd("t1 d m7 1e14 200; e15 100");
-//	excuteCmd("d m7 1e15");
+	executeCmd("1e10;1e8+112");
+//	executeCmd("t1 d m7 1e14 200; e15 100");
+//	executeCmd("d m7 1e15");
 
 	char ccmd[256] = {0};
 	while (true) {
 		printf("\n>> ");
-		if (!gets(ccmd) || !excuteCmd(ccmd))
+		if (!gets(ccmd) || !executeCmd(ccmd))
 			break;
 	}
 
