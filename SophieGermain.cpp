@@ -1,6 +1,6 @@
 /************************************************************
 	this programming is the most fast algorithm for count
-sophie germain primes, performance and throughput improvement by minimizing cache conflicts and misses
+sophie germain primes, performance and through improvement by minimizing cache conflicts and misses
 in the last level caches of multi-cores processors.
 http://www.primesdemystified.com/sophiegermainprimes.html
 http://oeis.org/A092816/list
@@ -18,7 +18,7 @@ http://en.wikipedia.org/wiki/Sophie_Germain_prime
 
 # define SVERSION       "1.2"
 # define MAXN           "1e16"
-# define MINN           10000000
+# define MINN           100000000
 # define SGP            2
 # define SOF            1
 
@@ -44,7 +44,7 @@ http://en.wikipedia.org/wiki/Sophie_Germain_prime
 # define FAST_CROSS      1
 # define OPT_L1CACHE     1
 # define OPT_L2CACHE     1
-# define PRIME_DIFF      0
+# define PRIME_DIFF      1
 # define TREE2           0
 # define OPT_SEG_SIEVE   1
 
@@ -108,12 +108,9 @@ static const char* const HelpConfig = "\
 	[M: Monitor progress m(0 - 30)]\n\
 	[F: Factorial of whell prime factor f(7 - 29)]\n\
 	[T: Threads number t(2 - 64)]\n\
-	[C: Cpu L1/L2 data cache size c(L1:16-128, L2:128-1024)]\n";
-
-static const char* const HelpCmd = "\
+	[C: Cpu L1/L2 data cache size c(L1:16-128, L2:128-1024)]\n\
 	[B: Benchmark (start) (end)]\n\
 	[U: Unit test (1 - 10000)]\n\
-	[N: Number of patterns (start) (count)]\n\
 	[I: List (powbase) (start index) (end index)]\n\
 	[L: List (start) (end/count) (step)]\n";
 
@@ -122,7 +119,6 @@ static const char* const HelpUse = "\
 	B, B e9 e10\n\
 	C31, C1024\n\
 	U, U 1000+2 2\n\
-	N 2e8+20 100\n\
 	I 2 10 20\n\
 	P S L 1e9 2e9 1e8";
 
@@ -200,7 +196,7 @@ static struct
 }
 Config =
 {
-	PRINT_RET | PRINT_TIME, MAX_L1SIZE, 1024, 4, (1 << 8) - 1
+	PRINT_RET | PRINT_TIME, MAX_L1SIZE, 1024, 4, (1 << 9) - 1
 };
 
 static struct
@@ -1144,14 +1140,14 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 	}
 
 	if (CHECK_FLAG(PRINT_LOG)) {
-		printf("maxp / leng = %.2lf\n", Gp.SqrtN1 / (sieve_byte * 8.0));
+		printf("sqrtp / leng = %.2lf, sqrtp / L1 = %2.lf\n", Gp.SqrtN2 / (sieve_byte * 8.0), (double)(sieve_byte * 8) / Config.CpuL1Size);
 	}
 
 	uint64 gpn = 0;
 
 	for (int pcuri = pbegi; pcuri < pendi; pcuri++) {
 		pnext = getNextPattern(pattern, pnext);
-#ifndef CHECK_PATTERNS
+#ifdef CHECK_PATTERNS
 		if (CHECK_FLAG(CHECK_PATTERN)) {
 			if (
 					gcd(Gp.Wheel, pattern) != 1
@@ -1297,8 +1293,8 @@ static uint getDefaultWheel(const uint64 n)
 		wheel = 9699690;
 	} else if (powten <= 17) {
 		wheel = 223092870;
-	} else {
-		wheel = 223092870ul * 29;
+//	} else {
+//		wheel = 223092870ul * 29;
 	}
 
 	return wheel;
@@ -1310,9 +1306,9 @@ static int getWheel(const uint64 n)
 {
 	uint wheel = getDefaultWheel(n);
 
-	int cachesize = (int)(n / wheel);
+	const int cachesize = (int)(n / wheel);
 
-	int blocks = cachesize / (Config.CpuL2Size << 13);
+	const int blocks = cachesize / (Config.CpuL2Size << 13);
 
 	wheel *= (blocks + 1);
 
@@ -1531,7 +1527,7 @@ static uint64 doGetGp(const uint64 n, int pn, bool addsmall)
 	if (CHECK_FLAG(PRINT_LOG)) {
 		printf("initGp time %.2lf ms\n", getTime() - ts);
 	}
-
+	
 	const uint64 sgn = addsmall ? getSmallGp(n) : 0;
 	if (pn <= 0 || pn > Gp.Patterns) {
 		pn = Gp.Patterns;
@@ -1550,7 +1546,7 @@ static uint64 doGetGp(const uint64 n, int pn, bool addsmall)
 
 #if (OMP)
 	omp_set_num_threads(Config.Threads);
-#pragma omp parallel for reduction(+:gpn) if (n >= MINN * 3)
+	#pragma omp parallel for reduction(+:gpn) if (n >= MINN * 3)
 	for (int oi = 0; oi < Config.Threads; oi++) {
 		int bi = pn / Config.Threads * oi;
 		int ei = bi + pn / Config.Threads;
@@ -1590,10 +1586,10 @@ static uint64 getGp(const uint64 n, int pn)
 	uint64 gptn = 0;
 	bool addsmall = true;
 	//optimize for Ktuplet prime with small n > e7
-	if (n >= ipow(10, 14)) {
-		uint sqrtn2 = isqrt(NEXT_PAIR(n));
+	if (n > ipow(10, 14)) {
+		const uint sqrtn2 = isqrt(NEXT_PAIR(n));
 		uint wheel = getWheel(n);
-		uint64 maxn = sqrtn2 > wheel ? sqrtn2 : wheel;
+		const uint64 maxn = sqrtn2 > wheel ? sqrtn2 : wheel;
 		wheel = Gp.Wheel;
 		Gp.Wheel = 0;
 		gptn = doGetGp(maxn, 0, true);
@@ -1719,19 +1715,6 @@ static void listPowGp(const char params[][80], int cmdi)
 	SET_FLAG(PRINT_RET);
 }
 
-static void listPatterns(uint64 start, int count)
-{
-	Gp.Wheel = 0;
-	getPrime(isqrt(start) + count * 4 + 2000);
-	uint wheel = getWheel(start);
-	printf("wheel = %u\n", wheel);
-	for (int i = 0; i < count; i++) {
-		int patterns = getPattern(wheel, 0);
-		printf("pattern(%llu) = %d\n", start, patterns);
-		start += 2;
-	}
-}
-
 //benchMark
 static void benchMark(const char params[][80])
 {
@@ -1829,7 +1812,7 @@ static void cpuid(int cpuinfo[4], int id)
 #endif
 }
 
-// http://msdn.microsoft.com/en-us/library/hskdteyh%28v=vs.80%29.aspx
+// http://msdn.microsoft.com/en-us/library/hskdteyh%28v=vs.100%29.aspx
 static int getCpuInfo()
 {
 	char cpuName[255] = {-1};
@@ -1871,7 +1854,7 @@ static void printInfo( )
 #ifdef _MSC_VER
 	printf("Compiled by MS/vc++ %d", _MSC_VER);
 #else
-	printf("Compiled by g++ %d.%d.%d", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+	printf("Compiled by g++ %s", __VERSION__);
 #endif
 
 #if _M_AMD64 || __x86_64__
@@ -1963,7 +1946,6 @@ static int parseCmd(char params[][80])
 				break;
 			case 'H':
 				puts(HelpConfig);
-				puts(HelpCmd);
 				puts(HelpUse);
 				break;
 			default:
@@ -2007,7 +1989,7 @@ static int splitCmd(const char* ccmd, char params[][80])
 }
 
 //
-static bool excuteCmd(const char* cmd)
+static bool executeCmd(const char* cmd)
 {
 	while (cmd) {
 
@@ -2040,8 +2022,8 @@ static bool excuteCmd(const char* cmd)
 			listDiffGp(params, cmdi);
 		} else if (cmdc == 'I') {
 			listPowGp(params, cmdi);
-		} else if (cmdc == 'N') {
-			listPatterns(n1, n2);
+//		} else if (cmdc == 'N') {
+//			listPatterns(n1, n2);
 		} else if (cmdc == 'E' || isdigit(cmdc)) {
 			SophieGermain(n1, n2);
 		}
@@ -2076,17 +2058,17 @@ int main(int argc, char* argv[])
 		if (argv[i][0] == 'm')
 			doCompile();
 		else
-			excuteCmd(argv[i]);
+			executeCmd(argv[i]);
 	}
 
-	excuteCmd("e10;");
-//	excuteCmd("t1 d m7 1e14 200; e15 100");
-//	excuteCmd("d m7 1e15");
+	executeCmd("e10;");
+//	executeCmd("t1 d m7 1e14 200; e15 100");
+//	executeCmd("d m7 1e15");
 
 	char ccmd[256] = {0};
 	while (true) {
 		printf("\n>> ");
-		if (!gets(ccmd) || !excuteCmd(ccmd))
+		if (!gets(ccmd) || !executeCmd(ccmd))
 			break;
 	}
 
@@ -2111,12 +2093,12 @@ int main(int argc, char* argv[])
 MINGW: gcc 4.6.3
 CXXFLAGS: -Ofast -msse4 -s -pipe  -march=corei7 -funroll-loops
 windows 7 64 bit, I5 3470 3.2G   / i3 350M 2.26G
-G(1e11) = 218116524        3.54  | 09.0 sec
-G(1e12) = 1822848478       42.8  | 89.4 sec
-G(1e13) = 15462601989      561.  | 990. sec
-G(1e14) = 13280063038      8323  | 3.20 hour
-G(1e15) = 1154538341852    36.0  | 45.4 hour
-G(1e16) =                  400   |
+S(1e11) = 218116524        4.64  | 14.0 sec
+S(1e12) = 1822848478       52.8  | 140.4 sec
+S(1e13) = 15462601989      541.  | 1790. sec
+S(1e14) = 13280063038      7123  | 5.20 hour
+S(1e15) = 1154538341852    27.8  | 91.4 hour
+S(1e16) =                  400   |
 
   c1600 m5 d t4 e15 1000
 	need 28h amd phoenm x4 830
