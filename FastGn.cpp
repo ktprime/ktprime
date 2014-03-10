@@ -28,7 +28,7 @@
 	# define POPCNT      1
 	# include <intrin.h>
 #elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44)
-	# define POPCNT      1
+	# define POPCNT      0
 	# include <popcntintrin.h>
 	//# include <immintrin.h>
 #else
@@ -240,7 +240,7 @@ static uchar PatternMask[1 << 16];
 static uint64 GP[MAX_GPCOUNT + WHEEL + 2];
 
 //max number of goldbach partition of start
-static const uint64 Maxn = 1e14;
+static const uint64 Maxn = (uint64)1e14;
 
 //the crossing out bit mod 30, the first
 //16 bit of SievedTpl map to
@@ -326,10 +326,10 @@ typedef void (*sieve_func)(const uint64 , const uint64 , const uint , const int 
 static double getTime( )
 {
 #ifdef _WIN32
-	LARGE_INTEGER s_freq, performanceCount;
-	QueryPerformanceFrequency(&s_freq);
-	QueryPerformanceCounter(&performanceCount);
-	return 1000. * performanceCount.QuadPart / (double)s_freq.QuadPart;
+	LARGE_INTEGER freq, count;
+	QueryPerformanceFrequency(&freq);
+	QueryPerformanceCounter(&count);
+	return 1000. * count.QuadPart / (double)freq.QuadPart;
 #else
 	struct timeval tmVal;
 	gettimeofday(&tmVal, NULL);
@@ -590,9 +590,6 @@ static void startWorkThread(int threads, uint64 minn, int gpcount)
 	for (i = 0; i < threads; i++) {
 		thandle[i] = CreateThread(NULL, 0,
 			(LPTHREAD_START_ROUTINE)threadProc, (LPVOID)(&Tdata[i]), 0, &tid[i]);
-		if (thandle[i] == NULL) {
-			printf("create win32 thread error %ld\n", GetLastError());
-		}
 	}
 	WaitForMultipleObjects(threads, thandle, true, INFINITE);
 	for (i = 0; i < threads; i++) {
@@ -603,10 +600,7 @@ static void startWorkThread(int threads, uint64 minn, int gpcount)
 #else
 	pthread_t tid[MAX_THREADS];
 	for (i = 0; i < threads; i++) {
-		int error = pthread_create(&tid[i], NULL, threadProc, &Tdata[i]);
-		if (error != 0) {
-			printf("create posix thread error %d\n", error);
-		}
+		pthread_create(&tid[i], NULL, threadProc, &Tdata[i]);
 	}
 	for (i = 0; i < threads; i++) {
 		pthread_join(tid[i], NULL);
@@ -708,10 +702,10 @@ inline static int countBit1(uint64 n)
 	#else
 	return _mm_popcnt_u32(n) + _mm_popcnt_u32(n >> 32);
 	#endif
-#elif __GNUC__
-	return __builtin_popcountll(n);
+//#elif __GNUC__
+//	return __builtin_popcountll(n);
 #elif 1
-	uint hig = n >> 32, low = (uint)n;
+	uint hig = (uint)(n >> 32), low = (uint)n;
 	return WordNumBit1[(ushort)low] + WordNumBit1[low >> 16] +
 		WordNumBit1[(ushort)hig] + WordNumBit1[hig >> 16];
 #else
@@ -942,7 +936,7 @@ inline static int countBit0ArrayOr(const uchar bitarray1[], const uchar bitarray
 	return countBit0ArrayOrAvx2(bitarray1, bitarray2, bitleng);
 #elif SSE2
 	return countBit0ArrayOrSSE2(bitarray1, bitarray2, bitleng);
-#elif POPCNT || __GNUC__
+#elif POPCNT
 	return countBit0ArrayOrPopcnt((uint64*)bitarray1, (uint64*)bitarray2, bitleng);
 #elif X86_64
 	return countBit0ArrayOr64((uint64*)bitarray1, (uint64*)bitarray2, bitleng);
@@ -1210,7 +1204,7 @@ static int savePrime(const uint64 offset, const int wordleng, const ushort* bita
 }
 
 //get prime from bit buffer
-static int dumpGp(const uint64 offset, const int wordlengs, const ushort* bitarray)
+static int dumpGp(uint64 offset, const int wordlengs, const ushort* bitarray)
 {
 	int primes = 0;
 	static uint total = 1;
@@ -1218,14 +1212,15 @@ static int dumpGp(const uint64 offset, const int wordlengs, const ushort* bitarr
 		total = 1;
 	}
 
+	offset += 1;
 	for (int bi = 0; bi <= wordlengs; bi++) {
 		ushort mask = ~bitarray[bi];
 		while (mask > 0) {
-			const int pi = PRIME_OFFSET(mask);
-			printf("%u %llu\n", total++, offset + bi * 16 * 2 + pi * 2 + 1);
-			primes++;
+			printf("%u %llu\n", total++, offset + PRIME_OFFSET(mask) * 2);
 			mask &= mask - 1;
+			primes++;
 		}
+		offset += 32;
 	}
 
 	return primes;
@@ -1236,16 +1231,16 @@ static int setSieveTpl(const uint64 start, const uint sievesize, uchar bitarray[
 {
 	int bitleng = sievesize;
 
-	const int startbytei = (start % BLOCK_SIZE) / WHEEL;
-	bitleng += start % WHEEL;
+	const int si = (start % BLOCK_SIZE) / WHEEL;
+	bitleng += int(start % WHEEL);
 	bitleng = bitleng / WHEEL * 8 + WheelLeng[bitleng % WHEEL];
 	const int bytes = bitleng / CHAR_BIT + 1;
 
-	if (startbytei + bytes < sizeof(SievedTpl)) {
-		memcpy(bitarray, SievedTpl + startbytei, bytes);
+	if (si + bytes < sizeof(SievedTpl)) {
+		memcpy(bitarray, SievedTpl + si, bytes);
 	} else {
-		memcpy(bitarray, SievedTpl + startbytei, sizeof(SievedTpl) - startbytei);
-		memcpy(bitarray + sizeof(SievedTpl) - startbytei, SievedTpl, bytes + startbytei - sizeof(SievedTpl));
+		memcpy(bitarray, SievedTpl + si, sizeof(SievedTpl) - si);
+		memcpy(bitarray + sizeof(SievedTpl) - si, SievedTpl, bytes + si - sizeof(SievedTpl));
 	}
 
 	if (start < WHEEL) {
@@ -1740,7 +1735,7 @@ static void initBitTable( )
 	//3. init Map16To30 table
 	nbitsize = sizeof(Map16To30) / sizeof(Map16To30[0]);
 	for (i = 0; i < nbitsize; i++) {
-		uint mask = (uint)(~0 - (3u << 30));
+		uint mask = (uint)(~0 - (0x11 << 30));
 		for (int j = 0; j < 16; j++) {
 			if ((i & (1 << j)) == 0)
 				mask &= ~(1 << (Pattern[j] / 2));
@@ -1777,7 +1772,7 @@ static void initCache( )
 
 static int startTestGp(const int checkloops, int gpcount)
 {
-	if (!freopen("prime.gp", "rb", stdin)) {
+	if (!freopen("gp.txt", "rb", stdin)) {
 		puts("can not read test data file");
 		freopen(CONSOLE, "r", stdin);
 		return -1;
@@ -1847,7 +1842,7 @@ static int startTestGp(const int checkloops, int gpcount)
 		printf("loop %d : [%llu, %d] ", i + 1, minn, gcount2);
 
 		if (itemfails > 0)
-			printf("%d cases fail; excuteCmd( c%d a%d t%d)\n",
+			printf("%d cases fail; executeCmd( c%d a%d t%d)\n",
 				itemfails, Config.SieveSize, Config.Algorithm, Config.Threads);
 		else
 			printf(" g(%d) t(%d) pass\r", Config.Algorithm, Config.Threads);
@@ -2072,8 +2067,7 @@ static int segmentedGp02(const uint64 start1, const uint64 start2, uint sievesiz
 	}
 
 	if (Config.PrintGppair) {
-//		gps += savePrime(start1, byteleng1 / 2, (ushort*)bitarray1, NULL);
-		gps = dumpGp(start1, sievesize >> 5, (ushort*)bitarray1);
+		gps += savePrime(start1, byteleng1 / 2, (ushort*)bitarray1, NULL);
 	} else {
 		gps += countBit0Array((uint64*)bitarray1, byteleng1 * CHAR_BIT);
 	}
@@ -2281,7 +2275,7 @@ static void getGp1(const uint64 minn, const uint gpcount, const uint gstep, uint
 		Config.PrintGap = 0;
 		Config.PrintRet = true;
 		Config.PrintTime = false;
-		freopen("prime.gp", "wb+", stdout);
+		freopen("gp.txt", "wb+", stdout);
 		printf("%llu:%u:%d\n", minn, gpcount, 2);
 	}
 
@@ -2438,7 +2432,7 @@ static void getGp2(uint64 minn, int gpcount, uint64 gp[])
 	if (Config.SaveResult) {
 		Config.PrintGap = 0;
 		Config.PrintRet = true;
-		freopen("prime.gp", "wb+", stdout);
+		freopen("gp.txt", "wb+", stdout);
 		printf("%llu:%d:%d\n", minn, gpcount, 2);
 	}
 
@@ -2485,7 +2479,7 @@ static void printInfo( )
 #ifdef _MSC_VER
 	printf("Compiled by MS/vc++ %d", _MSC_VER);
 #else
-	printf("Compiled by GNU/g++ %d.%d.%d", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+	printf("Compiled by GNU/g++ %s", __VERSION__);
 #endif
 
 #if X86_64
@@ -2597,8 +2591,8 @@ static int parseConfig(const char cmdparams[][40])
 	return cmdi;
 }
 
-//excute command cmd:[H, B, U, R, N, S]
-static bool excuteCmd(const char* cmd)
+//execute command cmd:[H, B, U, R, N, S]
+static bool executeCmd(const char* cmd)
 {
 	while (cmd) {
 
@@ -2665,26 +2659,26 @@ int main(int argc, char* argv[])
 		if (c == 'm') {
 			doCompile( );
 		} else if (c == 'u') {
-			excuteCmd("f r 30 e4; u e4 3; u e3 20");
-			excuteCmd("f 3e5 e4; u 10000 100; u 1000 5000");
-			for (int i = 20; i < 32; i++) {
+			executeCmd("f r 30 e4; u e4 3; u e3 20");
+			executeCmd("f 3e5 e4; u 10000 100; u 1000 5000");
+			for (int i = 20; i <= 32; i++) {
 				char cmd[100];
-				sprintf(cmd, "f 2^%d 10000; u %d %d;", i, 1000, rand() % 1000 + 100);
-				excuteCmd(cmd);
+				sprintf(cmd, "f 2^%d 10000; u %d %d;", i, 1000, rand() % 1000 + 10);
+				executeCmd(cmd);
 			}
-			excuteCmd("g3 f 1e10 300; u 100 200");
+			executeCmd("g3 f 1e10 300; u 100 200");
 		} else {
-			excuteCmd(argv[i]);
+			executeCmd(argv[i]);
 		}
 	}
 
-	excuteCmd("E9 1E4");
-	excuteCmd("t1 E9 1E3");
+	executeCmd("pr pg");
+//	executeCmd("t4 E9 1E4");
 
 	char ccmd[255] = {0};
 	while (true) {
 		printf("\n>> ");
-		if (!gets(ccmd) || !excuteCmd(ccmd))
+		if (!gets(ccmd) || !executeCmd(ccmd))
 			break;
 	}
 
@@ -2700,27 +2694,21 @@ G[10^9] to G[10^9 + 2e4]
 
 2.00G AMD  K8 3600+ 20.0 seconds
 2.80G AMD  X4  820  5.25 seconds SSE4A x86
-2.80G AMD  X4  641  2.80 seconds SSE4A x64
 2.80G AMD  X4  641  4.80 seconds SSE4A x86
+2.80G AMD  X4  641  2.80 seconds SSE4A x64
 
 3.00G Intel PD 930  19.0 seconds
 2.66G Intel I5 560M 8.30 seconds SSE4.2 x86
 2.26G Intel I3 350M 7.90 seconds SSE4.2 x86
 2.26G Intel I3 350M 5.80 seconds SSE4.2 x64
+3.20G Intel I5 3470 1.62 seconds SSE4.2 x64
+3.20G Intel I5 3470 3.80 seconds SSE4.2 x86
 
 G[10^9] to G[10^9 + 2e3]
 popcnt64 : 1620
 popcnt32 : 2063
 tree3    : 2600
 table16  : 3560
-
-Optimization for G(n)
-1. use wheel 30 segmented sieve algorithm
-2. X86 popcnt instruction
-3.
-
-New feature in plan:
-1. Optimization for large number
 
 http://graphics.stanford.edu/~seander/bithacks.html
 *******************************************************************
@@ -2738,13 +2726,7 @@ http://code.google.com/p/pcxprj/wiki/CompilerAndLinkerSwitchGuide
 -fprofile-generate
 -fprofile-use
 
-g++:
-	g++ -Wall -msse2 -O2 -mpopcnt -s -pipe -mtune=native
- -fomit-frame-pointer -lpthread FastGp.cpp -o FastGn.exe
-
-gcc:
-	gcc -std=c99 -Wall -msse2 -O2 -mpopcnt -s -pipe -mtune=native
- -fomit-frame-pointer -lpthread FastGp.cpp -o FastGn.exe
+g++ -O3 -funroll-loops -mpopcnt -s -pipe -march=native -fomit-frame-pointer -lpthread FastGp.cpp -o FastGn.exe
 
 build by vc++
 	cl /O2 FastGp.cpp
