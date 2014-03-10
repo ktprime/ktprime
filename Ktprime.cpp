@@ -14,6 +14,8 @@ k   s : b
 5  12 : 0  4  6  10  12
 5  12 : 0  2  6  8   12
 6  16 : 0  4  6  10  12  16
+7  20 : 0  2  6  8   12  18 20
+7  20 : 0  2  8  12  14  18 20
 
     * pi(x) : prime-counting function
     * pi2(x) : count of twin primes.
@@ -28,23 +30,17 @@ k   s : b
       prime sextuplet = (p, p + 4, p + 6, p + 10, p + 12, p + 16)
     * pi7(x) : count of prime septuplets.
       prime septuplet = (p, p + 2, p + 6, p + 8, p + 12, p + 18, p + 20)
-
+doc:
 http://www.primesdemystified.com/sophiegermainprimes.html
 http://primes.utm.edu/glossary/xpage/PrimeKTuplet.html
-Prime k-tuplet definition at the Prime Glossary.
+http://en.wikipedia.org/wiki/Prime_k-tuple
 http://mathworld.wolfram.com/PrimeConstellation.html
-
+http://numbers.computation.free.fr/Constants/Primes/twin.html.
 http://anthony.d.forbes.googlepages.com/ktuplets.htm
-K-tuplet definition and records, maintained by Tony Forbes.
 
 http://www.trnicely.net
-Computational prime research page of Thomas R. Nicely. Tables of values of pi(x), pi2(x), pi3(x) and pi4(x).
-
 http://www.ieeta.pt/~tos/primes.html
-Computational prime research page of Tomás Oliveira e Silva. Tables of values of pi(x) and of pi2(x).
-
 http://code.google.com/p/primesieve/
-http://numbers.computation.free.fr/Constants/Primes/twin.html.
 **************************************************************/
 
 # include <ctype.h>
@@ -69,7 +65,6 @@ http://numbers.computation.free.fr/Constants/Primes/twin.html.
 #if _MSC_VER > 1400
 	# define POPCNT      1
 	# include <intrin.h>
-	# pragma warning(disable: 4996 4244 4127 4505 4018)
 #elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44)
 	# define POPCNT      0
 	# include <popcntintrin.h>
@@ -102,7 +97,7 @@ typedef unsigned short ushort;
 typedef unsigned int   uint;
 
 #ifdef _WIN32
-	typedef unsigned __int64 uint64;
+	typedef __int64 uint64;
 	#define CONSOLE "CON"
 	#include <windows.h>
 #else
@@ -129,8 +124,8 @@ typedef unsigned int   uint;
 # define SET_BIT(a, n)      a[(n) >> BSHIFT] |= MASK_N(n)
 //# define FLP_BIT (a, n)     a[(n) >> BSHIFT] ^= MASK_N(n)
 //# define CLR_BIT(a, n)      a[(n) >> BSHIFT] &= ~MASK_N(n)
-//# define TST_BIT(a, n)      (a[(n) >> BSHIFT] & MASK_N(n))
-# define TST_BIT2(a, n)     (a[(n) / 2 >> BSHIFT] & MASK_N((n) / 2))
+# define TST_BIT(a, n)      (a[(n) >> BSHIFT] & MASK_N(n))
+# define TST_BIT2(a, n)     TST_BIT(a, (n) / 2)
 
 # define CHECK_FLAG(flag)   (Config.Flag & flag)
 # define SET_FLAG(flag)     Config.Flag |= flag
@@ -251,7 +246,7 @@ static uchar Prime[PRIME_NUMS];
 static uint Moudle[PRIME_NUMS];
 
 //typedef ushort ptype;
-typedef uchar ptype; //pi,pi2
+typedef ushort ptype; //pi,pi2
 static ptype* Pattern = NULL; //[1658880 * 22 + 10];
 
 //table of ktuplet
@@ -343,7 +338,7 @@ static struct ThreadInfo
 	uint64 Result;
 } TData[MAX_THREADS];
 
-static bool excuteCmd(const char* cmd);
+static bool executeCmd(const char* cmd);
 static uint64 sievePattern(int, int);
 
 #ifdef _WIN32
@@ -413,11 +408,10 @@ static uint64 startWorkThread(int threads, int pbegi, int pendi)
 static double getTime()
 {
 #ifdef WIN32
-	LARGE_INTEGER s_freq;
-	LARGE_INTEGER performanceCount;
-	QueryPerformanceFrequency(&s_freq);
-	QueryPerformanceCounter(&performanceCount);
-	return 1000 * performanceCount.QuadPart / (double)s_freq.QuadPart;
+	LARGE_INTEGER freq, count;
+	QueryPerformanceFrequency(&freq);
+	QueryPerformanceCounter(&count);
+	return 1000 * count.QuadPart / (double)freq.QuadPart;
 #else
 	struct timeval tmVal;
 	gettimeofday(&tmVal, NULL);
@@ -1300,9 +1294,9 @@ static int savePikPattern(const utype bitarray[], int leng, ptype pattern[])
 			}
 		}
 
-		if (canadd == 0) {
+		if (canadd == 1) {
 			if (pattern) {
-//				assert(p - lastpattern < (1 << (8 * sizeof(ptype))));
+				assert(p - lastpattern < (1 << (8 * sizeof(ptype))));
 				pattern[pn] = p - lastpattern;
 				lastpattern = p;
 			}
@@ -1797,7 +1791,7 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 
 	for (int pcuri = pbegi; pcuri < pendi; pcuri++) {
 		pnext = getNextPattern(pattern, pnext);
-#if 0
+#if 1
 		if (CHECK_FLAG(CHCECK_PATTERN)) {
 			if (gcd(KData.Wheel, pattern) != 1)
 				printf("error pattern = %d\n", pattern);
@@ -2009,7 +2003,6 @@ static int getPrime(const int n, uchar prime[])
 		segmentedSieve2(bitarray, start, sleng + 16);
 #endif
 		if (prime) {
-//			pi1n += savePi1Pattern(bitarray, sleng, prime + pi1n + 1);
 			pi1n += savePrime(bitarray, sleng, prime + pi1n + 1);
 		} else {
 			pi1n += countBitZeros(bitarray, sleng / 2);
@@ -2572,7 +2565,7 @@ static void testPik()
 	SET_FLAG(PRINT_TIME);
 
 	for (int i = 0; i < sizeof(pidata) / sizeof(pidata[0]); i++) {
-		excuteCmd(pidata[i][0]);
+		executeCmd(pidata[i][0]);
 
 		for (int j = 1; j < sizeof(pidata[i])/sizeof(pidata[i][0]); j ++) {
 			uint64 n = atoint64(pidata[i][j], 100);
@@ -2931,7 +2924,7 @@ static int splitCmd(const char* ccmd, char cmdparams[][80])
 }
 
 //
-static bool excuteCmd(const char* cmd)
+static bool executeCmd(const char* cmd)
 {
 	while (cmd) {
 
@@ -2960,7 +2953,7 @@ static bool excuteCmd(const char* cmd)
 		} else if (cmdc == 'B') {
 			puts("----------- start benchmark ------------");
 			if (isdigit(cmdparams[cmdi + 1][0]))
-				excuteCmd("t4 m7 c1000 e15");
+				executeCmd("t4 m7 c1000 e15");
 			benchMark(cmdparams);
 		} else if (cmdc == 'U') {
 			if (cmdparams[cmdi + 1][0] == 0) {
@@ -3022,17 +3015,16 @@ int main(int argc, char* argv[])
 		if (argv[i][0] == 'm')
 			doCompile();
 		else
-			excuteCmd(argv[i]);
+			executeCmd(argv[i]);
 	}
 
-	excuteCmd("d t1 k21 e10");
-	excuteCmd("k1 e16 100");
-//	excuteCmd("d t4 M6 C1200 k6 e13");
+	executeCmd("d t1 k41 e10");
+//	executeCmd("d t4 M6 C1200 k6 e13");
 
 	char ccmd[256] = {0};
 	while (true) {
 		printf("\n>> ");
-		if (!gets(ccmd) || !excuteCmd(ccmd))
+		if (!gets(ccmd) || !executeCmd(ccmd))
 			break;
 	}
 
