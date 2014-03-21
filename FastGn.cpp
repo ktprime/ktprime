@@ -7,7 +7,7 @@
 # include <assert.h>
 # include <limits.h>
 
-# define VERSION         "1.2"
+# define VERSION         "1.3"
 # define WHEEL           30
 # define WHEEL_SKIP      0x799b799b
 
@@ -1177,12 +1177,12 @@ static void splitToBitArray(uchar srcarray[], const int bitleng, uchar dstarray[
 }
 
 //get prime from bit buffer
-static int savePrime(const uint64 offset, const int wordleng, const ushort* bitarray, uint* dstarray)
+static int savePrime(const uint64 offset, const int wordleng, const ushort* bitarray, uint* dstarray, int init)
 {
 	int primes = 0;
-	static uint total = 1;
+	static uint total = 0;
 	if (offset == 0) {
-		total = 1;
+		total = init;
 	}
 
 	for (int bi = 0; bi <= wordleng; bi++) {
@@ -1192,7 +1192,7 @@ static int savePrime(const uint64 offset, const int wordleng, const ushort* bita
 			const int pi = PRIME_OFFSET(mask);
 			uint64 p = prime + Pattern[pi];
 			if (dstarray == NULL)
-				printf("%u %llu\n", total++, p);
+				printf("%u %llu\n", ++total, p);
 			else
 				dstarray[primes] = uint(p - offset);
 			primes++;
@@ -1566,7 +1566,7 @@ static int segmentedSieve(uint64 start, uint sievesize, uchar dstarray[])
 		memcpy(dstarray, bitarray, byteleng + 16);
 		primes = byteleng;
 	} else if (dstarray[0] == SAVE_PRIMEDIF) {
-		primes = savePrime(start, byteleng / 2, (ushort*)bitarray, (uint*)dstarray);
+		primes = savePrime(start, byteleng / 2, (ushort*)bitarray, (uint*)dstarray, 0);
 	}
 
 	return primes;
@@ -1932,7 +1932,7 @@ static void addMultiGp35(const uint64 minn, const int gpcount, uint64 gp[])
 	bitarray[0] = CON_VTOWHEEL;
 
 	//remove CON_VTOWHEEL !!!
-	const uint64 start = minn - 6;
+	const int64 start = minn - 6;
 	const int mod30bits = start % WHEEL / 2;
 
 	segmentedSieve(start, gpcount * 2 + 2, (uchar*)bitarray);
@@ -1945,22 +1945,21 @@ static void addMultiGp35(const uint64 minn, const int gpcount, uint64 gp[])
 			const int pi = PRIME_OFFSET(mask);
 			mask &= ~(1 << pi);
 			const int offset = (bi * WHEEL * 2 + Pattern[pi] - 2 * mod30bits) / 2;
-			gp[offset] ++;
+			gp[offset + 0] ++;
 			gp[offset + 1] ++;
 		}
 	}
 #else
 	//5, minn - 5
-	if (!TST_BIT(bitarray, mod30bits))
+	if (!TST_BIT(bitarray, mod30bits) && start + 1 >= 5)
 		gp[0] ++;
-	////3, maxn - 3
-	if (!TST_BIT(bitarray, (gpcount + mod30bits)) && minn > 8)
-		gp[gpcount - 1] ++;
-
-	for (int i = 1; i < gpcount; i++) {
+	for (int i = 1; i <= gpcount; i++) {
 		if (!TST_BIT(bitarray, (i + mod30bits))) {
-			gp[i - 0] ++; // 3 + x
-			gp[i - 1] ++; // 5 + x
+			const uint64 x = start + (i + mod30bits) * 2 + 1;
+			if (x >= 5)
+				gp[i - 0] ++; // 5 + x
+			if (x >= 3)
+				gp[i - 1] ++; // 3 + x
 		}
 	}
 #endif
@@ -2025,7 +2024,7 @@ static int segmentedGp01(const uint64 start1, const uint64 start2, const uint si
 			const uint rid = maxn % p;
 			if (rid == 0)
 				bitarray2[0] |= 0x2;
-			else if (rid == 2) //modlu 5
+			else if (rid == 2) //module 5
 				bitarray2[0] |= 0x4;
 		}
 	}
@@ -2067,7 +2066,7 @@ static int segmentedGp02(const uint64 start1, const uint64 start2, uint sievesiz
 	}
 
 	if (Config.PrintGppair) {
-		gps += savePrime(start1, byteleng1 / 2, (ushort*)bitarray1, NULL);
+		gps += savePrime(start1, byteleng1 / 2, (ushort*)bitarray1, NULL, gps);
 	} else {
 		gps += countBit0Array((uint64*)bitarray1, byteleng1 * CHAR_BIT);
 	}
