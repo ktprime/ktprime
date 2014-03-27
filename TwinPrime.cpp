@@ -141,11 +141,9 @@ static const char* const Help = "\
 	[L: Set sieve segs L1(2-6), L2(2-6) L3(2-6)]\n\n\
 	[I: Info of programming]\n\
 	[Z: Compile self and run]\n\
-	[G: Find maxp adjacent prime gap [start, end]]\n\
 	[P: Print prime in [start, end]]\n\n\
 Example:\n\
 	1e16 1e16+10^10 s512\n\
-	g 1e19 2^32 s256\n\
 	p 1e12+100 100";
 
 enum EFLAG
@@ -161,8 +159,6 @@ enum ECMD
 	COPY_BITS,
 	SAVE_PRIME,
 	SAVE_BYTE,
-	SAVE_BYTEGAP,
-	FIND_MAXGAP,
 	PCALL_BACK
 };
 
@@ -301,21 +297,6 @@ static uchar Lsb[1 << 16];
 static uchar WordNumBit0[1 << 16];
 #endif
 
-//accelerates to save diff prime < 2^31 into Prime[]
-//range = [n, n + 2 * WHEEL30]
-struct PrimeGap
-{
-	uchar Gap[13];
-	//number of bits1 in wheel range
-	uchar Bits;
-	//first bit index 1 in range
-	uchar Beg;
-	//last bit index 1 in range
-	uchar End;
-};
-
-static PrimeGap* WheelGap = NULL;
-
 struct WheelElement
 {
 #ifndef _LITTLE_ENDIAN
@@ -347,6 +328,11 @@ static WheelInit WheelInit210[WHEEL210];
 static WheelElement Wheel210[48][64];
 static WheelFirst WheelFirst210[WHEEL210][64];
 
+static const uchar TwBits[] =
+{
+	1, 3, 6, 9, 11, 14
+};
+
 static const uchar SmallPrime[] =
 {
 	2, 3, 5
@@ -355,11 +341,6 @@ static const uchar SmallPrime[] =
 static uchar Pattern30[64] =
 {
 	1, 7, 11, 13, 17, 19, 23, 29
-};
-
-const uchar TwBits[] =
-{
-	1, 3, 6, 9, 11, 14
 };
 
 //api
@@ -761,57 +742,6 @@ static int savePrimeByte(const stype bitarray[], const int bytes, uchar* prime)
 	return primes;
 }
 
-/***
-static int savePrime(const stype bitarray[], uint64 sieve_index, const int size, uint64* prime)
-{
-	int primes = 0;
-
-	for (int bi = 0; bi <= size; bi ++) {
-		stype mask = ~bitarray[bi];
-		while (mask > 0) {
-			prime[primes ++] = sieve_index + PRIME_OFFSET(mask);
-			mask &= mask - 1;
-		}
-		sieve_index += WHEEL30 * sizeof(mask);
-	}
-
-	return primes;
-}
-
-static int savePrimeGap(ushort bitarray[], const uint64 start, const int word_size, uchar* prime)
-{
-	ushort pdiff = *(char*)prime;
-	int primes = 0;
-	initWheelGap();
-
-	for (int i = 0; i < word_size; i ++) {
-		const short mask = ~bitarray[i];
-		if (mask == 0) {
-			pdiff += WHEEL30 * sizeof(mask);
-			continue;
-		}
-
-		ushort gap = pdiff + WheelGap[mask].Beg;
-		*prime = gap;
-		if (gap > 255) {
-			*(ushort*)(prime ++) = gap + 1;
-		}
-		*(uint64*)(prime + 1) = *(uint64*)(WheelGap[mask].Gap + 0);
-		pdiff = WheelGap[mask].End;
-		uchar bits = WheelGap[mask].Bits;
-		if (bits > 8)
-			*(uint*)(prime + 9) = *(uint*)(WheelGap[mask].Gap + 8);
-		prime += bits;
-		primes += bits;
-	}
-
-	prime[0] = pdiff;
-	prime[1] = 0;
-
-	return primes;
-}
-***/
-
 static void allocWheelBlock(const uint blocks)
 {
 	static Stock StockCache [MAX_STOCK];
@@ -871,33 +801,31 @@ static void initWheelMedium(const uint sieve_size, const uint maxp, const uint64
 	uint j = Threshold.L1Index;
 	const uint pix = (uint)(maxp / log((double)maxp) * (1 + 1.200 / log((double)maxp)));
 	MediumWheel = (WheelPrime*) malloc(sizeof(WheelPrime) * pix + 1000);
+	uint64 offset = start;
 
 	for (uint p = Threshold.L1Maxp; p < maxp; p += Prime[++j]) {
-		uint64 sieve_index = p - (uint)(start % p);
 		uint l2size = Threshold.L2Size;
-		if (sieve_size < l2size || p >= Threshold.L2Maxp)
+		if ((sieve_size < l2size || p >= Threshold.L2Maxp) && l2size != sieve_size) {
 			l2size = sieve_size;
-
+			offset = start;
+		}
 		const uint64 p2 = (uint64)p * p;
-		if (p2 >= start) {
-#if WHEEL == WHEEL30
-			sieve_index = (p2 - start) % l2size;
-#else
-			sieve_index = p2 - start;
-#endif
+		while (p2 >= offset + l2size && p2 > offset) {
+			offset += l2size;
+//			offset = p2 - p2 % l2size + start % l2size; if (offset < p2) offset += l2size;
+		}
+
+		uint sieve_index = p - (uint)(offset % p);
+		if (p2 > offset) {
+			sieve_index = p2 - offset;
 		}
 
 		const uint pi = WHEEL_INIT[p % WHEEL].PrimeIndex;
-		WheelFirst wf = WHEEL_FIRST[sieve_index % WHEEL][pi];
-		sieve_index = (sieve_index + wf.Correct * p) / WHEEL30;
+		WheelFirst wf = WHEEL_FIRST[(sieve_index + offset) % WHEEL][pi];
+		sieve_index += wf.Correct * p;
 
-		//TODO:
-		if (p2 > start && p2 > start + l2size) {
-			sieve_index %= (l2size / WHEEL30);
-		}
-
+		MediumWheel[j].SieveIndex = (sieve_index / WHEEL30 << SIEVE_BIT) | wf.WheelIndex;
 		MediumWheel[j].Wp = (p / WHEEL << SIEVE_BIT) + pi;
-		MediumWheel[j].SieveIndex = (sieve_index << SIEVE_BIT) | wf.WheelIndex;
 	}
 
 	MediumWheel[j].Wp = -1u;
@@ -1409,8 +1337,6 @@ static int segmentProcessed(uchar bitarray[], const uint64 start, const uint byt
 		primes = doCall((ushort*)bitarray, start, bytes, cmd ->Primes, (sieve_call)cmd ->Data);
 	} else if (SAVE_BYTE == oper) {
 		primes = savePrimeByte((stype*)bitarray, bytes, cmd ->Data + cmd ->Primes);
-//	} else if (SAVE_BYTEGAP == oper) {
-//		primes = savePrimeGap(bitarray, start, dwords / 2, cmd ->Data + cmd ->Primes);
 //	} else if (SAVE_PRIME == oper) {
 //		primes = savePrime((stype*)bitarray, start, dwords, (uint64*)cmd ->Data + cmd ->Primes);
 	}
@@ -1585,7 +1511,7 @@ void setLevelSegs(uint cdata)
 			Threshold.L2Segs = segs;
 			Threshold.L2Maxp = Threshold.L2Size / (WHEEL30 * segs);
 			initThreshold();
-		} else if (level == 3 && ERAT_BIG > 2 && segs <= 6) {
+		} else if (level == 3 && segs > 2 && segs <= 6) {
 			Threshold.Msegs = segs;
 		}
 	}
@@ -1613,9 +1539,6 @@ static int checkSmall(const uint64 start, const uint64 end, Cmd* cmd)
 			primes ++;
 			if (cmd && cmd ->Oper == PCALL_BACK) {
 				(*(sieve_call)cmd ->Data)(primes, SmallPrime[i]);
-				cmd ->Primes += 1;
-			} else if (cmd && cmd ->Oper == SAVE_PRIME) {
-				((uint64*)cmd ->Data)[primes - 1] = SmallPrime[i];
 				cmd ->Primes += 1;
 			}
 		}
@@ -1806,6 +1729,7 @@ static uint initMediumSieve(const uint64 start, const uint sqrtp)
 	sievePrime(Prime + 1, medium + 1476);
 
 	if (sqrtp >= Threshold.L1Maxp) {
+		assert(medium * (26 + 2) / WHEEL30 < (-1u >> SIEVE_BIT));
 		initWheelMedium(sieve_size, medium + 256, start - start % WHEEL210);
 	}
 
@@ -2069,9 +1993,9 @@ static void fixRangeTest(uint64 lowerBound, const int64 range, uint64 Ret)
 		end = end - end % WHEEL210 + 6;
 		if (end > upperBound)
 			end = upperBound;
-
 		setSieveSize(rand() % MAX_SIEVE + 128);
-		setLevelSegs(rand() % 5 + 12), setLevelSegs(rand() % 5 + 22), setLevelSegs(rand() % 5 + 32);
+		setLevelSegs(rand() % 5 + 12), setLevelSegs(rand() % 5 + 22);
+		setLevelSegs(rand() % 3 + 34);
 		primes += doSieve(lowerBound, end - 1);
 		printf("Remaining chunk: %.2f%%\r", (int64)(upperBound - lowerBound) * 100.0 / range);
 		lowerBound = end;
@@ -2119,10 +2043,11 @@ static void startBenchmark( )
 	srand(time(0));
 	for (int j = 12; j <= 19; j ++) {
 		uint64 start = ipow(10, j), end = start + ipow(2, 32);
-		setLevelSegs(rand() % 5 + 12), setLevelSegs(rand() % 5 + 22), setLevelSegs(rand() % 5 + 32);
+		setLevelSegs(rand() % 5 + 12), setLevelSegs(rand() % 5 + 22);
+		setLevelSegs(rand() % 4 + 34);
 		primes = doSieve(start, end);
 		printf("pi2(10^%d, 10^%d+2^32) = %llu                 \n", j, j, primes);
-		assert(primes == primeCounts[j]);
+		assert (primes == primeCounts[j]);
 	}
 
 	Config.Progress = 0;
@@ -2131,13 +2056,13 @@ static void startBenchmark( )
 
 	const uint64 RangeData[][3] =
 	{
-		{ipow(01, 11), ipow(10, 11), 199708605},
+		{ipow(10, 11), ipow(10, 11), 199708605},
 		{ipow(10, 15), ipow(10, 11), 110670758},
 		{ipow(10, 17), ipow(10, 11), 86176910},
-		{ipow(10, 19), ipow(10, 11), 66176910},
-		{ipow(10, 14), ipow(10, 12), ipow(10, 9) * 31 +  16203073ul},
-		{ipow(10, 16), ipow(10, 12), ipow(10, 9) * 27 + 143405794ul},
-		{ipow(10, 18), ipow(10, 12), ipow(10, 9) * 24 + 127637783ul},
+		{ipow(10, 19), ipow(10, 11), 68985092},
+		{ipow(10, 14), ipow(10, 12), 1270127074},
+		{ipow(10, 16), ipow(10, 12), 972773783},
+		{ipow(10, 18), ipow(10, 12), 768599834},
 	};
 
 	for (int k = 0; k < sizeof(RangeData) / sizeof(RangeData[0]); k ++) {
@@ -2472,8 +2397,7 @@ int main(int argc, char* argv[])
 #endif
 
 #ifndef BIG_RANGE
-//	(61430713 = 6863 * 8951)
-	executeCmd("1e8");
+	executeCmd("1e16 1e6 s0248");
 	executeCmd("1e12 1e9; 1e16 1e9; e18 e9");
 #else
 	executeCmd("e16 1e10");
@@ -2489,4 +2413,3 @@ int main(int argc, char* argv[])
 	return 0;
 }
 #endif
-
