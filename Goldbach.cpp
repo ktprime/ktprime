@@ -16,7 +16,7 @@ http://numbers.computation.free.fr/Constants/Primes/twin.html.
 # include <stdio.h>
 # include <assert.h>
 
-# define GVERSION       "2.1"
+# define GVERSION       "2.2"
 # define MAXN           "1e16"
 # define MINN           10000000
 
