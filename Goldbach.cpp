@@ -5,8 +5,8 @@ in the last level caches of multi-cores processors.
 
 http://www.trnicely.net
 http://www.ieeta.pt/~tos/primes.html
-http://code.google.com/p/primesieve/
 http://numbers.computation.free.fr/Constants/Primes/twin.html.
+http://mathworld.wolfram.com/GoldbachPartition.html
 **************************************************************/
 
 # include <ctype.h>
@@ -16,7 +16,7 @@ http://numbers.computation.free.fr/Constants/Primes/twin.html.
 # include <stdio.h>
 # include <assert.h>
 
-# define GVERSION       "2.2"
+# define GVERSION       "2.1"
 # define MAXN           "1e16"
 # define MINN           10000000
 
@@ -29,7 +29,7 @@ http://numbers.computation.free.fr/Constants/Primes/twin.html.
 	# define POPCNT      1
 	# include <intrin.h>
 #elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44)
-	# define POPCNT      1
+	# define POPCNT      0
 	# include <popcntintrin.h>
 #else
 	# define POPCNT      0
@@ -52,9 +52,9 @@ http://numbers.computation.free.fr/Constants/Primes/twin.html.
 # define NO_ASM_X86      1
 #endif
 
-typedef unsigned char  uchar;
+typedef unsigned char uchar;
 typedef unsigned short ushort;
-typedef unsigned int   uint;
+typedef unsigned int uint;
 
 #ifdef _WIN32
 	typedef unsigned __int64 uint64;
@@ -72,10 +72,10 @@ typedef unsigned int   uint;
 # if BSHIFT == 3
 	typedef uchar utype;
 	# define MASK 7
-# elif BSHIFT ==  4
+# elif BSHIFT == 4
 	typedef ushort utype;
 	# define MASK 15
-# elif BSHIFT ==  5
+# elif BSHIFT == 5
 	typedef uint utype;
 	# define MASK 31
 # endif
@@ -93,7 +93,7 @@ enum EFLAG
 	PRINT_RET = 1 << 30,
 	PRINT_TIME = 1 << ('P' - 'A'),
 	PRINT_LOG = 1 << ('D' - 'A'),
-	SAVE_TASK   = 1 << ('A' - 'A'),
+	SAVE_TASK = 1 << ('A' - 'A'),
 	SAVE_RESUTL = 1 << ('S' - 'A'),
 	CHECK_PATTERN = 1 << ('R' - 'A'),
 };
@@ -130,14 +130,14 @@ Patterns = %d\n\
 Tasks = %d\n\
 Pbegi = %d\n\
 Pendi = %d\n\
-N = %llu\n\
-Result = %llu";
+N = %lld\n\
+Result = %lld";
 
 static const char* const PrintFormat =
 #if _MSC_VER == 1200
 	"G(%I64d) = %I64d";
 #else
-	"G(%llu) = %llu";
+	"G(%lld) = %lld";
 #endif
 
 /************************************/
@@ -178,8 +178,7 @@ static ushort WordReverse[1 << 16];
 //the first 10 even prime numbers
 static const uchar SmallPrime[ ] =
 {
-	2, 3, 5, 7, 11, 13,
-	17, 19, 23, 29, 31
+	2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31
 };
 
 //config
@@ -258,7 +257,6 @@ static void devideTaskData(int threads, int pbegi, int pendi)
 static uint64 startWorkThread(int threads, int pbegi, int pendi)
 {
 	int i;
-	//assert(pendi >= pbegi && pbegi >= 0);
 	if (threads > MAX_THREADS) {
 		threads = 4;
 	}
@@ -444,8 +442,7 @@ static void packQwordBit1(utype* bitarray, const int leng)
 	mem[1] = (uint64)(~0);
 }
 
-//use asm to accelerate hot spot
-static void setBitArray(utype bitarray[], int s1, int s2, const int step)
+static void set2BitArray(utype bitarray[], int s1, int s2, const int step)
 {
 	if (s2 > s1) {
 		s2 ^= (s1 ^= (s2 ^= s1));
@@ -599,7 +596,7 @@ static void sieveWheelFactor(utype bitarray[], const uint64 start, const int len
 //sieve prime in [start, start + leng]
 static void segmentedSieve(utype bitarray[], const uint64 start, const int leng, int first)
 {
-	const int sqrtn = isqrt(start + leng) + 1;
+	const int sqrtn = (int)(isqrt(start + leng)) + 1;
 	for (int i = first, p = SmallPrime[first - 1]; p < sqrtn; PRIME_NEXT(p, i)) {
 		crossOutFactor(bitarray, start, leng, p);
 	}
@@ -1051,7 +1048,7 @@ static int sieveGp(utype bitarray[], const int pattern1)
 		int s2 = asmMulDivSub(moudle, pattern1, p, leng);
 		if (s2 > leng)
 			s2 -= p;
-		setBitArray(bitarray, s1, s2, -p);
+		set2BitArray(bitarray, s1, s2, -p);
 #else
 		int s1 = asmMulDiv(moudle, pattern1, p);
 		int s2 = leng - asmMulDivSub(moudle, pattern2, p, leng);
@@ -1119,7 +1116,7 @@ static void printProgress(int tid, double time_use, int aves, int pcnt)
 		printf("%.2lf hour", totaltime / 3600);
 	}
 
-	printf(", goldbach partition ~= %llu\n", (uint64)aves * Gp.Patterns);
+	printf(", goldbach partition ~= %lld\n", (uint64)aves * Gp.Patterns);
 }
 
 //thread call: get result form pattern pbegi to pendi
@@ -1170,7 +1167,7 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 #else
 		scnt++;
 #endif
-		if ((scnt & Config.PrintGap) == 7) {
+		if ((scnt & Config.PrintGap) == 31) {
 			printProgress(tid, getTime() - tstart, (int)(gpn / (1 + pcuri - pbegi)), scnt);
 		}
 	}
@@ -1178,7 +1175,7 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 	free(bitarray);
 
 	if (CHECK_FLAG(PRINT_LOG)) {
-		printf("thread %d: pattern[%3d - %3d] = %llu\n", tid, pbegi, pendi, gpn);
+		printf("thread %d: pattern[%3d - %3d] = %lld\n", tid, pbegi, pendi, gpn);
 	}
 
 	return gpn;
@@ -1284,8 +1281,8 @@ static uint getDefaultWheel(const uint64 n)
 		wheel = 9699690;
 	} else if (powten <= 17) {
 		wheel = 223092870;
-	} else {
-		wheel = 223092870ul * 29;
+//	} else {
+//		wheel = 223092870ul * 29;
 	}
 
 	return wheel;
@@ -1297,9 +1294,9 @@ static int getWheel(const uint64 n)
 {
 	uint wheel = getDefaultWheel(n);
 
-	int cachesize = (int)(n / wheel);
+	const int cachesize = (int)(n / wheel);
 
-	int blocks = cachesize / (Config.CpuL2Size << 13);
+	const int blocks = cachesize / (Config.CpuL2Size << 13);
 
 	wheel *= (blocks + 1);
 
@@ -1398,7 +1395,7 @@ static int getSmallGp(const uint64 n)
 	int ret = getPartition(n, leng);
 
 	if (CHECK_FLAG(PRINT_LOG)) {
-		printf("sieve small n = %llu, leng = %d", n, leng);
+		printf("sieve small n = %lld, leng = %d", n, leng);
 		printf("\nand small ret = %d, and time use %.lf ms\n", ret, getTime( ) - ts);
 	}
 
@@ -1557,7 +1554,7 @@ static uint64 getGp(const uint64 n, int pn)
 
 #if (OMP)
 	omp_set_num_threads(Config.Threads);
-#pragma omp parallel for reduction(+:gpn) if (n >= MINN * 3)
+	#pragma omp parallel for reduction(+:gpn) if (n >= MINN * 3)
 	for (int oi = 0; oi < Config.Threads; oi++) {
 		int bi = pn / Config.Threads * oi;
 		int ei = bi + pn / Config.Threads;
@@ -1594,8 +1591,8 @@ static uint64 getGp(const uint64 n, int pn)
 static void printResult(const uint64 n, const uint64 gpn, double ts)
 {
 	int pow10 = ilog10(n);
-	if (n % ipow(10, pow10) == 0) {
-		printf("G(%de%d) = %llu", (int)(n / ipow(10, pow10)), pow10, gpn);
+	if (n % ipow(10, pow10) == 0 && n > 10000) {
+		printf("G(%de%d) = %lld", (int)(n / ipow(10, pow10)), pow10, gpn);
 	} else {
 		printf(PrintFormat, n, gpn);
 	}
@@ -1607,7 +1604,7 @@ static void printResult(const uint64 n, const uint64 gpn, double ts)
 	putchar('\n');
 }
 
-static uint64 GPartiton(const uint64 n, int pn)
+static uint64 gpartiton(const uint64 n, int pn)
 {
 	double ts = getTime( );
 
@@ -1654,7 +1651,7 @@ static int startTest(int tesecase, bool rwflag)
 			if (n < 1000000) {
 				n = 4 * n + 1000000;
 			}
-			GPartiton(n, 0);
+			gpartiton(n, 0);
 		} else {
 			uint64 res, n;
 			char linebuf[256] = {0};
@@ -1670,7 +1667,7 @@ static int startTest(int tesecase, bool rwflag)
 
 			uint64 gpn = getGp(n, 0);
 			if (gpn != res) {
-				printf("case %d with wrong result %llu, ", i, gpn);
+				printf("case %d with wrong result %lld, ", i, gpn);
 				printf(PrintFormat, n, res);
 				putchar('\n');
 			}
@@ -1723,7 +1720,7 @@ static void listDiffGp(const char params[][80], int cmdi)
 		freopen("batch.txt", "wb", stdout);
 	}
 
-	printf("%llu:%d:%d\n\n", start, (int)(2 + end - start) / 2, step);
+	printf("%lld:%d:%d\n\n", start, (int)(2 + end - start) / 2, step);
 
 	int pcnt = 0;
 	uint64 allSum = 0;
@@ -1732,10 +1729,10 @@ static void listDiffGp(const char params[][80], int cmdi)
 		if (isdigit(params[4][0])) {
 			printf("%d ", pcnt);
 		}
-		allSum += GPartiton(n, 0);
+		allSum += gpartiton(n, 0);
 	}
 
-	printf("average = %llu, ", allSum / pcnt);
+	printf("average = %lld, ", allSum / pcnt);
 
 	printf("all case time use %.lf ms\n", getTime( ) - ts);
 	freopen(CONSOLE, "w", stdout);
@@ -1780,7 +1777,7 @@ static void listPatterns(uint64 start, int count)
 	printf("wheel = %u\n", wheel);
 	for (int i = 0; i < count; i++) {
 		int patterns = getGppattern(start, wheel, 0);
-		printf("pattern(%llu) = %d\n", start, patterns);
+		printf("pattern(%lld) = %d\n", start, patterns);
 		start += 2;
 	}
 }
@@ -1811,7 +1808,7 @@ static void benchMark(const char params[][80])
 	uint64 gap = start;
 	for (; start * 10 <= n; ) {
 		for (int j = 0; j < 9; j++) {
-			GPartiton((j + 1) * gap, 0);
+			gpartiton((j + 1) * gap, 0);
 		}
 		start *= 10;
 		gap *= 10;
@@ -2011,7 +2008,7 @@ static int parseCmd(char params[][80])
 				} else if (tmp == 1) {
 					Config.PrintGap = Config.PrintGap * 2 + 1;
 				} else if (tmp == 0) {
-					Config.PrintGap >>= 1;
+					Config.PrintGap = 0;
 				}
 				break;
 			case 'H':
@@ -2095,7 +2092,7 @@ static bool executeCmd(const char* cmd)
 		} else if (cmdc == 'N') {
 			listPatterns(n1, n2);
 		} else if (cmdc == 'E' || isdigit(cmdc)) {
-			GPartiton(n1, n2);
+			gpartiton(n1, n2);
 		}
 
 		if (pcmd) {
@@ -2131,7 +2128,7 @@ int main(int argc, char* argv[])
 			executeCmd(argv[i]);
 	}
 
-	executeCmd("1e10;1e8+112");
+//	executeCmd("1e10;1e8+112");
 //	executeCmd("t1 d m7 1e14 200; e15 100");
 //	executeCmd("d m7 1e15");
 
@@ -2149,8 +2146,8 @@ int main(int argc, char* argv[])
 G(1e14) = 90350630388, 6481.20 s AMD X4 820
 
 MINGW: gcc 4.6.3
-CXXFLAGS: -Ofast -msse4 -s -pipe  -march=corei7 -funroll-loops
-windows 7 64 bit, AMD Althon 2 X4 641 2.8G  / Intel i3 350M 2.26G
+CXXFLAGS: -Ofast -msse4 -s -pipe -march=corei7 -funroll-loops
+windows 7 64 bit, AMD X4 641 2.8G/ Intel i3 350M 2.26G
 G(1e11) = 149091160        3.54  | 09.0 sec
 G(1e12) = 1243722370       42.8  | 89.4 sec
 G(1e13) = 10533150855      491.  | 990. sec
@@ -2165,11 +2162,11 @@ feature:
   2. detial algorithm and readme
 
 Linux g++:
-  g++ -Wall -march=native -s -pipe -O2 -ffunction-sections -fomit-frame-pointer -lpthread GPartiton.cpp
+  g++ -Wall -march=native -s -pipe -O2 -ffunction-sections -fomit-frame-pointer -lpthread gpartiton.cpp
 Mingw/g++:
-  g++ -Wall -mpopcnt -mtune=native -O2 -s -pipe GPartiton.cpp
+  g++ -Wall -mpopcnt -mtune=native -O2 -s -pipe gpartiton.cpp
 MS vc++:
-  cl /O2 /Os GPartiton.cpp
+  cl /O2 /Os gpartiton.cpp
 
  ****************************************************/
 
