@@ -16,7 +16,7 @@ http://en.wikipedia.org/wiki/Sophie_Germain_prime
 # include <stdio.h>
 # include <assert.h>
 
-# define SVERSION       "1.2"
+# define SVERSION       "1.0"
 # define MAXN           "1e16"
 # define MINN           100000000
 # define SGP            2
@@ -178,8 +178,7 @@ static ushort WordReverse[1 << 16];
 //the first 10 even prime numbers
 static const uchar SmallPrime[ ] =
 {
-	2, 3, 5, 7, 11, 13,
-	17, 19, 23, 29, 31
+	2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31
 };
 
 //config
@@ -811,14 +810,14 @@ static void initBitTable( )
 	}
 #endif
 
-	//4. init LeftMostBit1 table
+	//3. init LeftMostBit1 table
 	for (int m = 2; m < sizeof(LeftMostBit1) / sizeof(LeftMostBit1[0]); m += 2) {
 		LeftMostBit1[m + 0] = LeftMostBit1[m >> 1] + 1;
 		LeftMostBit1[m + 1] = 0;
 	}
 
 #if FAST_CROSS
-	//3. init CrossedTpl table, pre sieve the factor in array sievefactor
+	//4. init CrossedTpl table, pre sieve the factor in array sievefactor
 	sieveWheelFactor(CrossedTpl, 0, sizeof(CrossedTpl) * 16, SEGMENT_SIZE);
 #endif
 }
@@ -1149,10 +1148,9 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 		pnext = getNextPattern(pattern, pnext);
 #ifdef CHECK_PATTERNS
 		if (CHECK_FLAG(CHECK_PATTERN)) {
-			if (
-					gcd(Gp.Wheel, pattern) != 1
-					|| gcd(Gp.Wheel * SGP, NEXT_PAIR(pattern)) != 1
-			   )
+			if (gcd(Gp.Wheel, pattern) != 1
+				|| gcd(Gp.Wheel * SGP, NEXT_PAIR(pattern)) != 1
+			)
 				printf("error pattern = %d\n", pattern);
 			continue;
 		}
@@ -1172,7 +1170,7 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 #else
 		scnt++;
 #endif
-		if ((scnt & Config.PrintGap) == 7) {
+		if ((scnt & Config.PrintGap) == 31) {
 			printProgress(tid, getTime() - tstart, (int)(gpn / (1 + pcuri - pbegi)), scnt);
 		}
 	}
@@ -1606,7 +1604,7 @@ static uint64 getGp(const uint64 n, int pn)
 static void printResult(const uint64 n, const uint64 gpn, double ts)
 {
 	int pow10 = ilog10(n);
-	if (n % ipow(10, pow10) == 0) {
+	if (n % ipow(10, pow10) == 0 && n > 10000) {
 		printf("S(%de%d) = %llu", (int)(n / ipow(10, pow10)), pow10, gpn);
 	} else {
 		printf(PrintFormat, n, gpn);
@@ -1619,7 +1617,7 @@ static void printResult(const uint64 n, const uint64 gpn, double ts)
 	putchar('\n');
 }
 
-static uint64 SophieGermain(const uint64 n, const int pn)
+static uint64 sophieGermain(const uint64 n, const int pn)
 {
 	double ts = getTime( );
 
@@ -1675,7 +1673,7 @@ static void listDiffGp(const char params[][80], int cmdi)
 		if (isdigit(params[4][0])) {
 			printf("%d ", pcnt);
 		}
-		allSum += SophieGermain(n, 0);
+		allSum += sophieGermain(n, 0);
 	}
 
 	printf("average = %llu, ", allSum / pcnt);
@@ -1741,7 +1739,7 @@ static void benchMark(const char params[][80])
 	uint64 gap = start;
 	for (; start * 10 <= n; ) {
 		for (int j = 0; j < 9; j++) {
-			SophieGermain((j + 1) * gap, 0);
+			sophieGermain((j + 1) * gap, 0);
 		}
 		start *= 10;
 		gap *= 10;
@@ -1941,7 +1939,7 @@ static int parseCmd(char params[][80])
 				} else if (tmp == 1) {
 					Config.PrintGap = Config.PrintGap * 2 + 1;
 				} else if (tmp == 0) {
-					Config.PrintGap >>= 1;
+					Config.PrintGap = 0;
 				}
 				break;
 			case 'H':
@@ -2022,10 +2020,8 @@ static bool executeCmd(const char* cmd)
 			listDiffGp(params, cmdi);
 		} else if (cmdc == 'I') {
 			listPowGp(params, cmdi);
-//		} else if (cmdc == 'N') {
-//			listPatterns(n1, n2);
 		} else if (cmdc == 'E' || isdigit(cmdc)) {
-			SophieGermain(n1, n2);
+			sophieGermain(n1, n2);
 		}
 
 		if (pcmd) {
@@ -2096,7 +2092,7 @@ windows 7 64 bit, I5 3470 3.2G   / i3 350M 2.26G
 S(1e11) = 218116524        4.64  | 14.0 sec
 S(1e12) = 1822848478       52.8  | 140.4 sec
 S(1e13) = 15462601989      541.  | 1790. sec
-S(1e14) = 13280063038      7123  | 5.20 hour
+S(1e14) = 13280063038      6523  | 5.20 hour
 S(1e15) = 1154538341852    27.8  | 91.4 hour
 S(1e16) =                  400   |
 
@@ -2107,11 +2103,11 @@ feature:
   2. detial algorithm and readme
 
 Linux g++:
-  g++ -Wall -march=native -s -pipe -O2 -ffunction-sections -fomit-frame-pointer -lpthread SophieGermain.cpp
+  g++ -Wall -march=native -s -pipe -O2 -ffunction-sections -fomit-frame-pointer -lpthread sophieGermain.cpp
 Mingw/g++:
-  g++ -Wall -mpopcnt -mtune=native -O2 -s -pipe SophieGermain.cpp
+  g++ -Wall -mpopcnt -mtune=native -O2 -s -pipe sophieGermain.cpp
 MS vc++:
-  cl /O2 /Os SophieGermain.cpp
+  cl /O2 /Os sophieGermain.cpp
 
  ****************************************************/
 
