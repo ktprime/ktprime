@@ -876,7 +876,7 @@ static int initBucketInfo(const uint sieve_size, const uint sqrtp, const uint64 
 {
 //	assert ((range >> 32) < sieve_size);
 	BucketInfo.CurBucket = range / sieve_size + 1;
-	if (range % sieve_size == 0)
+	if (range % sieve_size == 0) //watch it
 		BucketInfo.CurBucket --;
 
 	//wheel 210 pattern, max pattern difference is 10 //30 ->6, 210 ->8
@@ -972,7 +972,7 @@ static int segmentedSieve(uint64 start, uint sieve_size, Cmd*);
 static void initBucketWheel(uint medium, uint sqrtp, const uint64 start, const uint64 range)
 {
 	uint nextp = 0; uint64 remp = 0;
-	if (++sqrtp == 0) sqrtp = -1u; //overflow
+	if (++sqrtp == 0) sqrtp = -1u; //watch overflow
 
 	for (uint segsize = L2_DCACHE_SIZE * (WHEEL30 << 10); medium < sqrtp; medium += segsize) {
 		if (segsize > sqrtp - medium)
@@ -1463,22 +1463,15 @@ static int segmentedSieve(uchar bitarray[], const uint64 start, const uint wheel
 
 		eratSieveSmall(bitarray + sieve_index / WHEEL30, start + sieve_index, segsize);
 
-#if L2_DCACHE_SIZE != MAX_SIEVE
 		//static int64 time_use = 0; int64 ts = getTime();
 		if (MediumWheel)
 			eratSieveMedium(bitarray + sieve_index / WHEEL30, start + sieve_index, segsize, Threshold.L1Index, Threshold.L2Maxp);
 		//time_use += getTime() - ts; if (sieve_size != Config.SieveSize) { printf("eratSieveMedium1 time %.f ms\n", time_use); time_use = 0; }
-#endif
 	}
 
 	//static int64 time_use1 = 0; int64 ts1 = getTime(); //280 ms
-#if L2_DCACHE_SIZE != MAX_SIEVE
 	if (medium >= Threshold.L2Maxp)
 		eratSieveMedium(bitarray, start, sieve_size, Threshold.L2Index, medium + 1);
-#else
-	if (medium >= Threshold.L1Maxp)
-		eratSieveMedium(bitarray, start, sieve_size, Threshold.L1Index, medium + 1);
-#endif
 
 	//time_use1 += getTime() - ts1; if (sieve_size != Config.SieveSize) { printf("eratSieveMedium time %lld ms\n", time_use1); time_use1 = 0; }
 	if (start >= Config.MinBucket) {
@@ -1692,7 +1685,7 @@ static uint64 pi(uint64 start, uint64 end, Cmd* cmd)
 	start -= wheel_offset;
 	int64 primes = checkSmall(start, end, cmd);
 
-	if (++end == 0) end --; //fix overflow 2^64 - 1
+	if (++end == 0) end --; //watch overflow 2^64 - 1
 
 	for (uint si = 0, sieve_size = Config.SieveSize; start < end; start += sieve_size) {
 		if (sieve_size > end - start) {
