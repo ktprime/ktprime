@@ -271,7 +271,8 @@ struct _BucketInfo
 //thread ...
 static _BucketInfo BucketInfo;
 static _Bucket Bucket [MAX_BUCKET];
-static Stock* StockPool [MAX_STOCK];
+static Stock StockCache [MAX_STOCK];
+static Stock* pStockHead;
 static WheelPrime* WheelPtr [(1 << 17) / MEM_BLOCK]; //2G vm
 
 #if CHECK
@@ -854,7 +855,6 @@ static int savePrimeGap(ushort bitarray[], const uint64 start, const int word_si
 
 static void allocWheelBlock(const uint blocks)
 {
-	static Stock StockCache [MAX_STOCK];
 	WheelPrime *pwheel = (WheelPrime*) malloc((blocks + 1) * MEM_WHEEL);
 	WheelPtr[BucketInfo.PtrSize ++] = pwheel;
 //	assert (pwheel && BucketInfo.PtrSize < sizeof(WheelPtr) / sizeof(WheelPtr[0]));
@@ -863,10 +863,12 @@ static void allocWheelBlock(const uint blocks)
 	//align by MEM_WHEEL
 	pwheel = (WheelPrime*)((size_t)pwheel + MEM_WHEEL - (size_t)pwheel % MEM_WHEEL);
 	for (uint i = 0; i < blocks; i ++) {
-		Stock* pStock = StockPool[BucketInfo.CurStock + i] = StockCache + i + BucketInfo.StockSize;
+		Stock* pStock = StockCache + i + BucketInfo.StockSize;
 		pStock ->Wheel = pwheel + WHEEL_SIZE * i;
-		pStock ->Next = NULL;
+		pStock ->Next = pStock + 1;
 	}
+	StockCache[BucketInfo.StockSize + blocks - 1].Next = pStockHead;
+	pStockHead = StockCache + BucketInfo.StockSize;
 
 	BucketInfo.StockSize += blocks;
 	BucketInfo.CurStock += blocks;
@@ -896,6 +898,7 @@ static int initBucketInfo(const uint sieve_size, const uint sqrtp, const uint64 
 	blocks += pix / WHEEL_SIZE + BucketInfo.MaxBucket;
 #endif
 
+	pStockHead = NULL;
 	if (BucketInfo.CurBucket == blocks)
 		BucketInfo.MaxBucket = blocks;
 
@@ -952,16 +955,17 @@ static void pushBucket(const uint sieve_index, const uint wp, const uchar wheel_
 	_Bucket* pbucket = Bucket + next_bucket;
 	WheelPrime* wheel = pbucket ->Wheel ++;
 	if ((size_t)wheel % MEM_WHEEL == 0) {
-		Stock* pstock = StockPool[-- BucketInfo.CurStock];
+#ifndef BIG_RANGE
+		if (--BucketInfo.CurStock == 0) {
+			allocWheelBlock(MEM_BLOCK);
+		}
+#endif
+		Stock* pstock = pStockHead;
+		pStockHead = pStockHead->Next;
 		wheel = pstock ->Wheel;
 		pbucket ->Wheel = pstock ->Wheel + 1;
 		pstock ->Next = pbucket ->Shead;
 		pbucket ->Shead = pstock;
-
-#ifndef BIG_RANGE
-		if (BucketInfo.CurStock == 0)
-			allocWheelBlock(MEM_BLOCK);
-#endif
 	}
 
 	wheel ->Wp = wp;
@@ -1405,7 +1409,7 @@ static void eratSieveBucket(uchar bitarray[], const uint sieve_size)
 		loops = WHEEL_SIZE;
 	}
 
-	for (Stock* phead = (Stock*)Bucket; phead = phead ->Next; loops = WHEEL_SIZE) {
+	for (Stock* phead = (Stock*)Bucket, *pNext = (Stock*)phead->Next; phead = pNext; loops = WHEEL_SIZE) {
 		WheelPrime* cur_wheel = phead ->Wheel;
 		while (loops) {
 #ifndef SBIG2
@@ -1414,7 +1418,11 @@ static void eratSieveBucket(uchar bitarray[], const uint sieve_size)
 			sieveBigOne(bitarray, sieve_size, cur_wheel ++), loops --;
 #endif
 		}
-		StockPool[BucketInfo.CurStock ++] = phead;
+
+		BucketInfo.CurStock ++;
+		pNext = phead->Next;
+		phead->Next = pStockHead;
+		pStockHead = phead;
 	}
 
 	BucketInfo.CurBucket --;
@@ -2480,7 +2488,7 @@ int main(int argc, char* argv[])
 	srand(time(0));
 	for (int j = 1; j < 20; j++) {
 		for (int i = 2; i <= 6; i++) {
-			setSieveSize(MAX_SIEVE/2);
+			setSieveSize(MAX_SIEVE / 2);
 			setLevelSegs(i + 30); setLevelSegs(rand() % 5 + 12), setLevelSegs(rand() % 5 + 22);
 			const uint64 medium = Config.SieveSize / i;
 			const uint64 start = medium * medium;
