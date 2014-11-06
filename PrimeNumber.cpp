@@ -1,27 +1,27 @@
 //fast segmented sieving of prime number
 /***
-MINGW: gcc 4.7.3
+MINGW: gcc 4.9.1
 CXXFLAG:g++ -march=native [-DW210,-DSAFE=1] -funroll-loops -O3 -s -pipe;
 Windows 7 x64,              	X4 641 2.8G /I3 350M 2.26G/i5 3470 3.2G
-pi(1e11, 1e11+1e10) = 394050419        4.54 / 5.25/3.16
-pi(1e12, 1e12+1e10) = 361840208        5.56 / 6.31/3.69
-pi(1e13, 1e13+1e10) = 334067230        7.03 / 7.66/4.21
-pi(1e14, 1e14+1e10) = 310208140        8.74 / 9.49/5.02
-pi(1e15, 1e15+1e10) = 289531946        10.42/11.41/6.00
-pi(1e16, 1e16+1e10) = 271425366        12.15/13.35/6.92
-pi(1e17, 1e17+1e10) = 255481287        14.28/15.58/8.02
-pi(1e18, 1e18+1e10) = 241272176        17.50/18.95/9.56
-pi(1e19, 1e19+1e10) = 228568014        24.20/25.60/12.53
+pi(1e11, 1e11+1e10) = 394050419        4.54 / 5.25/3.06
+pi(1e12, 1e12+1e10) = 361840208        5.56 / 6.31/3.49
+pi(1e13, 1e13+1e10) = 334067230        7.03 / 7.66/4.04
+pi(1e14, 1e14+1e10) = 310208140        8.74 / 9.49/4.85
+pi(1e15, 1e15+1e10) = 289531946        10.42/11.41/5.69
+pi(1e16, 1e16+1e10) = 271425366        12.15/13.35/6.66
+pi(1e17, 1e17+1e10) = 255481287        14.28/15.58/7.70
+pi(1e18, 1e18+1e10) = 241272176        17.50/18.95/9.15
+pi(1e19, 1e19+1e10) = 228568014        24.20/25.60/12.17
 
-pi(1e18, 1e18+1e6) = 24280              1.16/0.72/0.49
-pi(1e18, 1e18+1e8) = 2414886            1.80/1.54/0.90
-pi(1e18, 1e18+1e9) = 24217085           3.81/3.80/1.94
-pi(1e18, 1e18+1e12)= 24127637783        1546/1640/860
-pi(1e16, 1e16+1e12)= 27143405794        1166/1310/690
-pi(1e14, 1e14+1e12)= 31016203073        880 / 950/500
+pi(1e18, 1e18+1e6) = 24280              1.16/0.72/0.46
+pi(1e18, 1e18+1e8) = 2414886            1.80/1.54/0.83
+pi(1e18, 1e18+1e9) = 24217085           3.81/3.80/1.90
+pi(1e18, 1e18+1e12)= 24127637783        1546/1640/820
+pi(1e16, 1e16+1e12)= 27143405794        1166/1310/660
+pi(1e14, 1e14+1e12)= 31016203073        880 / 950/474
 
 doc:
-	http://www.ieeta.pt/~tos/software/prime_sieve.html
+	http://sweet.ua.pt/tos/software/prime_sieve.html
 	http://code.google.com/p/primesieve/wiki/Links
 	http://primesieve.org/
 	http://www.compileonline.com/
@@ -929,7 +929,7 @@ static void initWheelMedium(const uint sieve_size, const uint maxp, const uint64
 
 		uint sieve_index = p - (uint)(offset % p);
 		if (p2 > offset) {
-			sieve_index = p2 - offset;
+			sieve_index = (uint)(p2 - offset);
 		}
 
 		const uint pi = WHEEL_INIT[p % WHEEL].PrimeIndex;
@@ -940,7 +940,7 @@ static void initWheelMedium(const uint sieve_size, const uint maxp, const uint64
 		MediumWheel[j].Wp = (p / WHEEL << SIEVE_BIT) + pi;
 	}
 
-	MediumWheel[j].Wp = -1u;
+	MediumWheel[j].Wp = (uint)(-1);
 }
 
 static void pushBucket(const uint sieve_index, const uint wp, const uchar wheel_index)
@@ -976,7 +976,7 @@ static int segmentedSieve(uint64 start, uint sieve_size, Cmd*);
 static void initBucketWheel(uint medium, uint sqrtp, const uint64 start, const uint64 range)
 {
 	uint nextp = 0; uint64 remp = 0;
-	if (++sqrtp == 0) sqrtp = -1u; //watch overflow
+	if (++sqrtp == 0) sqrtp = (uint)(0 - 1u); //watch overflow
 
 	for (uint segsize = L2_DCACHE_SIZE * (WHEEL30 << 10); medium < sqrtp; medium += segsize) {
 		if (segsize > sqrtp - medium)
@@ -1003,7 +1003,7 @@ static void initBucketWheel(uint medium, uint sqrtp, const uint64 start, const u
 			if (p > nextp) {
 				remp = start / (nextp = p + pmax);
 				if (p > nextp)
-					remp = start >> 32, nextp = -1u;
+					remp = start >> 32, nextp = (unsigned int)(-1);
 			}
 			uint sieve_index = p - fastMod(start - remp * p, p);
 #else
@@ -1693,7 +1693,8 @@ static uint64 pi(uint64 start, uint64 end, Cmd* cmd)
 	start -= wheel_offset;
 	int64 primes = checkSmall(start, end, cmd);
 
-	if (++end == 0) end --; //watch overflow 2^64 - 1
+
+	if (++end == 0) end --; //fix overflow 2^64 - 1
 
 	for (uint si = 0, sieve_size = Config.SieveSize; start < end; start += sieve_size) {
 		if (sieve_size > end - start) {
@@ -1838,7 +1839,7 @@ static uint initMediumSieve(const uint64 start, const uint sqrtp)
 
 	if (sqrtp >= Threshold.L1Maxp) {
 		//medium < 42358325 or (ERAT_BIG > 0.5 || MAX_SIEVE < 2048)
-		assert(medium * (8 + 2) / WHEEL30 < (-1u >> SIEVE_BIT));
+//		assert(medium * (8 + 2) / WHEEL30 < (-1u >> SIEVE_BIT));
 		initWheelMedium(sieve_size, medium + 256, start - start % WHEEL210);
 	}
 
@@ -1882,7 +1883,7 @@ uint64 doSieve(const uint64 start, const uint64 end, Cmd* cmd = NULL)
 	}
 
 #ifndef BIG_RANGE
-	assert(BucketInfo.StockSize == BucketInfo.CurStock);
+//	assert(BucketInfo.StockSize == BucketInfo.CurStock);
 #endif
 
 	memset(&BucketInfo, 0, sizeof(BucketInfo));
@@ -2492,7 +2493,7 @@ int main(int argc, char* argv[])
 			setLevelSegs(i + 30); setLevelSegs(rand() % 5 + 12), setLevelSegs(rand() % 5 + 22);
 			const uint64 medium = Config.SieveSize / i;
 			const uint64 start = medium * medium;
-			const uint64 range = ipow(10, 7) + (uint)rand() * rand();
+			const uint64 range = ipow(10, 10) + (uint)rand() * rand();
 			const uint64 r1 = doSieve(start - range, start + range, NULL);
 
 			setSieveSize(L2_DCACHE_SIZE * 2);
