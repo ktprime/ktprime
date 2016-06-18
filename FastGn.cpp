@@ -14,12 +14,13 @@
 # define L1_SIEVE_SEG    4
 
 //max continuous goldbach partition number
-# define MAX_GPCOUNT     20000
+# define MAX_GPCOUNT     10000
 # define MAX_THREADS     32
 # define OMP             0
 
-# define BIT_SCANF       1
-# define PRIME_DIFF      1
+# define BIT_SCANF       0
+# define PRIME_DIFF      0
+# define WORD_BIT        16
 
 //use of the SSE4.2/ SSE4a POPCNT instruction for fast bit counting.
 #if _MSC_VER > 1300
@@ -55,13 +56,13 @@ typedef unsigned short ushort;
 typedef unsigned int uint;
 
 #ifdef _WIN32
-	static const char* GPFORMAT = "G(%I64d) = %I64d\n";
+	const char* GPFORMAT = "G(%I64d) = %I64d\n";
 	typedef __int64 int64;
 	typedef unsigned __int64 uint64;
 	# include <windows.h>
 	# define CONSOLE "CON"
 #else
-	static const char* GPFORMAT = "G(%llu) = %llu\n";
+	const char* GPFORMAT = "G(%lld) = %lld\n";
 	typedef long long int64;
 	typedef unsigned long long uint64;
 	# include <sys/time.h>
@@ -107,12 +108,14 @@ static struct CacheInfo
 	int L1Size;
 	int L1Maxp;
 	int L1Index;
+	int L1Prime;
 	int L2Size;
 }
 CpuCache =
 {
 	(L1_CACHE_SIZE << 10) * WHEEL,
 	(L1_CACHE_SIZE << 10) / L1_SIEVE_SEG,
+	0,
 	0,
 	256
 };
@@ -186,7 +189,7 @@ static struct Config
 {
 	false, true, false, false, true,
 	2, 4, 4 * L1_CACHE_SIZE * (WHEEL << 10),
-	(1 << 16) - 1, 1, 0xffff
+	(1 << 17) - 1, 1, 0xffff
 };
 
 //small prime buffer up to 1e7
@@ -202,7 +205,7 @@ static uchar SievedTpl8[8][(2 * BUFFER_SIZE) / 8 + 32];
 
 #if BIT_SCANF == 0
 //bit 1 left most table
-static char LeftMostBit1[1 << 16];
+static char LeftMostBit1[1 << WORD_BIT];
 #endif
 
 //15 - 8 sgi | 7 - 4 step |0 - 3 wi;
@@ -210,17 +213,17 @@ static ushort WheelSkip[WHEEL][8];
 
 //number of bits 1 binary representation table in Range[0-2^16)
 #if POPCNT == 0
-static uchar WordNumBit1[1 << 16];
+static uchar WordNumBit1[1 << WORD_BIT];
 #endif
 
-//WordReverse[i] is equal to the bit reverse of i (i < 2^16)
-static ushort WordReverse[1 << 16];
+//WordReverse[i] is equal to the bit reverse of i (i < 2^WORD_BIT)
+static ushort WordReverse[1 << WORD_BIT];
 
 //map 8-bit char to 30 bit integer number
-static uint Map16To30[1 << 16];
+static uint Map16To30[1 << WORD_BIT];
 
 //map wheel byte
-static uchar PatternMask[1 << 16];
+static uchar PatternMask[1 << WORD_BIT];
 
 //G(i) is goldbach partition of start + 2*i
 static uint64 GP[MAX_GPCOUNT + WHEEL + 2];
@@ -289,7 +292,7 @@ static struct TaskInfo
 	uint64 minn;
 	uint64 first;
 	uint64* gp;
-	uint64 gpbuf[MAX_GPCOUNT];
+	uint64* gpbuf;
 } Tdata[MAX_THREADS];
 
 static int setSieveSize(uint sievesize);
@@ -444,6 +447,20 @@ static void cpuid(int cpuinfo[4], int id)
 #endif
 }
 
+static void setL1Data(int L1Size)
+{
+	CpuCache.L1Size = (L1Size << 10) * WHEEL;
+	CpuCache.L1Maxp = (L1Size << 10) / L1_SIEVE_SEG;
+
+	uint j = 8 + FIRST_SIEVE / 23, p = FIRST_SIEVE;
+	while (p < CpuCache.L1Maxp) {
+		NEXT_PRIME(p, j);
+	}
+
+	CpuCache.L1Index = j;
+	CpuCache.L1Prime = p;
+}
+
 //http://msdn.microsoft.com/en-us/library/hh977022%28v=vs.110%29.aspx
 static int getCpuInfo()
 {
@@ -464,11 +481,11 @@ static int getCpuInfo()
 
 	//amd cpu
 	if (cpuName[0] == 'A') {
-		CpuCache.L1Size = 64 * (WHEEL << 10);
+		setL1Data(64);
 	} else {
-		CpuCache.L1Size = 32 * (WHEEL << 10);
+		setL1Data(32);
 	}
-	CpuCache.L1Maxp = CpuCache.L1Size / (WHEEL * L1_SIEVE_SEG);
+
 	CpuCache.L2Size = cpuinfo[2] >> 16;
 
 	return cpuinfo[2] >> 16;
@@ -479,16 +496,7 @@ static int getSystemInfo( )
 #ifdef _WIN32
 	SYSTEM_INFO si;
 	GetSystemInfo(&si);
-
 	Config.Threads = si.dwNumberOfProcessors;
-
-	if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
-		printf("Cpu arch = x86, ");
-#if PROCESSOR_ARCHITECTURE_AMD64
-	else if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
-		printf("Cpu arch = x86-64, ");
-#endif
-	return Config.Threads;
 #else
 	Config.Threads = sysconf(_SC_NPROCESSORS_CONF);
 #endif
@@ -529,6 +537,7 @@ static int divideTask(const int threads, const uint64 minn, int gpcount)
 			if (i == threads - 1)
 				Tdata[i].gpcount = (minn + 2 * gpcount - Tdata[i].minn) >> 1;
 		} else {
+			Tdata[i].gpbuf = (uint64*)malloc((gpcount + 30) * sizeof(uint64));
 			Tdata[i].gpcount = gpcount;
 			Tdata[i].minn = minn;
 		}
@@ -551,9 +560,7 @@ static void startWorkThread(int threads, uint64 minn, int gpcount)
 	}
 	WaitForMultipleObjects(threads, thandle, true, INFINITE);
 	for (i = 0; i < threads; i++) {
-		if (thandle[i]) {
-			CloseHandle(thandle[i]);
-		}
+		CloseHandle(thandle[i]);
 	}
 #else
 	pthread_t tid[MAX_THREADS];
@@ -565,11 +572,12 @@ static void startWorkThread(int threads, uint64 minn, int gpcount)
 	}
 #endif
 
-	if (Config.Advanced && Tdata[0].gpbuf) {
-		for (i = 0; i < gpcount; i++) {
-			GP[i] = 0;
-			for (int t = 0; t < threads; t++)
+	if (Config.Advanced) {
+		memset(GP, 0, sizeof(GP[0]) * gpcount);
+		for (int t = 0; t < threads; t++) {
+			for (i = 0; i < gpcount; i++)
 				GP[i] += Tdata[t].gpbuf[i];
+			free((void*)Tdata[t].gpbuf);
 		}
 	}
 }
@@ -626,7 +634,7 @@ RETP:
 #else
 
 	const uchar masks0 = (uchar)wordmask;
-	const uchar masks1 = wordmask >> 8;
+	const uchar masks1 = wordmask >> CHAR_BIT;
 
 	while (ps1 <= pend) {
 		*ps1 |= masks1; ps1 += step;
@@ -650,8 +658,8 @@ inline static int countBit1(uint64 n)
 	return __builtin_popcountll(n);
 #elif 1
 	const uint hig = (uint)(n >> 32), low = (uint)n;
-	return WordNumBit1[(ushort)low] + WordNumBit1[low >> 16] +
-		WordNumBit1[(ushort)hig] + WordNumBit1[hig >> 16];
+	return WordNumBit1[(ushort)low] + WordNumBit1[low >> WORD_BIT] +
+		WordNumBit1[(ushort)hig] + WordNumBit1[hig >> WORD_BIT];
 #else
 	n -= (n >> 1) & 0x5555555555555555ull;
 	n = (n & 0x3333333333333333ull) + ((n >> 2) & 0x3333333333333333ull);
@@ -936,56 +944,47 @@ static int convertByteToWheel(ushort srcarray[], const int wordleng, uchar dstar
 	return wordleng;
 }
 
-//move bit from [0, bitleng) to [highpos, highpos + bitleng)
-static void shiftBitToHigh(uchar bitarray[], const int bitleng, const int highpos)
-{
-	if (highpos % CHAR_BIT == 0) {
-		memmove(bitarray + highpos / CHAR_BIT, bitarray, bitleng / CHAR_BIT + 32);
-	} else {
-		uint* plowdword = (uint*)bitarray + (highpos + bitleng) / 32;
-		const int bitmove = highpos % 16;
-		for (int i = bitleng / 32 + 1; i > 0; i--) {
-			const uint lowword = *(uint64*)plowdword << bitmove;
-			*plowdword -- = lowword;
-		}
-	}
-}
-
-//move bit from [lowpos, lowpos + bitleng) to [0, bitleng)
+//move bit from [lowpos, lowpos + bitleng) to [0, bitleng) lowpos <= CHAR_BIT 
 static void shiftBitToLow(uchar bitarray[], const int bitleng, const int lowpos)
 {
+#if 0
 	if (lowpos % CHAR_BIT == 0) {
 		memmove(bitarray, bitarray + lowpos / CHAR_BIT, bitleng / CHAR_BIT + 32);
-	} else {
-		uint* plowdword = (uint*)bitarray + lowpos / CHAR_BIT;
-		const int bitmove = lowpos % 16;
-		for (int i = bitleng / 32 + 1; i > 0; i--) {
-			const uint newword = *(uint64*)plowdword >> bitmove;
-			*plowdword++ = newword;
-		}
+		return ;
+	}
+#endif
+
+	uint* plowdword = (uint*)bitarray + lowpos / 32;
+	const int bitmove = lowpos % 32;
+	for (int i = bitleng / 32 + 1; i > 0; i--) {
+		const uint newword = *(uint64*)plowdword >> bitmove;
+		*plowdword++ = newword;
 	}
 }
 
-//copy from srcarray with bit in [lowpos, lowpos + bitleng) to dstarray in [0, bitleng]
+//copy from srcarray with bit in [lowpos, lowpos + bitleng) to dstarray in [0, bitleng] lowpos < CHAR_BIT
 static void shiftBitToLow2(uchar srcarray[], const int bitleng, const int lowpos, uchar dstarray[])
 {
+#if 0
 	if (lowpos % CHAR_BIT == 0) {
 		memcpy(dstarray, srcarray + lowpos / CHAR_BIT, bitleng / CHAR_BIT + 32);
-	} else {
-		uint* plowdword = (uint*)(srcarray + lowpos / 16);
-		uint* pdstdword = (uint*) dstarray;
-		const int bitmove = lowpos % 16;
+		return
+	}
+#endif
 
-		for (int i = bitleng / 32 + 1; i > 0; i--) {
-			const uint newword = *(uint64*)plowdword++ >> bitmove;
-			*pdstdword++ = newword;
-		}
+	uint* plowdword = (uint*)(srcarray + lowpos / 32);
+	uint* pdstdword = (uint*) dstarray;
+	const int bitmove = lowpos % 32;
+
+	for (int i = bitleng / 32 + 1; i > 0; i--) {
+		const uint newword = *(uint64*)plowdword++ >> bitmove;
+		*pdstdword++ = newword;
 	}
 }
 
-static void reverseByteArray(uchar* pbeg, uchar* pend)
+static void reverseArray(uchar* pbeg, int byteleng)
 {
-	ushort* ps = (ushort*)(pbeg + 0), * pe = (ushort*)(pend - 1);
+	ushort* ps = (ushort*)(pbeg + 0), * pe = (ushort*)(pbeg + byteleng - 2);
 	while (ps <= pe) {
 		const ushort tmp = (*ps >> CHAR_BIT) | (*ps << CHAR_BIT);
 		*ps++ = (*pe >> CHAR_BIT) | (*pe << CHAR_BIT);
@@ -994,14 +993,14 @@ static void reverseByteArray(uchar* pbeg, uchar* pend)
 }
 
 //reverse word array bitarray with number of byteleng
-static void reverseBitArray(uchar bitarray[], const int byteleng)
+static void reverseByteArray(uchar bitarray[], const int byteleng)
 {
 	uint* ps = (uint*)(bitarray);
 	uint* pe = (uint*)(bitarray + byteleng - 4);
 
 	while (ps <= pe) {
-		const uint tmp = WordReverse[*ps >> 16] | (WordReverse[*ps & 0xffff] << 16);
-		*ps++ = WordReverse[*pe >> 16] | (WordReverse[*pe & 0xffff] << 16);
+		const uint tmp = WordReverse[*ps >> WORD_BIT] | (WordReverse[*ps & 0xffff] << WORD_BIT);
+		*ps++ = WordReverse[*pe >> WORD_BIT] | (WordReverse[*pe & 0xffff] << WORD_BIT);
 		*pe-- = tmp;
 	}
 
@@ -1015,25 +1014,13 @@ static void reverseBitArray(uchar bitarray[], const int byteleng)
 
 //reverse bitarray with bit in [0, bitleng) with bitleng > 0
 //swap the kth and (bitleng - kth - 1) bit value of bitarray
-static void reverseBitPack(uchar bitarray[], const int bitleng)
+static void reverseBitArray(uchar bitarray[], const int bitleng)
 {
 	const int bitremains = bitleng % CHAR_BIT;
-
-#if 1
-	reverseBitArray(bitarray, (bitleng + CHAR_BIT - bitremains) / CHAR_BIT);
-	shiftBitToLow(bitarray, bitleng + 16, CHAR_BIT - bitremains);
-#else
-	const int bytes = bitleng / CHAR_BIT;
-	uint buffer[BLOCK_SIZE / 64 + 9];
-	uint* pe = (uint*)(bitarray + bytes);
-	uint* ps = buffer;
-
-	while ((uchar*)pe >= bitarray) {
-		const uint tmp = *(uint64*)--pe >> bitremains;
-		*ps++ = (WordReverse[(ushort)tmp]) << 16u | (WordReverse[tmp >> 16]);
+	reverseByteArray(bitarray, bitleng / CHAR_BIT + (CHAR_BIT + bitremains - 1) / CHAR_BIT);
+	if (bitremains > 0) {
+		shiftBitToLow(bitarray, bitleng, CHAR_BIT - bitremains);
 	}
-	memcpy(bitarray, buffer, bytes + 9);
-#endif
 }
 
 static void splitToBitArray(uchar srcarray[], const int bitleng, uchar dstarray[][BUFFER_SIZE8])
@@ -1044,11 +1031,11 @@ static void splitToBitArray(uchar srcarray[], const int bitleng, uchar dstarray[
 		ushort word[4];
 	} utmp;
 
-#if 1
+#if 0
 	for (int i = 0; i < 8; i++) {
-		//if ((Config.GpMask & (1 << i)) == 0) {
-		//		continue;
-		//}
+		if ((Config.GpMask & (1 << i)) == 0) {
+			continue;
+		}
 		uchar* prc = dstarray[i];
 		for (int j = 0; j < bitleng; j += 8) {
 			utmp.mask = (*(uint64*)(srcarray + j) >> i) & (0x0101010101010101);
@@ -1120,11 +1107,10 @@ static int dumpGp(uint64 offset, const int wordlengs, const ushort* bitarray, ui
 		total = gps;
 	}
 
-	offset += 1;
 	for (int bi = 0; bi <= wordlengs; bi++) {
 		ushort mask = ~bitarray[bi];
 		while (mask > 0) {
-			printf("%u %llu\n", total++, offset + PRIME_OFFSET(mask) * 2);
+			printf("%u %llu\n", total++, offset + PRIME_OFFSET(mask) * 2 + 1);
 			mask &= mask - 1;
 			primes++;
 		}
@@ -1324,7 +1310,7 @@ sieveGp(uchar bitarray[], const uchar* pend, const uint p, uint offset, uint mul
 	}
 	if (pbeg[3] == 0) {
 		pbeg[3] = pbeg[2];
-		mask0 |= (mask0 >> 16) << 24;
+		mask0 |= (mask0 >> WORD_BIT) << 24;
 	}
 	crossOutFactor4(pbeg, pend, mask0, p);
 #endif
@@ -1350,7 +1336,7 @@ sieveSmall1(uchar bitarray[], const uchar* pend, const uint p, uint offset, uint
 		offset += (multiples % 4) * 2 * p; multiples /= 4;
 
 		uchar* ps1 = bitarray + offset / WHEEL;
-		wordmask |= WheelMask[offset % WHEEL] << 8;
+		wordmask |= WheelMask[offset % WHEEL] << CHAR_BIT;
 		offset += (multiples % 4) * 2 * p; multiples /= 4;
 		crossOutFactor2(ps0, ps1, pend, wordmask, p);
 	}
@@ -1393,14 +1379,18 @@ sieveSmall3(uchar dstarray[][BUFFER_SIZE8], const uint sleng, const uint p, uint
 	}
 }
 
-static void doSieve2(uchar dstarray[][BUFFER_SIZE8], const uint64 start, const uint sievesize)
+//core code of this algorithm
+//sieve prime multiples in [start, start + sievesize)
+static int segmentedSieve2(uint64 start, const uint sievesize, uchar dstarray[][BUFFER_SIZE8])
 {
+	const int sleng = sievesize / WHEEL * 1 + 8;
+	const int byteleng = setSieveTpl2(start, sievesize, dstarray);
+	start -= start % WHEEL;
+
 	uint sqrtp = isqrt(start + sievesize) + 1;
 	if ((start + sievesize) < ((uint64)sqrtp) * sqrtp) {
 		sqrtp = isqrt(start + sievesize) + 2;
 	}
-
-	const int sleng = sievesize / WHEEL * 1 + 8;
 
 	uint j = 8 + FIRST_SIEVE / 23, p = FIRST_SIEVE;
 	for (; p < sqrtp; NEXT_PRIME(p, j)) {
@@ -1418,14 +1408,6 @@ static void doSieve2(uchar dstarray[][BUFFER_SIZE8], const uint64 start, const u
 			sieveSmall3(dstarray, sleng, p, offset, multiples);
 		}
 	}
-}
-
-//core code of this algorithm
-//sieve prime multiples in [start, start + sievesize)
-static int segmentedSieve2(const uint64 start, const uint sievesize, uchar dstarray[][BUFFER_SIZE8])
-{
-	const int byteleng = setSieveTpl2(start, sievesize, dstarray);
-	doSieve2(dstarray, start - start % WHEEL, sievesize);
 
 	return byteleng;
 }
@@ -1440,9 +1422,9 @@ static void doSieve(uchar bitarray[], const uint64 start, const uint sievesize, 
 	const uchar* pend = bitarray + sievesize / WHEEL;
 
 	uint j = 8 + FIRST_SIEVE / 23, p = FIRST_SIEVE;
-	//TODO:
-	while (p < minp) {
-		NEXT_PRIME(p, j);
+	if (minp == CpuCache.L1Maxp) {
+		p = CpuCache.L1Prime;
+		j = CpuCache.L1Index;
 	}
 
 	for (; p < sqrtp; NEXT_PRIME(p, j)) {
@@ -1641,7 +1623,7 @@ static void initWheelSkip()
 static void initBitTable( )
 {
 	//1. init WordNumBit1 table in 0-2^16
-	int nbitsize = 1 << 16;
+	int nbitsize = 1 << WORD_BIT;
 	int i;
 #if POPCNT == 0
 	WordNumBit1[0] = 0;
@@ -1652,16 +1634,16 @@ static void initBitTable( )
 	//2. init bit reverseByte of word table
 	uchar bytereverse[256] = {0};
 	nbitsize = sizeof(WordReverse) / sizeof(WordReverse[0]);
-	for (i = 1; i < (1 << 8); i++)
+	for (i = 1; i < (1 << CHAR_BIT); i++)
 		bytereverse[i] = reverseByte((uchar)i);
 	for (i = 1; i < nbitsize; i++)
-		WordReverse[i] = bytereverse[i >> 8] | (bytereverse[i & 255] << 8);
+		WordReverse[i] = bytereverse[i >> CHAR_BIT] | (bytereverse[i & 255] << CHAR_BIT);
 
 	//3. init Map16To30 table
 	nbitsize = sizeof(Map16To30) / sizeof(Map16To30[0]);
 	for (i = 0; i < nbitsize; i++) {
 		uint mask = (uint)(~0 - (0x11 << 30));
-		for (int j = 0; j < 16; j++) {
+		for (int j = 0; j < WORD_BIT; j++) {
 			if ((i & (1 << j)) == 0)
 				mask &= ~(1 << (Pattern[j] / 2));
 		}
@@ -1670,7 +1652,7 @@ static void initBitTable( )
 
 #if BIT_SCANF == 0
 	//4. init LeftMostBit1 table
-	for (int m = 2; m < (1 << 16); m += 2) {
+	for (int m = 2; m < (1 << WORD_BIT); m += 2) {
 		LeftMostBit1[m + 0] = LeftMostBit1[m >> 1] + 1;
 		LeftMostBit1[m + 1] = 0;
 	}
@@ -1822,12 +1804,12 @@ static int addOneGp35(const uint64 maxn)
 		gmask |= 0x2;
 	}
 
-	if (gps > 0 && Config.PrintGp) {
-		if (gps == 2)
+	if (Config.PrintGp) {
+		if (gmask == 0)
 			puts("1 3\n2 5");
 		else if (gmask & 0x02)
 			puts("1 3");
-		else
+		else if (gmask & 0x01)
 			puts("1 5");
 	}
 
@@ -1909,14 +1891,14 @@ static int segmentedGp01(const uint64 start1, const uint64 start2, const uint si
 	segmentedSieve(start1, sievesize, bitarray1);
 	segmentedSieve(start2, sievesize, bitarray2);
 	//10% time use
-	reverseBitPack(bitarray2, (sievesize + start2 % WHEEL) >> 1);
+	reverseBitArray(bitarray2, (sievesize + start2 % WHEEL) >> 1);
 
 	//add smallest prime 3 and 5
 	if (start1 == 0) {
 		gps = addOneGp35(start2 + sievesize - 4);
 	}
 
-	for (int i = 0; i * (CHAR_BIT * 2) <= sievesize; i += 8)
+	for (int i = 0; i * (CHAR_BIT * 2) <= sievesize; i += CHAR_BIT)
 		*(uint64*)(bitarray1 + i) |= *(uint64*)(bitarray2 + i);
 
 	if (Config.PrintGp) {
@@ -1944,8 +1926,7 @@ static int segmentedGp02(const uint64 start1, const uint64 start2, const uint si
 	for (int i = byteleng2 - 1, j = 0; i >= 0; j += 2) {
 		const uint gmask = *(uint*)(bitarray2 + (i -= 2));
 		*(ushort*)(bitarray1 + j) |=
-			(PatternMask[(ushort)(gmask >> CHAR_BIT)]) |
-			(PatternMask[(ushort)gmask] << CHAR_BIT);
+			(PatternMask[(ushort)(gmask >> CHAR_BIT)]) | (PatternMask[(ushort)gmask] << CHAR_BIT);
 	}
 
 	if (start1 == 0) {
@@ -1975,7 +1956,7 @@ static void segmentedGp1(const uint64 start1, const uint64 start2, const uint si
 	segmentedSieve(start2, sievesize + gpcount * 2 + WHEEL, bitarray2);
 
 	int bitleng = (sievesize + start2 % WHEEL + gpcount * 2 - 2) >> 1;
-	reverseBitPack(bitarray2, bitleng);
+	reverseBitArray(bitarray2, bitleng);
 
 	if (gpcount == 1) {
 		gp[0] += countBit0ArrayOrPopcnt((uint64*)bitarray1, (uint64*)(bitarray2), sievesize >> 1);
@@ -2007,9 +1988,9 @@ static void segmentedGp1(const uint64 start1, const uint64 start2, const uint si
 static void segmentedGp2(const uint64 start1, const uint64 start2, const uint sievesize, const int gpcount, uint64 gp[])
 {
 	//assert(start + sievesize <= start2 + 1 && 0 == start % WHEEL);
-	uchar tmparray[BUFFER_SIZE + 32] MEM_ALIGN(32);
 	uchar bitarray1[8][BUFFER_SIZE8] MEM_ALIGN(32);
 	uchar bitarray2[8][BUFFER_SIZE8] MEM_ALIGN(32);
+	uchar tmparray[BUFFER_SIZE + 32] MEM_ALIGN(32);
 
 	//sieve the first bit array
 	tmparray[0] = COPY_BYBIT;
@@ -2027,7 +2008,7 @@ static void segmentedGp2(const uint64 start1, const uint64 start2, const uint si
 	tmparray[0] = COPY_BYBIT;
 	const int maxbit = segmentedSieve(start2, leng2, tmparray);
 
-	reverseByteArray(tmparray, tmparray + maxbit - 1);
+	reverseArray(tmparray, maxbit);
 	splitToBitArray(tmparray, maxbit, bitarray2);
 
 	int offset = (start1 + start2 + leng2) % WHEEL;
@@ -2066,8 +2047,8 @@ static void segmentedGp3(const uint64 start1, const uint64 start2, const uint si
 	uchar bitarray1[8][BUFFER_SIZE8] MEM_ALIGN(32);
 	uchar bitarray2[8][BUFFER_SIZE8] MEM_ALIGN(32);
 
-	//assert(((size_t)&bitarray1[0]) % 16 == 0);
-	//assert(((size_t)&bitarray2[0]) % 16 == 0);
+	//assert(((size_t)&bitarray1[0]) % WORD_BIT == 0);
+	//assert(((size_t)&bitarray2[0]) % WORD_BIT == 0);
 
 	const int begbit = segmentedSieve2(start1, sievesize, bitarray1);
 	const int leng2 = sievesize - 1 + (gpcount - 1) * 2;
@@ -2085,7 +2066,7 @@ static void segmentedGp3(const uint64 start1, const uint64 start2, const uint si
 
 	const int maxbit = segmentedSieve2(start2 - packlen, leng2 + packlen, bitarray2);
 	for (int i = 0; i < 8; i++) {
-		reverseBitPack(bitarray2[i], maxbit);
+		reverseBitArray(bitarray2[i], maxbit);
 	}
 
 	int offset = (start1 + start2 + leng2) % WHEEL;
@@ -2138,7 +2119,7 @@ static void initPatternMask(const uint wheelmod)
 	}
 
 	memset(PatternMask, (uchar)(-1), sizeof(PatternMask));
-	for (int k = 0; k < (1 << 16); k++) {
+	for (int k = 0; k < (1 << WORD_BIT); k++) {
 		for (int j = 0; j < pairs; j++) {
 			if (!(k & (1 << gppair[j][1]))) {
 				//set bit 0
@@ -2229,7 +2210,7 @@ static void getGp1(uint64 minn, uint gpcount, const uint gstep, uint64 gp[])
 	}
 
 	if (Config.SaveResult) {
-		Config.PrintGap = (1 << 16) - 1;
+		Config.PrintGap = (1 << 17) - 1;
 		Config.SaveResult = false;
 		freopen(CONSOLE, "w", stdout);
 	}
@@ -2352,7 +2333,7 @@ static void getGp2(uint64 minn, int gpcount, uint64 gp[])
 	}
 
 	if (Config.SaveResult) {
-		Config.PrintGap = (1 << 16) - 1;
+		Config.PrintGap = (1 << 17) - 1;
 		freopen(CONSOLE, "w", stdout);
 		Config.SaveResult = false;
 	}
@@ -2433,7 +2414,7 @@ static int parseConfig(const char cmdparams[][40])
 				setSieveSize(tmp);
 				break;
 			case 'T':
-				if (tmp < MAX_THREADS && tmp > 0) {
+				if (tmp < MAX_THREADS && tmp > 1) {
 					Config.Threads = tmp;
 				}
 				break;
@@ -2451,8 +2432,7 @@ static int parseConfig(const char cmdparams[][40])
 				if (tmp > 256 || tmp < 16) {
 					tmp = 63;
 				}
-				CpuCache.L1Size = (tmp << 10) * WHEEL;
-				CpuCache.L1Maxp = (tmp << 10) / L1_SIEVE_SEG;
+				setL1Data(tmp);
 			case 'M':
 				if (tmp >= 0 && tmp <= 30) {
 					Config.PrintGap = (1 << tmp) - 1;
@@ -2539,7 +2519,7 @@ int main(int argc, char* argv[])
 {
 	if (argc < 2) {
 		printInfo( );
-		puts(CmdInfo);
+		//puts(CmdInfo);
 	}
 
 	initGp( );
@@ -2565,7 +2545,7 @@ int main(int argc, char* argv[])
 	}
 
 	executeCmd("t1 e9 e3 g1; e9 e3 g2; e9 e3 g3");
-	executeCmd("t4 e9 e4 g2; e9 e4 g3");
+//	executeCmd("t4 e9 e4 g2; e9 e4 g3");
 
 	char ccmd[255] = {0};
 	while (true) {
