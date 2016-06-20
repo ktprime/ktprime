@@ -120,7 +120,7 @@ CpuCache =
 
 enum eConst
 {
-	FACTP        = 510510 * 1,
+	FACTP        = 510510,
 	BLOCKS       = 6,
 	FIRST_SIEVE  = 19,
 	BLOCK_SIZE   = FACTP * BLOCKS,
@@ -289,7 +289,6 @@ static struct TaskInfo
 	int gpcount;
 	uint64 minn;
 	uint64 first;
-	uint64* gp;
 	uint64* gpbuf;
 } Tdata[MAX_THREADS];
 
@@ -508,46 +507,39 @@ static int WINAPI threadProc(void* ptinfo)
 static void* threadProc(void* ptinfo)
 #endif
 {
-	struct TaskInfo* pThreadInfo = (struct TaskInfo*)ptinfo;
+	struct TaskInfo* pTask = (struct TaskInfo*)ptinfo;
 	if (Config.Advanced)
-		coreSieve2(pThreadInfo->minn, pThreadInfo->gpcount, pThreadInfo->gpbuf, pThreadInfo->first);
+		coreSieve2(pTask->minn, pTask->gpcount, pTask->gpbuf, pTask->first);
 	else
-		coreSieve1(pThreadInfo->minn, pThreadInfo->gpcount, pThreadInfo->gp);
+		coreSieve1(pTask->minn, pTask->gpcount, pTask->gpbuf);
 	return 0;
 }
 
-static int divideTask(const int threads, const uint64 minn, int gpcount)
+static int divideTask(const int threads, const uint64 minn, int gpcount, int step)
 {
-	int i;
-
-	int tsize = gpcount * 2 / threads;
-	tsize += tsize & 1;
-
-	for (i = 0; i < threads; i++) {
-		Tdata[i].gp = GP + i * tsize / 2;
-		Tdata[i].first = Config.SieveSize * i;
-	}
-
-	for (i = 0; i < threads; i++) {
-		if (!Config.Advanced) {
-			Tdata[i].gpcount = tsize / 2;
-			Tdata[i].minn = minn + i * tsize;
-			if (i == threads - 1)
-				Tdata[i].gpcount = (minn + 2 * gpcount - Tdata[i].minn) >> 1;
-		} else {
-			Tdata[i].gpbuf = (uint64*)malloc((gpcount + 30) * sizeof(uint64));
+	const int tsize = gpcount / threads;
+	for (int i = 0; i < threads; i++) {
+		if (Config.Advanced) {
+			Tdata[i].first = step * i;
 			Tdata[i].gpcount = gpcount;
 			Tdata[i].minn = minn;
+			Tdata[i].gpbuf = (uint64*)malloc((gpcount + 30) * sizeof(uint64));
+		} else {
+			Tdata[i].gpcount = tsize;
+			Tdata[i].minn = minn + i * tsize * 2;
+			Tdata[i].gpbuf = GP + i * tsize;
+			if (i == threads - 1)
+				Tdata[i].gpcount = (minn + 2 * gpcount - Tdata[i].minn) >> 1;
 		}
 	}
 
 	return threads;
 }
 
-static void startWorkThread(int threads, uint64 minn, int gpcount)
+static void startWorkThread(int threads, uint64 minn, int gpcount, int sievesize)
 {
 	int i;
-	divideTask(threads, minn, gpcount);
+	divideTask(threads, minn, gpcount, sievesize);
 
 #ifdef _WIN32
 	HANDLE thandle[MAX_THREADS];
@@ -897,40 +889,38 @@ static void packQword(uchar bitarray[], const int lastbitpos)
 
 //copy bit from srcarray to dstarray by table Map16To30
 //it's quite slow
-static int convertByteToWheel(ushort srcarray[], const int wordleng, uchar dstarray[])
+static int convertToWheel(ushort srcarray[], const int wordleng, uint pdst[])
 {
-	int lastbit = 32;
-	uint* pdst = (uint*)dstarray;
-	*pdst = 0;
+	int lastbit = 0;
 
 	for (int i = 0; i <= wordleng; i++) {
 		const uint mask = Map16To30[*srcarray++];
-		if (lastbit != 32) {
-			*pdst++ |= mask << (32 - lastbit);
-			*pdst = mask >> lastbit;
-			lastbit += 2;
+		if (lastbit > 0) {
+			*pdst++ |= mask << lastbit;
+			*pdst = mask >> (32 - lastbit);
+			lastbit -= 2;
 		} else {
-			*pdst |= mask;
-			lastbit = 2;
+			*pdst = mask;
+			lastbit = 30;
 		}
 	}
 
 	return wordleng;
 }
 
-//copy from srcarray with bit in [lowpos, lowpos + bitleng) to dstarray in [0, bitleng] lowpos < CHAR_BIT
-static void shiftBitToLow2(uchar srcarray[], const int bitleng, const int lowpos, uchar dstarray[])
+//copy from srcarray with bit in [frompos, frompos + bitleng) to dstarray in [0, bitleng] frompos < CHAR_BIT
+static void copyFromBit(uchar srcarray[], const int bitleng, const int frompos, uchar dstarray[])
 {
 #if 0
-	if (lowpos % CHAR_BIT == 0) {
-		memcpy(dstarray, srcarray + lowpos / CHAR_BIT, bitleng / CHAR_BIT + 32);
-		return
+	if (frompos % CHAR_BIT == 0) {
+		memcpy(dstarray, srcarray + frompos / CHAR_BIT, bitleng / CHAR_BIT + 32);
+		return ;
 	}
 #endif
 
-	uint* plowdword = (uint*)(srcarray + lowpos / 32);
+	uint* plowdword = (uint*)(srcarray + frompos / 32);
 	uint* pdstdword = (uint*) dstarray;
-	const int bitmove = lowpos % 32;
+	const int bitmove = frompos % 32;
 
 	for (int i = bitleng / 32 + 1; i > 0; i--) {
 		const uint newword = *(uint64*)plowdword++ >> bitmove;
@@ -938,32 +928,10 @@ static void shiftBitToLow2(uchar srcarray[], const int bitleng, const int lowpos
 	}
 }
 
-//move bit from [lowpos, lowpos + bitleng) to [0, bitleng) lowpos <= CHAR_BIT
-inline static void shiftBitToLow(uchar bitarray[], const int bitleng, const int lowpos)
+//swap bitarray[kth] and bitarray(bitleng - kth - 1)
+static void reverseArray(uchar* bitarray, int byteleng)
 {
-#if 0
-	if (lowpos % CHAR_BIT == 0) {
-		memmove(bitarray, bitarray + lowpos / CHAR_BIT, bitleng / CHAR_BIT + 32);
-		return ;
-	}
-#endif
-
-
-#if 0
-	uint* plowdword = (uint*)bitarray + lowpos / 32;
-	const int bitmove = lowpos % 32;
-	for (int i = bitleng / 32 + 1; i > 0; i--) {
-		const uint newword = *(uint64*)plowdword >> bitmove;
-		*plowdword++ = newword;
-	}
-#else
-	shiftBitToLow2(bitarray, bitleng, lowpos, bitarray);
-#endif
-}
-
-static void reverseArray(uchar* pbeg, int byteleng)
-{
-	ushort* ps = (ushort*)(pbeg + 0), * pe = (ushort*)(pbeg + byteleng - 2);
+	ushort* ps = (ushort*)(bitarray + 0), * pe = (ushort*)(bitarray + byteleng - 2);
 	while (ps <= pe) {
 		const ushort tmp = (*ps >> CHAR_BIT) | (*ps << CHAR_BIT);
 		*ps++ = (*pe >> CHAR_BIT) | (*pe << CHAR_BIT);
@@ -998,11 +966,11 @@ static void reverseBitArray(uchar bitarray[], const int bitleng)
 	const int bitremains = bitleng % CHAR_BIT;
 	reverseByteArray(bitarray, bitleng / CHAR_BIT + (CHAR_BIT + bitremains - 1) / CHAR_BIT);
 	if (bitremains > 0) {
-		shiftBitToLow(bitarray, bitleng, CHAR_BIT - bitremains);
+		copyFromBit(bitarray, bitleng, CHAR_BIT - bitremains, bitarray);
 	}
 }
 
-static void splitToBitArray(uchar srcarray[], const int bitleng, uchar dstarray[][BUFFER_SIZE8])
+static void splitBitArray(uchar srcarray[], const int bitleng, uchar dstarray[][BUFFER_SIZE8])
 {
 	union
 	{
@@ -1050,7 +1018,7 @@ static void splitToBitArray(uchar srcarray[], const int bitleng, uchar dstarray[
 }
 
 //get prime from bit buffer
-static int savePrime(const uint64 offset, const int wordleng, const ushort* bitarray, uint* dstarray, int total)
+static int savePrime(const uint64 offset, const int wordleng, const ushort* bitarray, uint* dstarray, uint total)
 {
 	int primes = 0;
 
@@ -1143,29 +1111,22 @@ static int setSieveTpl2(uint64 start, const uint sievesize, uchar bitarray[][BUF
 	const int si = (start % BLOCK_SIZE) / WHEEL;
 	const int bytes = bitleng / CHAR_BIT;
 
-#if 1
 	for (int i = 0; i < 8; i++) {
+		if ((Config.GpMask & (1 << i)) == 0) {
+			continue;
+		}
+
 		uchar *bitarrayi = bitarray[i];
-		shiftBitToLow2(SievedTpl8[i] + si / CHAR_BIT, bytes + 9, si % CHAR_BIT, bitarrayi);
+		copyFromBit(SievedTpl8[i] + si / CHAR_BIT, bytes + 9, si % CHAR_BIT, bitarrayi);
 		if (ei > i) {
 			packQword(bitarrayi, bytes + 1);
 		} else {
 			packQword(bitarrayi, bytes);
 		}
 
-		if (start <= Pattern[i] && start + sievesize > Pattern[i]) {
+		if (start <= Pattern[i] && start + sievesize > Pattern[i])
 			CLR_BIT(bitarrayi, 0);
-		}
 	}
-#else
-	if (si + bytes < sizeof(SievedTpl)) {
-		splitToBitArray(SievedTpl + si, bytes * CHAR_BIT + 8, bitarray);
-	} else {
-		const uint sieve_size = (sizeof(SievedTpl) - si) * CHAR_BIT;
-		splitToBitArray(SievedTpl + si, sieve_size, bitarray);
-		splitToBitArray(SievedTpl, bytes + si - sieve_size,  bitarray + sieve_size);
-	}
-#endif
 
 	if (start < WHEEL)
 		SET_BIT(bitarray[0], 0);
@@ -1268,6 +1229,19 @@ sieveGp(uchar bitarray[], const uchar* pend, const uint p, uint offset, uint mul
 			*ps0 |= mask0; ps0 += p;
 		}
 	}
+#elif 0
+	uchar* ps0 = NULL;
+	for (int m = 0; m < 8; m++) {
+		mask0 = 1 << WheelIndex[offset % WHEEL];
+		if (Config.GpMask & mask0) {
+			uchar* ps0 = bitarray + offset / WHEEL;
+			while (ps0 <= pend) {
+				*ps0 |= mask0; ps0 += p;
+			}
+		}
+		offset += (multiples % 4) * 2 * p; multiples /= 4;
+	}
+
 #else
 	uchar* pbeg[4] = {0};
 	for (int m = 0, pn = 0; m < 8; m++) {
@@ -1391,8 +1365,8 @@ static void doSieve(uchar bitarray[], const uint64 start, const uint sievesize, 
 	const uint bestp = sievesize / WHEEL / 2;
 	const uchar* pend = bitarray + sievesize / WHEEL;
 
-	uint j = 8 + p / 23;
-	if (p == CpuCache.L1Prime) {
+	uint j = 8 + FIRST_SIEVE / 23;
+	if (p > FIRST_SIEVE) {
 		j = CpuCache.L1Index;
 	}
 
@@ -1428,7 +1402,8 @@ static void doSieve(uchar bitarray[], const uint64 start, const uint sievesize, 
 static int segmentedSieve(uint64 start, uint sievesize, uchar dstarray[])
 {
 	uchar bitarray[2 * BUFFER_SIZE + 32];
-	const uint maxp = isqrt(start + sievesize) + 1;
+//	if (start == 0) printf("size = %d, buf = %d\n", (sievesize / 30) >> 10, sizeof(bitarray) >> 10);
+	const uint sqrtp = isqrt(start + sievesize) + 1;
 	const uint byteleng = setSieveTpl(start, sievesize, bitarray);
 	sievesize += start % WHEEL; start -= start % WHEEL;
 
@@ -1437,14 +1412,14 @@ static int segmentedSieve(uint64 start, uint sievesize, uchar dstarray[])
 			segsize = sievesize - sieveindex;
 		doSieve(bitarray + sieveindex / WHEEL, start + sieveindex, segsize, FIRST_SIEVE, CpuCache.L1Maxp);
 	}
-	doSieve(bitarray, start, sievesize, CpuCache.L1Prime, maxp);
+	doSieve(bitarray, start, sievesize, CpuCache.L1Prime, sqrtp);
 
 	int primes = byteleng;
 	const int cmd = (dstarray == NULL) ? 0 : dstarray[0];
 	if (cmd == 0) {
 		primes = countBit0Array((uint64*)bitarray, byteleng * CHAR_BIT);
 	} else if (cmd == CON_VTOWHEEL) {
-		primes = convertByteToWheel((ushort*)bitarray, byteleng / 2 + 2, dstarray);
+		primes = convertToWheel((ushort*)bitarray, byteleng / 2 + 2, (uint*)dstarray);
 	} else if (cmd == COPY_BYBIT) {
 		memcpy(dstarray, bitarray, byteleng + 16);
 	} else if (cmd == SAVE_PRIMEDIF) {
@@ -1680,7 +1655,7 @@ static int startTestGp(const int checkloops, int gploops)
 	Config.PrintRet = Config.PrintTime = false;
 	Config.PrintGap = 0;
 
-	printf("Test gp data %llu:%d, input cases %d, gploops %d\n", start, maxgpcount, checkloops, gploops);
+	printf("Test gp %llu:%d, cases %d, gploops %d\n", start, maxgpcount, checkloops, gploops);
 
 	uint64 minn = start;
 	srand(time(0));
@@ -1701,7 +1676,7 @@ static int startTestGp(const int checkloops, int gploops)
 		for (int j = 0; j < gcount2; j++) {
 			if (filedata[j + i] != GP[j]) {
 				itemfails++;
-				printf("case %d wrong data G(%llu) = %llu != %llu (file)\n", i + 1, minn + j * 2, GP[j], filedata[i + j]);
+//				printf("case %d wrong data G(%llu) = %llu != %llu (file)\n", i + 1, minn + j * 2, GP[j], filedata[i + j]);
 			}
 		}
 
@@ -1714,6 +1689,7 @@ static int startTestGp(const int checkloops, int gploops)
 			printf(" g(%d) t(%d) pass\r", Config.Algorithm, Config.Threads);
 		minn += 2;
 	}
+	putchar('\n');
 	putchar('\n');
 
 	//restore the default configuration
@@ -1917,13 +1893,6 @@ static void segmentedGp1(const uint64 start1, const uint64 start2, const uint si
 	int bitleng = (sievesize + start2 % WHEEL + gpcount * 2 - 2) >> 1;
 	reverseBitArray(bitarray2, bitleng);
 
-#if 0
-	if (gpcount == 1) {
-		gp[0] += countBit0ArrayOrPopcnt((uint64*)bitarray1, (uint64*)(bitarray2), sievesize >> 1);
-		return;
-	}
-#endif
-
 	for (int movei = 1; movei <= (1 << 3) && movei <= gpcount; movei++) {
 		int gpi = gpcount - movei;
 		for (int i = 0; gpi >= 0; i++) {
@@ -1937,7 +1906,7 @@ static void segmentedGp1(const uint64 start1, const uint64 start2, const uint si
 			gpi -= 1 << 3;
 		}
 		if (movei < (1 << 3))
-			shiftBitToLow(bitarray2, bitleng, 1);
+			copyFromBit(bitarray2, bitleng, 1, bitarray2);
 	}
 }
 
@@ -1957,7 +1926,7 @@ static void segmentedGp2(const uint64 start1, const uint64 start2, const uint si
 	//time use 20%
 	//assert(((size_t)&bitarray1[0][0]) % 16 == 0);
 	//assert(((size_t)&bitarray2[0][0]) % 16 == 0);
-	splitToBitArray(tmparray, begbit, bitarray1);
+	splitBitArray(tmparray, begbit, bitarray1);
 	for (int k = 0; k < 8; k++)
 		packQword(bitarray1[k], begbit);
 
@@ -1967,7 +1936,7 @@ static void segmentedGp2(const uint64 start1, const uint64 start2, const uint si
 	const int maxbit = segmentedSieve(start2, leng2, tmparray);
 
 	reverseArray(tmparray, maxbit);
-	splitToBitArray(tmparray, maxbit, bitarray2);
+	splitBitArray(tmparray, maxbit, bitarray2);
 
 	int offset = (start1 + start2 + leng2) % WHEEL;
 	if (0 == offset)
@@ -1994,7 +1963,7 @@ static void segmentedGp2(const uint64 start1, const uint64 start2, const uint si
 		}
 
 		if (si == 7 && li < 7)
-			shiftBitToLow(bitarray2[wi], maxbit, 1);
+			copyFromBit(bitarray2[wi], maxbit, 1, bitarray2[wi]);
 	}
 }
 
@@ -2052,14 +2021,12 @@ static void segmentedGp3(const uint64 start1, const uint64 start2, const uint si
 		}
 
 		if (si == 7 && li < 7)
-			shiftBitToLow(bitarray2[wi], maxbit, 1);
+			copyFromBit(bitarray2[wi], maxbit, 1, bitarray2[wi]);
 	}
 }
 
 static void initPatternMask(const uint wheelmod)
 {
-	Config.GpMask = 0;
-
 	uchar gppair[16][2], pairs = 0;
 	for (int i = 0; i < 8; i++) {
 		for (int j = 0; j < 8; j++) {
@@ -2069,7 +2036,6 @@ static void initPatternMask(const uint wheelmod)
 				gppair[pairs][1] = j + 8;
 				if (psum > WHEEL)
 					gppair[pairs][1] = j;
-				Config.GpMask |= (1 << i) | (1 << j);
 				pairs++;
 				break;
 			}
@@ -2107,14 +2073,17 @@ static uint64 coreSieve0(const uint64 begin, int step)
 	const double ts = getTime();
 	const uint64 half = begin / 2;
 	uint64 sgp = 0;
-	initPatternMask(begin % WHEEL);
+
+	Config.GpMask = GpMask[begin % WHEEL / 2];
+	if (Config.Algorithm > 1) {
+		initPatternMask(begin % WHEEL);
+	}
 
 	if (step > half)
 		step = (int)half;
 #if (OMP)
 	omp_set_num_threads(Config.Threads);
-#pragma omp parallel for reduction(+:sgp) \
-	schedule(dynamic) if (begin > Minn)
+	#pragma omp parallel for reduction(+:sgp) schedule(dynamic) if (begin > Minn)
 #endif
 	for (uint64 start = 0; start < half; start += step) {
 		if (start > half - step)
@@ -2163,12 +2132,12 @@ static void getGp1(uint64 minn, uint gpcount, const uint gstep)
 
 	assert(minn >= 6 && 0 == gstep % 2 && gstep > 0);
 
-	if (minn / Config.Maxp > Config.Maxp) {
-		eratoSieve(isqrt(minn));
+	if ((minn + 2 * gpcount) / Config.Maxp > Config.Maxp) {
+		eratoSieve(isqrt(minn + 2 * gpcount));
 	}
 
 	for (int i = 0; i < gpcount; i++) {
-		coreSieve0(minn + i*gstep, Config.SieveSize);
+		coreSieve0(minn + i * gstep, Config.SieveSize);
 	}
 
 	if (Config.SaveResult) {
@@ -2182,8 +2151,8 @@ static void getGp1(uint64 minn, uint gpcount, const uint gstep)
 static void coreSieve2(uint64 minn, const int gpcount, uint64 gp[], const uint64 first)
 {
 	const uint64 half = minn / 2;
-	const int gstep = Config.Threads * Config.SieveSize;
 	uint sievesize = Config.SieveSize;
+	const int gstep = Config.Threads * sievesize;
 
 	double ts = getTime();
 	memset(gp, 0, sizeof(gp[0]) * gpcount);
@@ -2233,7 +2202,6 @@ static void coreSieve1(uint64 minn, const int gpcount, uint64 gp[])
 		segmentedGp(start, minn - start - sievesize, sievesize + 1, gpcount, gp);
 	}
 
-//	if (gpcount > 1)
 	addGpInMiddle(minn, gpcount, gp);
 	addMultiGp35(minn, gpcount, gp);
 }
@@ -2251,8 +2219,8 @@ static void getGp2(uint64 minn, int gpcount, uint64 gp[])
 	if (minn > Maxn)
 		minn = Maxn;
 
-	if (minn / Config.Maxp > Config.Maxp) {
-		eratoSieve(isqrt(minn));
+	if ((minn + 2 * gpcount) / Config.Maxp > Config.Maxp) {
+		eratoSieve(isqrt(minn + 2 * gpcount));
 	}
 
 	Config.GpMask = GpMask[minn % WHEEL / 2];
@@ -2270,7 +2238,7 @@ static void getGp2(uint64 minn, int gpcount, uint64 gp[])
 		if (Config.Threads > gpcount) {
 			Config.Threads = 1;
 		}
-		startWorkThread(Config.Threads, minn, gpcount);
+		startWorkThread(Config.Threads, minn, gpcount, Config.SieveSize);
 	} else if (Config.Advanced) {
 		coreSieve1(minn, gpcount, gp);
 	} else {
@@ -2373,7 +2341,7 @@ static int parseConfig(const char cmdparams[][40])
 				setSieveSize(tmp);
 				break;
 			case 'T':
-				if (tmp < MAX_THREADS && tmp > 1) {
+				if (tmp < MAX_THREADS && tmp > 0) {
 					Config.Threads = tmp;
 				}
 				break;
@@ -2382,10 +2350,7 @@ static int parseConfig(const char cmdparams[][40])
 					Config.Algorithm = tmp;
 				break;
 			case 'A':
-				if (tmp != 0)
-					Config.Advanced = tmp > 1;
-				else
-					Config.Advanced = !Config.Advanced;
+				Config.Advanced = tmp != 0 ? tmp > 1 : !Config.Advanced;
 				break;
 			case 'C':
 				if (tmp > 256 || tmp < 16) {
@@ -2489,22 +2454,28 @@ int main(int argc, char* argv[])
 			doCompile( );
 		} else if (c == 'u') {
 			srand(time(0));
-			executeCmd("f g1 r 6 e4; u e4 100; u e3 200");
-			executeCmd("f g2 r 3e5 e4; u 10000 100; u 1000 1000");
-			executeCmd("g2 t4 f 1e9 1000; u 100 100");
+//			executeCmd("f g2 r 6 e4; u e4 100; u e3 200");
+//			executeCmd("f g1 r e5 e4; u 10000 100; u 1000 1000");
+//			executeCmd("f g2 r e6 e3; u 1000 100; u 100 1000");
 			for (int i = 20; i <= 32; i++) {
 				char cmd[60] = {0};
-				sprintf(cmd, "A2 f 2^%d 10000; u %d %d;", i, 1000, rand() % 500 + 1);
+				sprintf(cmd, "t1 A2 g3 f 2^%d 10000; u %d %d;", i, 1000, rand() % 200 + 1);
 				executeCmd(cmd);
 			}
+			executeCmd("g2 t4 f 1e9 1000; u 100 100");
 			executeCmd("g3 t4 f 1e10 1000; u 100 200");
 		} else {
 			executeCmd(argv[i]);
 		}
 	}
 
+	executeCmd("f t1 A2 g2 2^24 10000");
+
+#if 0
+	executeCmd("t1 pr r e9 1 g1; r e9 1 g2; pr");
 	executeCmd("t1 e9 e3 g1; e9 e3 g2; e9 e3 g3");
-//	executeCmd("t4 e9 e4 g2; e9 e4 g3");
+	executeCmd("t4 e9 e4 g2; e9 e4 g3");
+#endif
 
 	char ccmd[255] = {0};
 	while (true) {
