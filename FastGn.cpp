@@ -20,8 +20,8 @@
 
 enum eConst
 {
-	BLOCK_SIZE   = 510510 * 19,
 	MAX_CACHE    = 200,
+	BLOCK_SIZE   = 510510 * 16,
 	SIEVE_SZIE   = MAX_CACHE * (WHEEL << 10) ,
 	FIRST_PRIME  = BLOCK_SIZE % 19 == 0 ? 23 : 19,
 	BUFFER_SIZE  = SIEVE_SZIE / WHEEL,
@@ -29,8 +29,8 @@ enum eConst
 };
 
 //SievedTpl: cross out the first 7/8th Prime's multiple
-static unsigned char SievedTpl[BLOCK_SIZE / WHEEL - (BLOCK_SIZE / WHEEL) % 64 + 64 * WHEEL];
-static unsigned char SievedTpl8[8][(BLOCK_SIZE / WHEEL / 4) - (BLOCK_SIZE / WHEEL / 4) % 32 + 64*WHEEL];
+static unsigned char SievedTpl[BLOCK_SIZE / WHEEL + 64];
+static unsigned char SievedTpl8[8][(BLOCK_SIZE / WHEEL / 8) + 64];
 //use of the SSE4.2/ SSE4a POPCNT instruction for fast bit counting.
 #if _MSC_VER > 1300
 	# define POPCNT      1
@@ -187,7 +187,6 @@ static struct Config
 #else
 	static uint Prime[664579 + MAX_GPCOUNT / 5 + 1000];
 #endif
-
 
 #ifndef BIT_SCANF
 //bit 1 left most table
@@ -558,7 +557,7 @@ static void startTask(int threads, uint64 minn, int gpcount, int sievesize, uint
 //((c * 0x80200802ULL) & 0x0884422110ULL) * 0x0101010101ULL >> 32;
 static uchar reverseByte(const uchar c)
 {
-	uchar n = 0;
+	uchar n;
 	n = (c & 0x55) << 1 | (c & 0xAA) >> 1;
 	n = (n & 0x33) << 2 | (n & 0xCC) >> 2;
 	n = (n & 0x0F) << 4 | (n & 0xF0) >> 4;
@@ -819,7 +818,7 @@ static void packQword(uchar bitarray[], const int lastbitpos)
 //copy from srcarray with bit in [frompos, frompos + bitleng) to dstarray in [0, bitleng] frompos < CHAR_BIT
 static void copyFromBitPos(uchar srcarray[], const int bitleng, const int frompos, uchar dstarray[])
 {
-	uint* psrcdword = (uint*)(srcarray + frompos / 32);
+	uint* psrcdword = (uint*)(srcarray) + frompos / 32;
 	uint* pdstdword = (uint*)dstarray;
 	const int bitmove = frompos % 32;
 
@@ -1018,7 +1017,15 @@ static int setSieveTpl8(uint64 start, const uint sievesize, uchar bitarray[][BUF
 		}
 
 		uchar *bitarrayi = bitarray[i];
-		copyFromBitPos(SievedTpl8[i] + si / CHAR_BIT, bytes + 9, si % CHAR_BIT, bitarrayi);
+		int copyLeng = (int)(BLOCK_SIZE / WHEEL - si);
+		copyLeng += (copyLeng % CHAR_BIT) == 0 ? 0 : CHAR_BIT - copyLeng % CHAR_BIT;
+		if (copyLeng > bytes) {
+			copyFromBitPos(SievedTpl8[i], bytes, si, bitarrayi);
+		} else {
+			copyFromBitPos(SievedTpl8[i], copyLeng, si, bitarrayi);
+			copyFromBitPos(SievedTpl8[i], (8 + bytes) - copyLeng, si % CHAR_BIT, bitarrayi + copyLeng / CHAR_BIT);
+		}
+
 		if (ei > i) {
 			packQword(bitarrayi, bytes + 1);
 		} else {
@@ -1371,14 +1378,9 @@ static void initSieveTpl( )
 	}
 
 	memset(SievedTpl8[0], ~0, sizeof(SievedTpl8[0]) * 8);
-
 	const int ssize = sizeof(SievedTpl);
-	for (int m = 0; m < 2 * ssize; m++) {
-		uchar mask = 0;
-		if (m < ssize)
-			mask = ~SievedTpl[m];
-		else
-			mask = ~SievedTpl[m - tmplSize];
+	for (int m = 0; m < ssize + 64; m++) {
+		uchar mask = m < ssize ?  ~SievedTpl[m] : ~SievedTpl[m - ssize];
 		for (int pi = 0; mask > 0; pi++) {
 			if (mask & 1)
 				SievedTpl8[pi][m >> 3] &= ~(1 << (m & 7));
@@ -1864,8 +1866,9 @@ static void segmentedGp3(const uint64 start1, const uint64 start2, const uint si
 
 	const int begbit = segmentedSieve3(start1, sievesize, bitarray1);
 	const int leng2 = sievesize - 1 + (gpcount - 1) * 2;
-
 	int packlen = 0;
+
+#if 0
 	for (int j = 0; j < 240 && start2 > j; j += 8) {
 		const int pack = getPackLen(start2 - j, leng2 + j);
 		if (pack % CHAR_BIT == 0) {
@@ -1873,6 +1876,7 @@ static void segmentedGp3(const uint64 start1, const uint64 start2, const uint si
 			break;
 		}
 	}
+#endif
 
 	const int maxbit = segmentedSieve3(start2 - packlen, leng2 + packlen, bitarray2);
 	for (int i = 0; i < 8; i++) {
@@ -2371,10 +2375,11 @@ mail to: bailuzhou@163.com
 free use for non-commercial purposes
 
 G[10^9] to G[10^9 + 2e4]
-2.26G Intel I3 350M 11.00 x86
-2.26G Intel I3 350M 5.60 x64
+2.66G Intel I5 560M 8.30 x86
+2.26G Intel I3 350M 7.90 x86
+2.26G Intel I3 350M 5.68 x64
 3.20G Intel I5 3470 3.00 x86
-3.20G Intel I5 3470 1.60 x64
+3.20G Intel I5 3470 1.62 x64
 
 G[10^9] to G[10^9 + 2e3]
 popcnt64 : 1620
