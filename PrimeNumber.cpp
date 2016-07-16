@@ -1,29 +1,26 @@
-//fast segmented sieving of prime number which is based on site http://sweet.ua.pt/tos/software/prime_sieve.html
-/***
-MingW: g++ 5.1.0/MS VC++ 2008-2015
-CXXFLAG:g++ -march=native [-DW210,-DSAFE=1] -funroll-loops -O3 -s -pipe;
-Windows 7/10 x64,              	X4 641 2.8G /I3 350M 2.26G/i5 3470 3.2G
-pi(1e11, 1e11+1e10) = 394050419        4.54 / 5.25/3.06
-pi(1e12, 1e12+1e10) = 361840208        5.56 / 6.31/3.49
-pi(1e13, 1e13+1e10) = 334067230        7.03 / 7.66/4.04
-pi(1e14, 1e14+1e10) = 310208140        8.74 / 9.49/4.85
-pi(1e15, 1e15+1e10) = 289531946        10.42/11.41/5.69
-pi(1e16, 1e16+1e10) = 271425366        12.15/13.35/6.66
-pi(1e17, 1e17+1e10) = 255481287        14.28/15.58/7.70
-pi(1e18, 1e18+1e10) = 241272176        17.50/18.95/9.15
-pi(1e19, 1e19+1e10) = 228568014        24.20/25.60/12.17
-
-pi(1e18, 1e18+1e6) = 24280              1.16/0.72/0.46
-pi(1e18, 1e18+1e8) = 2414886            1.80/1.54/0.83
-pi(1e18, 1e18+1e9) = 24217085           3.81/3.80/1.90
-pi(1e18, 1e18+1e12)= 24127637783        1546/1640/820
-pi(1e16, 1e16+1e12)= 27143405794        1166/1310/660
-pi(1e14, 1e14+1e12)= 31016203073        880 / 950/474
-
-doc:
-	http://sweet.ua.pt/tos/software/prime_sieve.html
+/*  fast segmented sieving of prime number which is based on site http://sweet.ua.pt/tos/software/prime_sieve.html
 	http://primesieve.org/
 ***/
+const char* result =
+"MingW: g++ 5.1.0/MS VC++ 2008-2015\n"
+"CXXFLAG:g++ -march=native [-DW210,-DSAFE=1] -funroll-loops -O3 -s -pipe\n"
+"Windows  10 x64                       |X4 641 2.8G|i3 350M 2.26G|i5 3470 3.2G|i7 6700 3.4 G\n"
+"pi(1e11, 1e11+1e10) = 394050419        4.34       |5.25         |3.06        |2.04\n"
+"pi(1e12, 1e12+1e10) = 361840208        5.36       |6.31         |3.49        |2.37\n"
+"pi(1e13, 1e13+1e10) = 334067230        7.03       |7.66         |4.04        |2.76\n"
+"pi(1e14, 1e14+1e10) = 310208140        8.34       |9.49         |4.85        |3.24\n"
+"pi(1e15, 1e15+1e10) = 289531946        10.12      |11.41        |5.69        |4.01\n"
+"pi(1e16, 1e16+1e10) = 271425366        11.85      |13.35        |6.66        |4.72\n"
+"pi(1e17, 1e17+1e10) = 255481287        13.78      |15.58        |7.70        |5.55\n"
+"pi(1e18, 1e18+1e10) = 241272176        16.50      |18.95        |9.15        |6.65\n"
+"pi(1e19, 1e19+1e10) = 228568014        23.20      |25.60        |12.17       |9.10\n"
+
+"pi(1e18, 1e18+1e6)  = 24280            1.06       |0.72         |0.46        |0.34\n"
+"pi(1e18, 1e18+1e8)  = 2414886          1.70       |1.54         |0.83        |0.70\n"
+"pi(1e18, 1e18+1e9)  = 24217085         3.61       |3.80         |1.90        |1.48\n"
+"pi(1e18, 1e18+1e12) = 24127637783      1446       |1640         |820         |592\n"
+"pi(1e16, 1e16+1e12) = 27143405794      1066       |1310         |660         |462\n"
+"pi(1e14, 1e14+1e12) = 31016203073      820        |950          |474         |324\n";
 
 #include <ctype.h>
 #include <stdlib.h>
@@ -44,7 +41,7 @@ doc:
 # define SIEVE_BIT        8 //8 - 10
 # define WHEEL_BIT        6 //6 - 7
 
-# define ERAT_SMALL       8 //4 - 16
+# define ERAT_SMALL       6 //4 - 16
 # define ERAT_MEDIUM      2 //2 - 6
 # define ERAT_BIG         6 //2 - 6
 
@@ -55,6 +52,10 @@ doc:
 #if (L2_DCACHE_SIZE < 64 || L2_DCACHE_SIZE > 1024)
 # define L2_DCACHE_SIZE   256
 #endif
+#ifndef SIEVE_SIZE
+# define SIEVE_SIZE 2048
+#endif
+
 # define MAX_SEGMENT      4096
 
 #ifdef W30 //fast on some cpu
@@ -1356,26 +1357,16 @@ static int segmentedSieve(uint64 start, uint sieve_size, Cmd* cmd = NULL)
 {
 	uchar bitarray[(L1_DCACHE_SIZE + L2_DCACHE_SIZE) << 10];
 
-	const uint wheel_offset = (uint)(start % WHEEL30);
 	const uint sqrtp = isqrt(start + sieve_size);
+	const uint wheel_offset = (uint)(start % WHEEL30);
 	start -= wheel_offset, sieve_size += wheel_offset;
 	const uint bytes = sieve_size / WHEEL30 + (7 + WheelInit30[sieve_size % WHEEL30].WheelIndex) / 8;
-	const uint mins = sqrtp;
 
-//	#pragma omp parallel for if (sieve_size > 2 * Threshold.L1Size)
-	for (int sieve_index = 0; sieve_index < (int)sieve_size; sieve_index += Threshold.L1Size) {
-		int segsize = Threshold.L1Size;
-		if (segsize + sieve_index > (int)sieve_size)
-			segsize = sieve_size - sieve_index;
-		preSieve(bitarray + sieve_index / WHEEL30, start + sieve_index, segsize);
-		eratSieveL1(bitarray + sieve_index / WHEEL30, start + sieve_index, segsize, Threshold.L1Maxp);
-	}
-
-	//	eratSieveSmall(bitarray, start, sieve_size);
+	eratSieveSmall(bitarray, start, sieve_size);
 
 	const uchar* pend = bitarray + sieve_size / WHEEL30;
 	uint j = Threshold.L1Index, p = Threshold.L1Maxp;
-	for (; p <= mins; p += Prime[++j]) {
+	for (; p <= sqrtp; p += Prime[++j]) {
 		uint sieve_index = p - (uint)(start % p);
 		if (start <= p) {
 			sieve_index = p * p - (uint)start;
@@ -1545,10 +1536,10 @@ static void printPiResult(const uint64 start, const uint64 end, uint64 primes)
 	const int end10 = ilog(end, 10);
 	const int dif10 = ilog(end - start + 1, 10);
 
-#if 1
+#if 0
 	printf("\rpi(%llu, %llu) = %llu", start, end, primes);
 #else
-	if (start > 0) {
+	if (start > 0 && end > 100) {
 		if (start % ipow(10, sta10) == 0 && sta10 > 2)
 			printf("pi(%de%d,", (int)(start / ipow(10, sta10)), sta10);
 		else if ((start & (start - 1)) == 0)
@@ -1877,9 +1868,9 @@ static void printInfo( )
 	printf("[MARCO] : (ASM_X86, POPCNT, BIT_SCANF, SAFE) = (%d, %d, %d, %d)\n", ASM_X86, 0, BIT_SCANF, SAFE);
 	printf("[MARCO] : MAX_SEGMENT = %dk, WHEEL_SIZE = %dk, ERAT_BIG = %d, WHEEL = %d\n",
 			MAX_SEGMENT, WHEEL_SIZE >> 7, Threshold.Msegs, WHEEL);
-	printf("[ARG ]  : L1Size = %dk, L2Size = %dk, SieveSize = %dk\n",
+	printf("[ARG ] : L1Size = %dk, L2Size = %dk, SieveSize = %dk\n",
 			Threshold.L1Size / WHEEL30 >> 10, Threshold.L2Size / WHEEL30 >> 10, Config.SieveSize / WHEEL30 >> 10);
-	printf("[ARG ]  : L1Seg/L1Maxp/L2Seg/L2Maxp/Medium/Large = (%d,%d,%d,%d,%d,%d)\n",
+	printf("[ARG ] : L1Seg/L1Maxp/L2Seg/L2Maxp/Medium/Large = (%d,%d,%d,%d,%d,%d)\n",
 		Threshold.L1Segs, Threshold.L1Maxp, Threshold.L2Segs, Threshold.L2Maxp, Threshold.Medium, isqrt(Threshold.BucketStart + 1));
 	puts(sepator);
 	puts(sepator);
@@ -1924,6 +1915,7 @@ static int parseCmd(const char params[][60])
 				Config.Flag ^= (1 << (toupper(params[i][1]) - 'A'));
 				break;
 			case 'I':
+				puts(result);
 				printInfo();
 				break;
 			default:
@@ -1996,12 +1988,12 @@ static bool executeCmd(const char* cmd)
 		if (cmdc == 'B') {
 			if (isdigit(params[cmdi + 1][0])) {
 				int powi = atoi(params[cmdi + 1]);
-				for (int i = 32; i < 64; i ++) {
-					uint64 start = ipow(2, i), range = ipow(10, powi);
+				for (int j = 11; j < 20; j ++) {
+					uint64 start = ipow(10, j), range = ipow(10, 10);
 					doSieve(start, start + range);
 				}
-				for (int j = 12; j < 20; j ++) {
-					uint64 start = ipow(10, j), range = ipow(10, 10);
+				for (int i = 32; i < 64; i ++) {
+					uint64 start = ipow(2, i), range = ipow(10, powi);
 					doSieve(start, start + range);
 				}
 			}
@@ -2035,6 +2027,7 @@ void initPrime(int sieve_size)
 }
 
 #ifndef PRIME_LIB
+
 #include <time.h>
 int main(int argc, char* argv[])
 {
@@ -2061,9 +2054,7 @@ int main(int argc, char* argv[])
 			setLevelSegs(i + 30); setLevelSegs(rand() % 5 + 12), setLevelSegs(rand() % 5 + 22);
 			const uint r2 = doSieve(start - range, start + range, NULL);
 			if (r1 != r2) {
-				printInfo();
-				const uint r3 = doSieve(start - range, start + range, NULL);
-				printf("  --- %ld != %ld, %I64d %I64d c%d L1%d L2%d L3%d\n", r1, r2, start - range, 2*range, Config.SieveSize, Threshold.L1Segs, Threshold.L2Segs, Threshold.Msegs);
+				printf(" --- %ld != %ld, %I64d %I64d c%d L1%d L2%d L3%d\n", r1, r2, start - range, 2*range, Config.SieveSize, Threshold.L1Segs, Threshold.L2Segs, Threshold.Msegs);
 			}
 		}
 	}
