@@ -3,6 +3,7 @@
 # include <stdlib.h>
 # include <ctype.h>
 # include <string.h>
+# include <assert.h>
 
 # define WHEEL           30
 # define WHEEL_SKIP      0x799b799b
@@ -20,17 +21,15 @@
 
 enum eConst
 {
-	MAX_CACHE    = 200,
-	BLOCK_SIZE   = 510510 * 16,
+	BLOCK_SIZE   = 510510 * 19,
+	MAX_CACHE    = 120,
 	SIEVE_SZIE   = MAX_CACHE * (WHEEL << 10) ,
 	FIRST_PRIME  = BLOCK_SIZE % 19 == 0 ? 23 : 19,
 	BUFFER_SIZE  = SIEVE_SZIE / WHEEL,
-	BUFFER_SIZE8 = (BUFFER_SIZE / 8) - (BUFFER_SIZE / 8) % 32 + 32,
+	BUFFER_SIZE8 = (BUFFER_SIZE / 8),
+	MAX_SIEVETPL = BLOCK_SIZE / WHEEL,
 };
 
-//SievedTpl: cross out the first 7/8th Prime's multiple
-static unsigned char SievedTpl[BLOCK_SIZE / WHEEL + 64];
-static unsigned char SievedTpl8[8][(BLOCK_SIZE / WHEEL / 8) + 64];
 //use of the SSE4.2/ SSE4a POPCNT instruction for fast bit counting.
 #if _MSC_VER > 1300
 	# define POPCNT      1
@@ -123,7 +122,6 @@ CpuCache =
 # define FLP_BIT(a, n)     a[n >> BSHIFT] ^= MASK_N(n)
 # define PACK_BIT(a, n)    a[n >> BSHIFT] |= ~((MASK_N(n)) - 1)
 
-
 static const char* CmdInfo = "\
 	[A: Advanced thread algorithm A[0-2]]\n\
 	[S: Set sieve size S[16 - 512]]\n\
@@ -181,6 +179,10 @@ static struct Config
 	(1 << 8) - 1, 1, 0xffff
 };
 
+//SievedTpl: cross out the first 7/8th Prime's multiple
+static uchar SievedTpl[MAX_SIEVETPL];
+static uchar SievedTpl8[8][MAX_SIEVETPL / 8 - (MAX_SIEVETPL / 8) % 64 + 64];
+
 //small prime buffer up to 1e7
 #ifdef PRIME_DIFF
 	static uchar Prime[664579 + MAX_GPCOUNT / 5 + 1000];
@@ -217,12 +219,11 @@ static uint64 Gp[MAX_GPCOUNT + WHEEL + 2];
 static const uint64 Maxn = (uint64)1e14 + MAX_GPCOUNT;
 static const uint64 Minn = (uint64)1e7;
 
-//the crossing out bit mod 30, the first
-//16 bit of SievedTpl map to
+//the crossing out bit mod 30, the first 16 bit of SievedTpl map to
 //----------------------------------------
-//|01/1|07/1|11/1|13/1|17/1|19/1|23/1|29/1| = 0x1111 1111 = SievedTpl[0]
+//|01/1|07/1|11/1|13/1|17/1|19/1|23/1|29/1| = 0b1111 1111 = SievedTpl[0]
 //----------------------------------------
-//|31/1|37/1|41/1|43/1|47/1|49/0|53/1|59/1| = 0x1101 1111 = SievedTpl[1]
+//|31/1|37/1|41/1|43/1|47/1|49/0|53/1|59/1| = 0b1101 1111 = SievedTpl[1]
 //----------------------------------------
 
 static const uchar Pattern[ ] =
@@ -818,7 +819,7 @@ static void packQword(uchar bitarray[], const int lastbitpos)
 //copy from srcarray with bit in [frompos, frompos + bitleng) to dstarray in [0, bitleng] frompos < CHAR_BIT
 static void copyFromBitPos(uchar srcarray[], const int bitleng, const int frompos, uchar dstarray[])
 {
-	uint* psrcdword = (uint*)(srcarray) + frompos / 32;
+	uint* psrcdword = (uint*)srcarray + frompos / 32;
 	uint* pdstdword = (uint*)dstarray;
 	const int bitmove = frompos % 32;
 
@@ -967,7 +968,7 @@ static int setSieveTpl(const uint64 start, const uint sievesize, uchar bitarray[
 	bitleng = bitleng / WHEEL * 8 + WheelLeng[bitleng % WHEEL];
 	const int bytes = bitleng / CHAR_BIT + 1;
 
-	const int tmplSize = BLOCK_SIZE / WHEEL;
+	const int tmplSize = MAX_SIEVETPL;
 	if (si + bytes < tmplSize) {
 		memcpy(bitarray, SievedTpl + si, bytes);
 	} else {
@@ -1007,7 +1008,7 @@ static int setSieveTpl8(uint64 start, const uint sievesize, uchar bitarray[][BUF
 {
 	int bitleng = sievesize + (int)(start % WHEEL);
 	bitleng = bitleng / WHEEL * 8 + WheelLeng[bitleng % WHEEL];
-	const int ei = bitleng % CHAR_BIT;
+	const int ei = bitleng % 8;
 	const int si = (start % BLOCK_SIZE) / WHEEL;
 	const int bytes = bitleng / CHAR_BIT;
 
@@ -1017,13 +1018,12 @@ static int setSieveTpl8(uint64 start, const uint sievesize, uchar bitarray[][BUF
 		}
 
 		uchar *bitarrayi = bitarray[i];
-		int copyLeng = (int)(BLOCK_SIZE / WHEEL - si);
-		copyLeng += (copyLeng % CHAR_BIT) == 0 ? 0 : CHAR_BIT - copyLeng % CHAR_BIT;
+		const int copyLeng = (int)(MAX_SIEVETPL - si);
 		if (copyLeng > bytes) {
-			copyFromBitPos(SievedTpl8[i], bytes, si, bitarrayi);
+			copyFromBitPos(SievedTpl8[i], bytes + 8, si, bitarrayi);
 		} else {
-			copyFromBitPos(SievedTpl8[i], copyLeng, si, bitarrayi);
-			copyFromBitPos(SievedTpl8[i], (8 + bytes) - copyLeng, si % CHAR_BIT, bitarrayi + copyLeng / CHAR_BIT);
+			copyFromBitPos(SievedTpl8[i], copyLeng + 8, si, bitarrayi);
+			copyFromBitPos(SievedTpl8[i], bytes - copyLeng + 8, (CHAR_BIT - copyLeng % CHAR_BIT) % CHAR_BIT, bitarrayi + (copyLeng + 7) / CHAR_BIT);//good ideal
 		}
 
 		if (ei > i) {
@@ -1372,15 +1372,10 @@ static void initSieveTpl( )
 		}
 	}
 
-	const int tmplSize = BLOCK_SIZE / WHEEL;
-	if (sizeof(SievedTpl) % tmplSize > 0) {
-		memcpy(SievedTpl + tmplSize, SievedTpl, sizeof(SievedTpl) % tmplSize);
-	}
-
-	memset(SievedTpl8[0], ~0, sizeof(SievedTpl8[0]) * 8);
-	const int ssize = sizeof(SievedTpl);
-	for (int m = 0; m < ssize + 64; m++) {
-		uchar mask = m < ssize ?  ~SievedTpl[m] : ~SievedTpl[m - ssize];
+	const int tmplSize = MAX_SIEVETPL;
+	memset(SievedTpl8, ~0, sizeof(SievedTpl8));
+	for (int m = 0; m < tmplSize + 8; m++) {
+		uchar mask = ~(m < tmplSize ? SievedTpl[m] : SievedTpl[m - tmplSize]);
 		for (int pi = 0; mask > 0; pi++) {
 			if (mask & 1)
 				SievedTpl8[pi][m >> 3] &= ~(1 << (m & 7));
@@ -1462,7 +1457,6 @@ static void initBitTable( )
 #endif
 }
 
-//init Prime, SievedTpl and WordNumBit1 table
 static void initFastGp( )
 {
 	eratoSieve(100131);
@@ -1607,7 +1601,7 @@ static int addOneGp35(const uint64 maxn)
 	}
 
 	if (gmask > 0 && Config.PrintGp) {
-		if (gmask = 0x03)
+		if (gmask == 0x03)
 			puts("1 3\n2 5");
 		else if (gmask & 0x01)
 			puts("1 3");
@@ -1868,7 +1862,6 @@ static void segmentedGp3(const uint64 start1, const uint64 start2, const uint si
 	const int leng2 = sievesize - 1 + (gpcount - 1) * 2;
 	int packlen = 0;
 
-#if 0
 	for (int j = 0; j < 240 && start2 > j; j += 8) {
 		const int pack = getPackLen(start2 - j, leng2 + j);
 		if (pack % CHAR_BIT == 0) {
@@ -1876,7 +1869,6 @@ static void segmentedGp3(const uint64 start1, const uint64 start2, const uint si
 			break;
 		}
 	}
-#endif
 
 	const int maxbit = segmentedSieve3(start2 - packlen, leng2 + packlen, bitarray2);
 	for (int i = 0; i < 8; i++) {
@@ -1988,7 +1980,7 @@ static uint64 coreSieve0(const uint64 begin, int sievesize)
 	}
 
 	if (Config.PrintRet) {
-		printf("G(%llu) = %u", begin, (uint)sgp);
+		printf("G(%I64u) = %u", begin, (uint)sgp);
 		if (Config.PrintTime && begin > Minn)
 			printf(", G%d S%d time %.3f sec", Algorithm, Config.SieveSize / 30 >> 10, (getTime() - ts) / 1000);
 		putchar('\n');
@@ -2354,9 +2346,9 @@ int main(int argc, char* argv[])
 	}
 
 #if 1
-	executeCmd("t1 s200 pr r e9 1 g1; r e9 1 g2; r e9 1 g3; pr");
-	executeCmd("t1 s63 e9 e3 g1; e9 e3 g2; e9 e3 g3");
-	executeCmd("t4 e9 e4 g2; e9 e4 g3");
+	executeCmd("t1 s200 pr r e9 1 g3; r e9 1 g2; r e9 1 g1; pr");
+//	executeCmd("t1 s63 e9 e3 g1; e9 e3 g2; e9 e3 g3");
+//	executeCmd("t4 e9 e4 g2; e9 e4 g3");
 #endif
 
 	char ccmd[255] = {0};
@@ -2375,11 +2367,10 @@ mail to: bailuzhou@163.com
 free use for non-commercial purposes
 
 G[10^9] to G[10^9 + 2e4]
-2.66G Intel I5 560M 8.30 x86
-2.26G Intel I3 350M 7.90 x86
-2.26G Intel I3 350M 5.68 x64
+2.26G Intel I3 350M 11.00 x86
+2.26G Intel I3 350M 5.60 x64
 3.20G Intel I5 3470 3.00 x86
-3.20G Intel I5 3470 1.62 x64
+3.20G Intel I5 3470 1.60 x64
 
 G[10^9] to G[10^9 + 2e3]
 popcnt64 : 1620
