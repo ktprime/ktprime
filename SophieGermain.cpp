@@ -1,4 +1,5 @@
 /************************************************************
+If both p and 2p+1 are prime, then p is a Sophie Germain prime.
 	this programming is the most fast algorithm for count
 sophie germain primes, performance and through improvement by minimizing cache conflicts and misses
 in the last level caches of multi-cores processors.
@@ -52,9 +53,9 @@ http://en.wikipedia.org/wiki/Sophie_Germain_prime
 # define NO_ASM_X86      1
 #endif
 
-typedef unsigned char  uchar;
+typedef unsigned char uchar;
 typedef unsigned short ushort;
-typedef unsigned int   uint;
+typedef unsigned int uint;
 
 #ifdef _WIN32
 	typedef unsigned __int64 uint64;
@@ -72,10 +73,10 @@ typedef unsigned int   uint;
 # if BSHIFT == 3
 	typedef uchar utype;
 	# define MASK 7
-# elif BSHIFT ==  4
+# elif BSHIFT == 4
 	typedef ushort utype;
 	# define MASK 15
-# elif BSHIFT ==  5
+# elif BSHIFT == 5
 	typedef uint utype;
 	# define MASK 31
 # endif
@@ -108,7 +109,7 @@ static const char* const HelpConfig = "\
 	[M: Monitor progress m(0 - 30)]\n\
 	[F: Factorial of whell prime factor f(7 - 29)]\n\
 	[T: Threads number t(2 - 64)]\n\
-	[C: Cpu L1/L2 data cache size c(L1:16-128, L2:128-1024)]\n\
+	[C: Cpu L1/L2 data cache size c(L1:16-128, L2:128-4096)]\n\
 	[B: Benchmark (start) (end)]\n\
 	[U: Unit test (1 - 10000)]\n\
 	[I: List (powbase) (start index) (end index)]\n\
@@ -166,7 +167,7 @@ static utype CrossedTpl[(SEGMENT_SIZE >> (BSHIFT + 1)) + 100];
 static uchar LeftMostBit1[1 << 16];
 
 //number of bits 1 binary representation table
-#if POPCNT == 0 && TREE2 == 0
+#if TREE2 == 0
 static uchar WordNumBit1[1 << 16];
 #endif
 
@@ -602,7 +603,8 @@ static void segmentedSieve(utype bitarray[], const uint64 start, const int leng,
 		crossOutFactor(bitarray, start, leng, p);
 	}
 	if (start == 0) {
-		*(ushort*)bitarray = 0x3491;
+		*((uchar*)bitarray + 0) = 0x91;
+		*((uchar*)bitarray + 1) = 0x34;
 	}
 }
 
@@ -663,7 +665,7 @@ asmMulDiv(const uint moudle, const uint pattern, uint p)
 {
 #ifdef NO_ASM_X86
 	p = ((uint64)moudle) * pattern % p;
-#elif !defined _MSC_VER
+#elif __GNUC__ 
 	__asm
 	(
 #if 0
@@ -699,7 +701,7 @@ asmMulDivSub(const uint moudle, const uint pattern, uint p, const uint leng)
 {
 #ifdef NO_ASM_X86
 	p = (((uint64)moudle) * pattern - leng) % p + leng;
-#elif !(defined _MSC_VER)
+#elif __GNUC__
 	__asm
 	(
 #if 1
@@ -790,7 +792,7 @@ static void initBitTable( )
 	//1. init WordNumBit1 table in 0-2^16, can use popcnt replace it
 	int i;
 
-#if 0 == POPCNT && 0 == TREE2
+#if 0 == TREE2
 	WordNumBit1[0] = 0;
 	for (i = 1; i < sizeof(WordNumBit1) / sizeof(WordNumBit1[0]); i++) {
 		WordNumBit1[i] = WordNumBit1[i >> 1] + (i & 1);
@@ -857,7 +859,7 @@ static int countPattern(const utype bitarray[], const int leng, ptype spattern[]
 	int psn = 0, lastpattern = 0;
 
 	for (int p = 1; NEXT_PAIR(p) <= leng; p += 2) {
-		int p2 = NEXT_PAIR(p);
+		const int p2 = NEXT_PAIR(p);
 		if (!TST_BIT2(bitarray, p) && !TST_BIT2(bitarray, p2)) {
 			if (spattern)
 				spattern[psn] = p - lastpattern;
@@ -1148,9 +1150,8 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 		pnext = getNextPattern(pattern, pnext);
 #ifdef CHECK_PATTERNS
 		if (CHECK_FLAG(CHECK_PATTERN)) {
-			if (gcd(Gp.Wheel, pattern) != 1
-				|| gcd(Gp.Wheel * SGP, NEXT_PAIR(pattern)) != 1
-			)
+			if (gcd(Gp.Wheel, pattern) != 1 || 
+				gcd(Gp.Wheel * SGP, NEXT_PAIR(pattern)) != 1)
 				printf("error pattern = %d\n", pattern);
 			continue;
 		}
@@ -1362,6 +1363,8 @@ static int getPartition(uint n)
 	memset(bitarray, 0, sieve_byte + 1);
 
 	segmentedSieve(bitarray, 0, n + 16, 2);
+	packQwordBit1(bitarray, (1 + n) / 2);
+
 	int gp = countPattern(bitarray, n, 0);
 	int p2 = NEXT_PAIR(2);
 	if (p2 % 2 == 1 && !TST_BIT2(bitarray, p2))
@@ -1418,7 +1421,7 @@ static uint initGp(const uint64 n)
 
 	Pattern[pns] = 0;
 	if (CHECK_FLAG(PRINT_LOG)) {
-		printf("wheel = %d * %d, sievesize = %dk\n", factorial, wheel /factorial, (n / wheel) >> 13);
+		printf("wheel = %d * %d, sievesize = %dk\n", factorial, wheel /factorial, (int)(n / wheel) >> 13);
 	}
 
 	return wheel;
@@ -1525,7 +1528,7 @@ static uint64 doGetGp(const uint64 n, int pn, bool addsmall)
 	if (CHECK_FLAG(PRINT_LOG)) {
 		printf("initGp time %.2lf ms\n", getTime() - ts);
 	}
-	
+
 	const uint64 sgn = addsmall ? getSmallGp(n) : 0;
 	if (pn <= 0 || pn > Gp.Patterns) {
 		pn = Gp.Patterns;
@@ -1847,7 +1850,7 @@ static void printInfo( )
 	puts(sepator);
 
 	printf("Sophie Germain Prime (n < %s) version %s\n", MAXN, SVERSION);
-	puts("Copyright (c) by Huang Yuanbing 2013 - 2014 bailuzhou@163.com");
+	puts("Copyright (c) by Huang Yuanbing 2013 - 2018 bailuzhou@163.com");
 
 #ifdef _MSC_VER
 	printf("Compiled by MS/vc++ %d", _MSC_VER);
@@ -2057,11 +2060,11 @@ int main(int argc, char* argv[])
 			executeCmd(argv[i]);
 	}
 
-	executeCmd("e10;");
+	executeCmd("e11;1e10;");
 //	executeCmd("t1 d m7 1e14 200; e15 100");
-//	executeCmd("d m7 1e15");
+//	executeCmd("d m9 1e15");
 
-	char ccmd[256] = {0};
+	char ccmd[255] = {0};
 	while (true) {
 		printf("\n>> ");
 		if (!gets(ccmd) || !executeCmd(ccmd))
@@ -2086,21 +2089,19 @@ int main(int argc, char* argv[])
 12		1822848478
 13
 
-MINGW: gcc 4.6.3
-CXXFLAGS: -Ofast -msse4 -s -pipe  -march=corei7 -funroll-loops
-windows 7 64 bit, I5 3470 3.2G   / i3 350M 2.26G
-S(1e11) = 218116524        4.64  | 14.0 sec
-S(1e12) = 1822848478       52.8  | 140.4 sec
-S(1e13) = 15462601989      541.  | 1790. sec
-S(1e14) = 13280063038      6523  | 5.20 hour
-S(1e15) = 1154538341852    27.8  | 91.4 hour
-S(1e16) =                  400   |
+MINGW: gcc 5.1.0
+CXXFLAGS: -Ofast -msse4 -s -pipe -march=corei7 -funroll-loops
+windows 7 64 bit, I5 3470 3.2G / i3 350M 2.26G
+S(1e11) = 218116524        4.64| 14.0 sec
+S(1e12) = 1822848478       52.8| 140.4 sec
+S(1e13) = 15462601989      541.| 1790. sec
+S(1e14) = 13280063038      6523| 5.20 hour
+S(1e15) = 1154538341852    27.8| 91.4 hour
+S(1e16) =                  400 |
 
-  c1600 m5 d t4 e15 1000
-	need 28h amd phoenm x4 830
 feature:
   1. win32 gui
-  2. detial algorithm and readme
+  2. detail algorithm and readme
 
 Linux g++:
   g++ -Wall -march=native -s -pipe -O2 -ffunction-sections -fomit-frame-pointer -lpthread sophieGermain.cpp
