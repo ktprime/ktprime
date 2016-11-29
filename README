@@ -1,29 +1,27 @@
-  the most fastest sieving prime algorithm for n < 2^64,
-each file is a useful tool and it's easy to be tested.
-
-Mingw: g++ 5.1.0 bailuzhou@163
+  the most fastest single-thread sieving prime programming for n < 2^64.
+Mingw: g++ 5.1.0 run on windows 10
 g++ -DSIEVE_SIZE=1024 -DSAFE -DW30 -march=native -funroll-loops -O3 -s -pipe
 Windows  10 x64  on x86_64 cpu         i3 350M 2.2G, i5 3470 3.2G,i7 6700 3.4 G
-pi(1e11, 1e10)  =  394050419           5.25          2.94         2.04
+pi(1e11, 1e10)  =  394050419           5.20          2.91         2.04
 pi(1e12, 1e10)  =  361840208           6.31          3.40         2.37
 pi(1e13, 1e10)  =  334067230           7.56          3.94         2.76
-pi(1e14, 1e10)  =  310208140           9.38          4.64         3.24
-pi(1e15, 1e10)  =  289531946           11.3          5.55         4.01
-pi(1e16, 1e10)  =  271425366           13.3          6.53         4.72
-pi(1e17, 1e10)  =  255481287           15.5          7.62         5.55
-pi(1e18, 1e10)  =  241272176           18.8          9.05         6.65
-pi(1e19, 1e10)  =  228568014           25.7          12.0         9.10
-pi(2^64-1e9,1e9)=  22537866            9.02          6.12         4.12
+pi(1e14, 1e10)  =  310208140           9.34          4.64         3.24
+pi(1e15, 1e10)  =  289531946           11.4          5.55         4.01
+pi(1e16, 1e10)  =  271425366           13.2          6.50         4.72
+pi(1e17, 1e10)  =  255481287           15.5          7.55         5.55
+pi(1e18, 1e10)  =  241272176           18.7          9.00         6.65
+pi(1e19, 1e10)  =  228568014           25.5          12.0         9.10
+pi(2^64-1e9,1e9)=  22537866            8.75          4.28         3.62
 pi(1e18, 1e6)   =  24280               0.75          0.46         0.34
-pi(1e18, 1e8)   =  2414886             1.50          0.83         0.70
+pi(1e18, 1e8)   =  2414886             1.50          0.81         0.70
 pi(1e18, 1e9)   =  24217085            3.80          1.80         1.48
-pi(1e14, 1e12)  =  31016203073         930           474          324
+pi(1e14, 1e12)  =  31016203073         930           466          324
 pi(1e16, 1e12)  =  27143405794         1300          660          462
-pi(1e18, 1e12)  =  24127637783         1640          820          592
-pi(1e19, 1e12)  =  22857444126         1800          920          622
+pi(1e18, 1e12)  =  24127637783         1640          800          592
+pi(1e19, 1e12)  =  22857444126         1800          900          622
+pi(1e18, 1e13)  =  241274558866                      8280         6000
+pi(1e19, 1e13)  =  228575545410                      8900         6210\n";
 doc:
 	http://sweet.ua.pt/tos/software/prime_sieve.html
 	http://primesieve.org/
-	http://www.compileonline.com/
-	http://liveworkspace.org/code/
-	http://coliru.stacked-crooked.com/
+Each file is a useful tool and it's easy to be tested.
