@@ -1,5 +1,5 @@
 /************************************************************
-copyright (C) 2008-2014 by Huang Yuanbing
+copyright (C) 20010-2018 by Huang Yuanbing
 mail to: bailuzhou@163.com
 free use for non-commercial purposes
 
@@ -31,16 +31,14 @@ k   s : b
     * pi7(x) : count of prime septuplets.
       prime septuplet = (p, p + 2, p + 6, p + 8, p + 12, p + 18, p + 20)
 doc:
-http://www.primesdemystified.com/sophiegermainprimes.html
 http://primes.utm.edu/glossary/xpage/PrimeKTuplet.html
 http://en.wikipedia.org/wiki/Prime_k-tuple
 http://mathworld.wolfram.com/PrimeConstellation.html
 http://numbers.computation.free.fr/Constants/Primes/twin.html.
 http://anthony.d.forbes.googlepages.com/ktuplets.htm
-
+http://primes.utm.edu/nthprime/index.php#piofx
 http://www.trnicely.net
 http://www.ieeta.pt/~tos/primes.html
-http://code.google.com/p/primesieve/
 **************************************************************/
 
 # include <ctype.h>
@@ -124,8 +122,8 @@ typedef unsigned int   uint;
 # define SET_BIT(a, n)      a[(n) >> BSHIFT] |= MASK_N(n)
 //# define FLP_BIT (a, n)     a[(n) >> BSHIFT] ^= MASK_N(n)
 //# define CLR_BIT(a, n)      a[(n) >> BSHIFT] &= ~MASK_N(n)
-# define TST_BIT(a, n)      (a[(n) >> BSHIFT] & MASK_N(n))
-# define TST_BIT2(a, n)     TST_BIT(a, (n) / 2)
+//# define TST_BIT(a, n)      (a[(n) >> BSHIFT] & MASK_N(n))
+# define TST_BIT2(a, n)     (a[(n) / 2 >> BSHIFT] & MASK_N((n) / 2))
 
 # define CHECK_FLAG(flag)   (Config.Flag & flag)
 # define SET_FLAG(flag)     Config.Flag |= flag
@@ -140,7 +138,7 @@ static const char* const HelpConfig = "\
 	[K: Calculate of Prime/Twin[Cousin]/Ktuplet Prime k(0 - 8)]\n\
 	[M: Monitor progress m(0 - 30)]\n\
 	[H: Help]\n\
-	[F: Factorial of whell prime factor f(7 - 29)]\n\
+	[F: Factorial of wheel prime factor f(7 - 29)]\n\
 	[T: Threads number t(2 - 64)]\n\
 	[C: Cpu L1/L2 data cache size (L1:16-128, L2:128-1024)]\n";
 
@@ -202,10 +200,7 @@ Kgap = %d\n\
 Wheel = %d\n\
 Patterns = %d\n\
 Tasks = %d\n\
-Pbegi = %d\n\
-Pendi = %d\n\
-N = %llu\n\
-Result = %llu";
+N = %llu\n";
 
 static const char* const PrintFormat[] =
 {
@@ -916,7 +911,8 @@ static void segmentedSieve1(utype bitarray[], const uint64 start, const int leng
 	}
 
 	if (start == 0) {
-		*(ushort*)bitarray = 0x3491;
+		*((uchar*)bitarray + 0) = 0x91;
+		*((uchar*)bitarray + 1) = 0x34;
 	}
 }
 
@@ -933,7 +929,8 @@ static void segmentedSieve2(utype bitarray[], const uint64 start, const int leng
 
 	if (start == 0) {
 		//the first 7th bit poisition set 1
-		*(ushort*)bitarray = 0x3491;
+		*((uchar*)bitarray + 0) = 0x91;
+		*((uchar*)bitarray + 1) = 0x34;
 	}
 }
 
@@ -1820,7 +1817,7 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 #else
 		scnt++;
 #endif
-		if ((scnt & Config.PrintGap) == 4) {
+		if ((scnt & Config.PrintGap) == 31) {
 			printProgress(tid, tstart, (int)(gpts / (1 + pcuri - pbegi)), scnt);
 		}
 	}
@@ -2112,86 +2109,65 @@ static int initParam(const uint64 n)
 
 static void saveTask(struct Task& curtask)
 {
-	if (freopen("prime.ta", "rb", stdin)) {
-		freopen(CONSOLE, "r", stdin);
-		remove("prime.ta.bak");
-		if (rename("prime.ta", "prime.ta.bak") != 0) {
-			perror("bake data fail");
-		}
+	if (curtask.Tasks == 0) {
+		curtask.Tasks = 4;
 	}
 
-	freopen("prime.ta", "wb", stdout);
-
-	if (LastTask.Tasks == 0)
-		curtask.Pendi += KData.Patterns / 3;
+	freopen("ktp.ta", "at+", stdout);
+	if (curtask.Result > 0)
+		printf("kt[%d-%d]=%lld\n", curtask.Pbegi, curtask.Pendi, curtask.Result);
 	else
-		curtask.Pendi += KData.Patterns / LastTask.Tasks;
+		printf(TaskFormat, curtask.Ptk, Config.Kgap, curtask.Wheel, KData.Patterns, curtask.Tasks, curtask.N);
 
-	if (curtask.Pendi > KData.Patterns) {
-		curtask.Pendi = KData.Patterns;
-	}
-
-	printf(TaskFormat, curtask.Ptk,
-			Config.Kgap, curtask.Wheel, KData.Patterns,
-			curtask.Tasks, curtask.Pbegi, curtask.Pendi,
-			curtask.N, curtask.Result);
-
-	freopen(CONSOLE, "r", stdin);
 	freopen(CONSOLE, "w", stdout);
 }
 
-static int readTaskData(struct Task &curtask)
+static int parseTask(struct Task &curtask)
 {
 	int ret = 0;
-	char linebuf[400] = {0};
-	char taskdata[400] = {0};
-	freopen("prime.ta", "rb", stdin);
+	char linebuf[400] = {0}, taskdata[400] = {0};
+	freopen("ktp.ta", "rb", stdin);
 
 	while (gets(linebuf)) {
+		if (linebuf[0] == 'k') {
+			sscanf(linebuf, "kt[%d-%d]=%lld", &curtask.Pendi, &curtask.Pbegi, &curtask.Result);
+			continue;
+		}
 		strcat(taskdata, strcat(linebuf, "\n"));
 	}
 
 	//read last task data
 	struct Task tmp = {0};
-	if (sscanf(taskdata, TaskFormat, &tmp.Ptk,
-		&Config.Kgap, &tmp.Wheel, &KData.Patterns,
-		&curtask.Tasks,	&curtask.Pbegi, &curtask.Pendi,
-		&tmp.N, &curtask.Result) != 9) {
+	if (sscanf(taskdata, TaskFormat, &tmp.Ptk, &Config.Kgap, &tmp.Wheel, &KData.Patterns, &curtask.Tasks, &tmp.N) != 6) {
 		printf("invalid task data format: %s : %s\n", taskdata, TaskFormat);
 		ret = -1;
 	}
 
 	//check task data
-	if (curtask.N != tmp.N ||
-		curtask.Wheel != tmp.Wheel ||
-		curtask.Ptk != tmp.Ptk) {
+	if (curtask.N != tmp.N || curtask.Wheel != tmp.Wheel || curtask.Ptk != tmp.Ptk) {
 		printf("last task \n%s is not match with current task\n", taskdata);
 		ret = -2;
 	}
 
 	freopen(CONSOLE, "r", stdin);
-
 	return ret;
 }
 
 //
 static int loadTask(struct Task &curtask)
 {
-	int ret = 0;
-	if (!freopen("prime.ta", "rb", stdin)) {
-		puts("create a default task file prime.ta\n");
+	if (curtask.Tasks == 0) {
+		curtask.Tasks = 4;
+	}
+	if (!freopen("ktp.ta", "rb", stdin)) {
+		puts("create a default task file ktp.ta\n");
+		curtask.Result = curtask.Pbegi = 0;
 		saveTask(curtask);
+	} else if (parseTask(curtask) != 0) {
+		curtask.Result = curtask.Pbegi = 0;
 	}
 
-	if (readTaskData(curtask) != 0) {
-		curtask.Result = curtask.Pbegi = curtask.Pendi = 0;
-		saveTask(curtask);
-	}
-
-	if (curtask.Tasks > 0) {
-		curtask.Pendi = curtask.Pbegi + KData.Patterns / curtask.Tasks + 1;
-	}
-
+	curtask.Pendi = curtask.Pbegi + KData.Patterns / curtask.Tasks + 1;
 	if (curtask.Pendi > KData.Patterns) {
 		curtask.Pendi = KData.Patterns;
 	}
@@ -2201,8 +2177,7 @@ static int loadTask(struct Task &curtask)
 	}
 
 	freopen(CONSOLE, "r", stdin);
-
-	return ret;
+	return 0;
 }
 
 //
@@ -2230,7 +2205,7 @@ static uint64 getGpKtPn(const uint64 n, int pn, bool addsmall)
 		int pbegi = 0, pendi = pn;
 
 		//load Last Task
-		if (CHECK_FLAG(SAVE_TASK) && loadTask(LastTask) >= 0) {
+		if (CHECK_FLAG(SAVE_TASK) && !addsmall && loadTask(LastTask) >= 0) {
 			pbegi = LastTask.Pbegi;
 			pendi = LastTask.Pendi;
 			gptn = LastTask.Result;
@@ -2256,8 +2231,7 @@ static uint64 getGpKtPn(const uint64 n, int pn, bool addsmall)
 #endif
 
 		//save Current Task
-		if (CHECK_FLAG(SAVE_TASK) && pbegi < pendi) {
-			LastTask.Pbegi = pendi;
+		if (CHECK_FLAG(SAVE_TASK) && !addsmall && pbegi < pendi) {
 			LastTask.Result = gptn;
 			saveTask(LastTask);
 		}
@@ -2316,7 +2290,7 @@ static uint64 Ktprime(const uint64 n, int pn)
 	}
 
 	//optimize for Ktuplet prime with small n > e7
-	if (n > atoint64("e13", 0)) {
+	if (n > atoint64("e12", 0)) {
 		int sqrtn = (int)sqrt((double)n + 0.1);
 		int wheel = getWheel(n);
 		int maxn = sqrtn > wheel ? sqrtn : wheel;
@@ -2667,7 +2641,7 @@ static void cpuid(int cpuinfo[4], int id)
 #endif
 }
 
-// http://msdn.microsoft.com/en-us/library/hskdteyh%28v=vs.80%29.aspx
+// http://msdn.microsoft.com/en-us/library/hskdteyh%28v=vs.100%29.aspx
 static int getCpuInfo()
 {
 	char cpuName[255] = {-1};
@@ -2709,12 +2683,12 @@ static void printInfo()
 	3.Ktuplet prime PIk(n)\n (n < %s) version %s\n",
 	KtupletName[0], KtupletName[1], MAXN, KVERSION);
 
-	puts("Copyright (c) by Huang Yuanbing 2008 - 2014 bailuzhou@163.com");
+	puts("Copyright (c) by Huang Yuanbing 2010 - 2018 bailuzhou@163.com");
 
 #ifdef _MSC_VER
 	printf("Compiled by MS/vc++ %d", _MSC_VER);
 #else
-	printf("Compiled by g++ %d.%d.%d", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+	printf("Compiled by g++ %s", __VERSION__);
 #endif
 
 #if _M_AMD64 || __x86_64__
@@ -2785,7 +2759,7 @@ static void printKpattern()
 		puts(KtupletName[ktuplets]);
 	} else {
 		if (ktuplets <= sizeof(KtupletName) / sizeof(KtupletName[0]))
-			printf(KtupletName[ktuplets]);
+			puts(KtupletName[ktuplets]);
 		else
 			printf("%d-tuples", ktuplets);
 		printf(": p");
@@ -2875,7 +2849,7 @@ static int parseCmd(char cmdparams[][80])
 				} else if (tmp == 1) {
 					Config.PrintGap = Config.PrintGap * 2 + 1;
 				} else if (tmp == 0) {
-					Config.PrintGap >>= 1;
+					Config.PrintGap = 0;
 				}
 				break;
 			case 'H':
@@ -3018,7 +2992,7 @@ int main(int argc, char* argv[])
 			executeCmd(argv[i]);
 	}
 
-	executeCmd("d t1 k41 e10");
+	executeCmd("d t1 k21 e10");
 //	executeCmd("d t4 M6 C1200 k6 e13");
 
 	char ccmd[256] = {0};
