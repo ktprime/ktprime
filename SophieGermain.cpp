@@ -17,15 +17,15 @@ http://en.wikipedia.org/wiki/Sophie_Germain_prime
 # include <stdio.h>
 # include <assert.h>
 
-# define SVERSION       "1.0"
+# define SVERSION       "2.0"
 # define MAXN           "1e16"
 # define MINN           100000000
 # define SGP            2
 # define SOF            1
 
 # define MAX_L1SIZE     (64 << 13)
-# define SEGMENT_SIZE   (510510 * 19 * 2)
-# define MAX_THREADS    32
+# define SEGMENT_SIZE   (510510 * 19 * 1)
+# define MAX_THREADS    256
 
 //SSE4a popcnt instruction, make sure cpu support it
 #if _MSC_VER > 1400
@@ -69,7 +69,10 @@ typedef unsigned int uint;
 	#include <pthread.h>
 #endif
 
+
+#ifndef BSHIFT
 # define BSHIFT 5
+#endif
 # if BSHIFT == 3
 	typedef uchar utype;
 	# define MASK 7
@@ -79,6 +82,9 @@ typedef unsigned int uint;
 # elif BSHIFT == 5
 	typedef uint utype;
 	# define MASK 31
+#else
+	typedef uint64 utype;
+	# define MASK 63
 # endif
 
 # define MASK_N(n)          (1 << (n & MASK))
@@ -128,16 +134,14 @@ static const char* const TaskFormat =
 Wheel = %d\n\
 Patterns = %d\n\
 Tasks = %d\n\
-Pbegi = %d\n\
-Pendi = %d\n\
-N = %llu\n\
-Result = %llu";
+Cache = %d\n\
+N = %lld\n";
 
 static const char* const PrintFormat =
 #if _MSC_VER == 1200
 	"S(%I64d) = %I64d";
 #else
-	"S(%llu) = %llu";
+	"S(%lld) = %lld";
 #endif
 
 /************************************/
@@ -216,18 +220,12 @@ static struct Task
 	int Tasks;
 	int Pbegi;
 	int Pendi;
-
 	uint64 Result;
 } LastTask;
 
-static struct ThreadInfo
-{
-	int Pbegi;
-	int Pendi;
-	uint64 Result;
-} TData[MAX_THREADS];
+static Task TData[MAX_THREADS];
 
-static uint64 sievePattern(int, int);
+static uint64 sievePattern(int, int, int);
 
 #ifdef _WIN32
 static DWORD WINAPI threadProc(void* ptinfo)
@@ -235,8 +233,8 @@ static DWORD WINAPI threadProc(void* ptinfo)
 static void* threadProc(void* ptinfo)
 #endif
 {
-	struct ThreadInfo* ptdata = (struct ThreadInfo*)(ptinfo);
-	ptdata->Result = sievePattern(ptdata->Pbegi, ptdata->Pendi);
+	struct Task* ptdata = (struct Task*)(ptinfo);
+	ptdata->Result = sievePattern(ptdata->Pbegi, ptdata->Pendi, ptdata->Tasks);
 	return 0;
 }
 
@@ -249,7 +247,9 @@ static void devideTaskData(int threads, int pbegi, int pendi)
 	int tsize = (pendi - pbegi) / threads;
 	tsize += tsize & 1;
 	TData[0].Pbegi = pbegi;
+	TData[0].Tasks = 1;
 	for (int i = 1; i < threads; i++) {
+		TData[i].Tasks = i + 1;
 		TData[i].Pbegi = TData[i - 1].Pendi =
 		TData[i - 1].Pbegi + tsize;
 	}
@@ -260,7 +260,7 @@ static uint64 startWorkThread(int threads, int pbegi, int pendi)
 {
 	int i;
 	if (threads > MAX_THREADS) {
-		threads = 4;
+		threads = 8;
 	}
 	devideTaskData(threads, pbegi, pendi);
 
@@ -585,7 +585,7 @@ static void crossOutFactor(utype bitarray[], const uint64 start, const int leng,
 //sieve multiple of each prime factor of wheelsie in [start, start + leng]
 static void sieveWheelFactor(utype bitarray[], const uint64 start, const int leng, const uint wheel)
 {
-	assert(wheel % 6 == 0);
+	//assert(wheel % 6 == 0);
 
 	for (int i = 2, p = 3; wheel % p == 0; PRIME_NEXT(p, i)) {
 		crossOutFactor(bitarray, start, leng, p);
@@ -665,7 +665,7 @@ asmMulDiv(const uint moudle, const uint pattern, uint p)
 {
 #ifdef NO_ASM_X86
 	p = ((uint64)moudle) * pattern % p;
-#elif __GNUC__ 
+#elif __GNUC__
 	__asm
 	(
 #if 0
@@ -760,7 +760,7 @@ static int simpleEratoSieve(const uint sqrtn)
 	int primes = 1;
 
 	utype bitarray[30000 >> (BSHIFT + 1)] = {0};
-	assert(sqrtn < sizeof(bitarray) * 16);
+	//assert(sqrtn < sizeof(bitarray) * 16);
 
 	uint lastprime = Prime[primes++] = 2;
 
@@ -911,11 +911,7 @@ static int getPattern(const uint wheel, ptype pattern[])
 
 	memset(bitarray, 0, sieve_byte + 1);
 	sieveWheelFactor(bitarray, 0, wheel + 16, wheel);
-	if (pattern) {
-		gpn = savePattern(bitarray, wheel, pattern);
-	} else {
-		gpn = savePattern(bitarray, wheel, 0);
-	}
+	gpn = savePattern(bitarray, wheel, pattern);
 
 	free(bitarray);
 
@@ -1106,28 +1102,24 @@ static void printProgress(int tid, double time_use, int aves, int pcnt)
 	double currper = 100.0 * pcnt / Gp.Patterns;
 	double totaltime = time_use / (10 * currper);
 
-	printf("thread[%2d]: (%.2lf%%), time ~= ", tid, currper);
+	printf("thread[%d]: (%.2lf%%), time ~= ", tid, currper);
 	if (totaltime < 3600 * 3) {
 		printf("%.2lf sec", totaltime);
 	} else {
 		printf("%.2lf hour", totaltime / 3600);
 	}
 
-	printf(", sophie germain ~= %llu\n", (uint64)aves * Gp.Patterns);
+	printf(", sophie germain ~= %lld\n", (uint64)aves * Gp.Patterns);
 }
 
 //thread call: get result form pattern pbegi to pendi
 //calcultate wheel * k + Pattern[pbegi, pendi] <= n
-static uint64 sievePattern(const int pbegi, const int pendi)
+static uint64 sievePattern(const int pbegi, const int pendi, int tid)
 {
-	static int stid = 0;
 	static int scnt = 0;
-
 	if (pbegi == 0) {
-		stid = scnt = 0;
+		scnt = 0;
 	}
-
-	int tid = ++stid;
 
 	double tstart = getTime( );
 
@@ -1150,7 +1142,7 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 		pnext = getNextPattern(pattern, pnext);
 #ifdef CHECK_PATTERNS
 		if (CHECK_FLAG(CHECK_PATTERN)) {
-			if (gcd(Gp.Wheel, pattern) != 1 || 
+			if (gcd(Gp.Wheel, pattern) != 1 ||
 				gcd(Gp.Wheel * SGP, NEXT_PAIR(pattern)) != 1)
 				printf("error pattern = %d\n", pattern);
 			continue;
@@ -1179,7 +1171,7 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 	free(bitarray);
 
 	if (CHECK_FLAG(PRINT_LOG)) {
-		printf("thread %d: pattern[%3d - %3d] = %llu\n", tid, pbegi, pendi, gpn);
+		printf("thread %d: pattern[%3d - %3d] = %lld\n", tid, pbegi, pendi, gpn);
 	}
 
 	return gpn;
@@ -1349,7 +1341,7 @@ static int getPrime(const int n)
 	if (CHECK_FLAG(PRINT_LOG)) {
 		printf("pi(%d) = %d\n", n, psn);
 	}
-	assert(psn < sizeof(Prime) / sizeof(Prime[0]));
+	//assert(psn < sizeof(Prime) / sizeof(Prime[0]));
 
 	return psn;
 }
@@ -1391,7 +1383,7 @@ static int getSmallGp(const uint64 n)
 	int ret = getPartition(leng);
 
 	if (CHECK_FLAG(PRINT_LOG)) {
-		printf("sieve small n = %llu, leng = %d", n, leng);
+		printf("sieve small n = %lld, leng = %d", n, leng);
 		printf("\nand small ret = %d, and time use %.lf ms\n", ret, getTime( ) - ts);
 	}
 
@@ -1429,44 +1421,35 @@ static uint initGp(const uint64 n)
 
 static void saveTask(struct Task& curtask)
 {
-	if (freopen("prime.ta", "rb", stdin)) {
-		freopen(CONSOLE, "r", stdin);
-		remove("prime.ta.bak");
-		if (rename("prime.ta", "prime.ta.bak") != 0) {
-			perror("back data fail");
-		}
-	}
-
 	if (curtask.Tasks == 0) {
-		curtask.Pendi += Gp.Patterns / 3;
-	} else {
-		curtask.Pendi += Gp.Patterns / curtask.Tasks;
+		curtask.Tasks = 4;
 	}
 
-	if (curtask.Pendi > Gp.Patterns) {
-		curtask.Pendi = Gp.Patterns;
-	}
-
-	freopen("prime.ta", "wb", stdout);
-	printf(TaskFormat, Gp.Wheel, Gp.Patterns, curtask.Tasks, curtask.Pbegi, curtask.Pendi, Gp.N, curtask.Result);
-	freopen(CONSOLE, "r", stdin);
-	freopen(CONSOLE, "w", stdout);
+	freopen("sophie.ta", "at+", stdout);
+	if (curtask.Result > 0)
+		printf("sg[%d-%d]=%lld\n", curtask.Pbegi, curtask.Pendi, curtask.Result);
+	else
+		printf(TaskFormat, Gp.Wheel, Gp.Patterns, curtask.Tasks, Config.CpuL2Size, Gp.N);
+	freopen(CONSOLE, "at", stdout);
 }
 
 static int parseTask(struct Task &curtask)
 {
 	int ret = 0;
 	char linebuf[400] = {0}, taskdata[400] = {0};
-	freopen("prime.ta", "rb", stdin);
+	freopen("sophie.ta", "rb", stdin);
 
 	while (gets(linebuf)) {
+		if (linebuf[0] == 's') {
+			sscanf(linebuf, "sg[%d-%d]=%lld", &curtask.Pendi, &curtask.Pbegi, &curtask.Result);
+			continue;
+		}
 		strcat(taskdata, strcat(linebuf, "\n"));
 	}
 
 	//read last task data
-	int wheel, patterns; uint64 N;
-	if (sscanf(taskdata, TaskFormat,
-				&wheel, &patterns, &curtask.Tasks, &curtask.Pbegi, &curtask.Pendi, &N, &curtask.Result) != 7) {
+	int wheel, patterns, cache; uint64 N;
+	if (sscanf(taskdata, TaskFormat, &wheel, &patterns, &curtask.Tasks, &cache, &N) != 5) {
 		printf("invalid task data format: %s : %s\n", taskdata, TaskFormat);
 		ret = -1;
 	}
@@ -1484,36 +1467,32 @@ static int parseTask(struct Task &curtask)
 //
 static int loadTask(struct Task &curtask)
 {
-	int ret = 0;
-	if (!freopen("prime.ta", "rb", stdin)) {
-		puts("create a default task file prime.ta\n");
-		saveTask(curtask);
-	}
-
-	if (parseTask(curtask) != 0) {
-		curtask.Result = curtask.Pbegi = curtask.Pendi = 0;
-		saveTask(curtask);
-	}
-
 	if (curtask.Tasks == 0) {
 		curtask.Tasks = 4;
 	}
 
-	if (curtask.Tasks > 0) {
-		curtask.Pendi = curtask.Pbegi + Gp.Patterns / curtask.Tasks + 1;
+	if (!freopen("sophie.ta", "rb", stdin)) {
+		puts("create a default task file sophie.ta\n");
+		curtask.Result = curtask.Pbegi = 0;
+		saveTask(curtask);
 	}
+	else if (parseTask(curtask) != 0) {
+		curtask.Result = curtask.Pbegi = 0;
+	}
+
+	curtask.Pendi = curtask.Pbegi + Gp.Patterns / curtask.Tasks + 1;
 
 	if (curtask.Pendi > Gp.Patterns) {
 		curtask.Pendi = Gp.Patterns;
 	}
 
 	if (CHECK_FLAG(PRINT_LOG)) {
-		printf("load last Task Data with pattern[%d - %d] ok\n", curtask.Pbegi, curtask.Pendi);
+		printf("load last Task Data with pattern[%d - %d] = %lld ok\n", curtask.Pbegi, curtask.Pendi, curtask.Result);
 	}
 
 	freopen(CONSOLE, "r", stdin);
 
-	return ret;
+	return 0;
 }
 
 static uint64 doGetGp(const uint64 n, int pn, bool addsmall)
@@ -1534,12 +1513,11 @@ static uint64 doGetGp(const uint64 n, int pn, bool addsmall)
 		pn = Gp.Patterns;
 	}
 
-	int pbegi = 0;
-	int pendi = pn;
+	int pbegi = 0, pendi = pn;
 	uint64 gpn = 0;
 
 	//load Last Task
-	if (CHECK_FLAG(SAVE_TASK) && loadTask(LastTask) >= 0) {
+	if (CHECK_FLAG(SAVE_TASK) && addsmall == false && loadTask(LastTask) >= 0) {
 		pbegi = LastTask.Pbegi;
 		pendi = LastTask.Pendi;
 		gpn = LastTask.Result;
@@ -1554,19 +1532,18 @@ static uint64 doGetGp(const uint64 n, int pn, bool addsmall)
 		if (oi == Config.Threads - 1) {
 			ei = pn;
 		}
-		gpn += sievePattern(bi + 1, ei);
+		gpn += sievePattern(bi + 1, ei, 1);
 	}
 #else
 	if (pendi - pbegi > 10 && Config.Threads > 1) {
 		gpn += startWorkThread(Config.Threads, pbegi, pendi);
 	} else if (pendi > pbegi) {
-		gpn += sievePattern(pbegi, pendi);
+		gpn += sievePattern(pbegi, pendi, 1);
 	}
 #endif
 
 	//save Current Task
-	if (CHECK_FLAG(SAVE_TASK) && pbegi < pendi) {
-		LastTask.Pbegi = pendi;
+	if (CHECK_FLAG(SAVE_TASK) && pbegi < pendi && addsmall == false) {
 		LastTask.Result = gpn;
 		saveTask(LastTask);
 	}
@@ -1587,7 +1564,7 @@ static uint64 getGp(const uint64 n, int pn)
 	uint64 gptn = 0;
 	bool addsmall = true;
 	//optimize for Ktuplet prime with small n > e7
-	if (n > ipow(10, 14)) {
+	if (n > ipow(10, 11)) {
 		const uint sqrtn2 = isqrt(NEXT_PAIR(n));
 		uint wheel = getWheel(n);
 		const uint64 maxn = sqrtn2 > wheel ? sqrtn2 : wheel;
@@ -1608,7 +1585,7 @@ static void printResult(const uint64 n, const uint64 gpn, double ts)
 {
 	int pow10 = ilog10(n);
 	if (n % ipow(10, pow10) == 0 && n > 10000) {
-		printf("S(%de%d) = %llu", (int)(n / ipow(10, pow10)), pow10, gpn);
+		printf("S(%de%d) = %lld", (int)(n / ipow(10, pow10)), pow10, gpn);
 	} else {
 		printf(PrintFormat, n, gpn);
 	}
@@ -1667,7 +1644,7 @@ static void listDiffGp(const char params[][80], int cmdi)
 		freopen("batch.txt", "wb", stdout);
 	}
 
-	printf("%llu:%d:%d\n\n", start, (int)(2 + end - start) / 2, step);
+	printf("%lld:%d:%d\n\n", start, (int)(2 + end - start) / 2, step);
 
 	int pcnt = 0;
 	uint64 allSum = 0;
@@ -1679,7 +1656,7 @@ static void listDiffGp(const char params[][80], int cmdi)
 		allSum += sophieGermain(n, 0);
 	}
 
-	printf("average = %llu, ", allSum / pcnt);
+	printf("average = %lld, ", allSum / pcnt);
 
 	printf("all case time use %.lf ms\n", getTime( ) - ts);
 	freopen(CONSOLE, "w", stdout);
@@ -2060,9 +2037,8 @@ int main(int argc, char* argv[])
 			executeCmd(argv[i]);
 	}
 
-	executeCmd("e11;1e10;");
 //	executeCmd("t1 d m7 1e14 200; e15 100");
-//	executeCmd("d m9 1e15");
+//	executeCmd("A d m7 t3 c1200 e12");
 
 	char ccmd[255] = {0};
 	while (true) {
@@ -2095,7 +2071,7 @@ windows 7 64 bit, I5 3470 3.2G / i3 350M 2.26G
 S(1e11) = 218116524        4.64| 14.0 sec
 S(1e12) = 1822848478       52.8| 140.4 sec
 S(1e13) = 15462601989      541.| 1790. sec
-S(1e14) = 13280063038      6523| 5.20 hour
+S(1e14) = 13280063038      6423| 5.20 hour
 S(1e15) = 1154538341852    27.8| 91.4 hour
 S(1e16) =                  400 |
 
