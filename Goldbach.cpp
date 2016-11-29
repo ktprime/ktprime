@@ -1,8 +1,10 @@
 /************************************************************
-	this programming is the most fast algorithm for count
-goldbach partition, performance and throughput improvement by minimizing cache conflicts and misses
+  A pair of primes (p,q) that sum to an even integer 2n=p+q are known as a Goldbach partition (Oliveira e Silva).
+	this programming is the most fast algorithm for calcultating
+goldbach partition g(2n), performance and throughput improvement by minimizing cache conflicts and misses
 in the last level caches of multi-cores processors.
 
+doc:
 http://www.trnicely.net
 http://www.ieeta.pt/~tos/primes.html
 http://numbers.computation.free.fr/Constants/Primes/twin.html.
@@ -16,26 +18,24 @@ http://mathworld.wolfram.com/GoldbachPartition.html
 # include <stdio.h>
 # include <assert.h>
 
-# define GVERSION       "2.1"
+# define GVERSION       "2.2"
 # define MAXN           "1e16"
 # define MINN           10000000
 
 # define MAX_L1SIZE     (64 << 13)
-# define SEGMENT_SIZE   (510510 * 19)
-# define MAX_THREADS    32
+# define SEGMENT_SIZE   (510510 * 19 * 2)
+# define MAX_THREADS    256
 
 //SSE4a popcnt instruction, make sure cpu support it
 #if _MSC_VER > 1400
 	# define POPCNT      1
 	# include <intrin.h>
 #elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44)
-	# define POPCNT      0
+	# define POPCNT      1
 	# include <popcntintrin.h>
 #else
 	# define POPCNT      0
 #endif
-
-//#pragma pack (16)
 
 # if OMP
 	#include <omp.h>
@@ -68,7 +68,9 @@ typedef unsigned int uint;
 	#include <pthread.h>
 #endif
 
+#ifndef BSHIFT
 # define BSHIFT 5
+#endif
 # if BSHIFT == 3
 	typedef uchar utype;
 	# define MASK 7
@@ -78,9 +80,12 @@ typedef unsigned int uint;
 # elif BSHIFT == 5
 	typedef uint utype;
 	# define MASK 31
+#else
+	typedef uint64 utype;
+	# define MASK 63
 # endif
 
-# define MASK_N(n)          (1 << (n & MASK))
+# define MASK_N(n)          ((utype)1 << (n & MASK))
 # define SET_BIT(a, n)      a[n >> BSHIFT] |= MASK_N(n)
 # define TST_BIT2(a, n)     (a[(n / 2) >> BSHIFT] & MASK_N(n / 2))
 
@@ -107,7 +112,7 @@ static const char* const HelpConfig = "\
 	[M: Monitor progress m(0 - 30)]\n\
 	[F: Factorial of whell prime factor f(7 - 29)]\n\
 	[T: Threads number t(2 - 64)]\n\
-	[C: Cpu L1/L2 data cache size c(L1:16-128, L2:128-1024)]\n\
+	[C: Cpu L1/L2 data cache size c(L1:16-128, L2:128-4096)]\n\
 	[B: Benchmark (start) (end)]\n\
 	[U: Unit test (1 - 10000)]\n\
 	[N: Number of patterns (start) (count)]\n\
@@ -128,10 +133,8 @@ static const char* const TaskFormat =
 Wheel = %d\n\
 Patterns = %d\n\
 Tasks = %d\n\
-Pbegi = %d\n\
-Pendi = %d\n\
-N = %lld\n\
-Result = %lld";
+Cache = %d\n\
+N = %lld\n";
 
 static const char* const PrintFormat =
 #if _MSC_VER == 1200
@@ -166,7 +169,7 @@ static utype CrossedTpl[(SEGMENT_SIZE >> (BSHIFT + 1)) + 100];
 static uchar LeftMostBit1[1 << 16];
 
 //number of bits 1 binary representation table
-#if POPCNT == 0 && TREE2 == 0
+#if TREE2 == 0
 static uchar WordNumBit1[1 << 16];
 #endif
 
@@ -214,18 +217,12 @@ static struct Task
 	int Tasks;
 	int Pbegi;
 	int Pendi;
-
 	uint64 Result;
 } LastTask;
 
-static struct ThreadInfo
-{
-	int Pbegi;
-	int Pendi;
-	uint64 Result;
-} TData[MAX_THREADS];
+static Task TData[MAX_THREADS];
 
-static uint64 sievePattern(int, int);
+static uint64 sievePattern(int, int, int);
 
 #ifdef _WIN32
 static DWORD WINAPI threadProc(void* ptinfo)
@@ -233,8 +230,8 @@ static DWORD WINAPI threadProc(void* ptinfo)
 static void* threadProc(void* ptinfo)
 #endif
 {
-	struct ThreadInfo* ptdata = (struct ThreadInfo*)(ptinfo);
-	ptdata->Result = sievePattern(ptdata->Pbegi, ptdata->Pendi);
+	struct Task* ptdata = (struct Task*)(ptinfo);
+	ptdata->Result = sievePattern(ptdata->Pbegi, ptdata->Pendi, ptdata->Tasks);
 	return 0;
 }
 
@@ -247,7 +244,9 @@ static void devideTaskData(int threads, int pbegi, int pendi)
 	int tsize = (pendi - pbegi) / threads;
 	tsize += tsize & 1;
 	TData[0].Pbegi = pbegi;
+	TData[0].Tasks = 1;
 	for (int i = 1; i < threads; i++) {
+		TData[i].Tasks = i + 1;
 		TData[i].Pbegi = TData[i - 1].Pendi =
 		TData[i - 1].Pbegi + tsize;
 	}
@@ -258,7 +257,7 @@ static uint64 startWorkThread(int threads, int pbegi, int pendi)
 {
 	int i;
 	if (threads > MAX_THREADS) {
-		threads = 4;
+		threads = 8;
 	}
 	devideTaskData(threads, pbegi, pendi);
 
@@ -583,7 +582,7 @@ static void crossOutFactor(utype bitarray[], const uint64 start, const int leng,
 //sieve multiple of each prime factor of wheelsie in [start, start + leng]
 static void sieveWheelFactor(utype bitarray[], const uint64 start, const int leng, const uint wheel)
 {
-	assert(wheel % 6 == 0);
+	//assert(wheel % 6 == 0);
 
 	for (int i = 2, p = 3; wheel % p == 0; PRIME_NEXT(p, i)) {
 		crossOutFactor(bitarray, start, leng, p);
@@ -601,7 +600,8 @@ static void segmentedSieve(utype bitarray[], const uint64 start, const int leng,
 		crossOutFactor(bitarray, start, leng, p);
 	}
 	if (start == 0) {
-		*(ushort*)bitarray = 0x3491;
+		*((uchar*)bitarray + 0) = 0x91;
+		*((uchar*)bitarray + 1) = 0x34;
 	}
 }
 
@@ -669,10 +669,10 @@ static int countBitZeros(utype bitarray[], const int leng)
 	return bit0s;
 }
 
+#if 0
 //reverse word array bitarray with length = leng
 static void reverseByteArray(ushort bitarray[], const int leng)
 {
-	assert(leng % 8 == 0);
 	ushort* ps = bitarray;
 	ushort* pe = (ushort*)((uchar*)ps + leng / 8 - 2);
 
@@ -692,15 +692,15 @@ static void reverseByteArray(ushort bitarray[], const int leng)
 //shift bitarray to low address and the offset is shiftbit bits
 static int shiftBitToLow(uchar bitarray[], const int leng, const int leftbitshift)
 {
-	uint* plowdword = (uint*)bitarray;
+	uint* plowdword = (uint*)(bitarray + 0);
 	uint* phigdword = (uint*)(bitarray + 2);
 
 	const int rightbitshift = 16 - leftbitshift;
 
 	//bugs for -O3 and utype = uchar
 	for (int i = leng / 32 + 1; i > 0; i--) {
-		*plowdword++ = ((ushort)(*plowdword >> leftbitshift)) |
-			(*phigdword++ << rightbitshift);
+		uint dmask = (ushort)(*plowdword >> leftbitshift);
+		*plowdword++ = dmask | (*phigdword++ << rightbitshift);
 	}
 
 	return leng / 8;
@@ -719,6 +719,53 @@ static void reverseBitArray(utype bitarray[], const int leng)
 	packQwordBit1(bitarray, leng);
 }
 
+#else
+
+//move bit from [lowpos, lowpos + bitleng) to [0, bitleng)
+static void shiftBitToLow(uchar bitarray[], const int bitleng, const int lowpos)
+{
+	if (lowpos % 8 == 0) {
+		memmove(bitarray, bitarray + lowpos / 8, bitleng / 8 + 32);
+	} else {
+		uint* plowdword = (uint*)bitarray + lowpos / 8;
+		const int bitmove = lowpos % 16;
+		for (int i = bitleng / 32 + 1; i > 0; i--) {
+			const uint newword = *(uint64*)plowdword >> bitmove;
+			*plowdword++ = newword;
+		}
+	}
+}
+//reverse word array bitarray with number of byteleng
+static void reverseByteArray(uchar bitarray[], const int byteleng)
+{
+	uint* ps = (uint*)(bitarray + 0);
+	uint* pe = (uint*)(bitarray + byteleng - 4);
+
+	while (ps <= pe) {
+		const uint tmp = reverseWord(*ps >> 16) | (reverseWord(*ps & 0xffff) << 16);
+		*ps++ = reverseWord(*pe >> 16) | (reverseWord(*pe & 0xffff) << 16);
+		*pe-- = tmp;
+	}
+
+	uchar* pcs = (uchar*)ps, *pce = (uchar*)pe + 3;
+	while (pcs <= pce) {
+		const uchar tmps = reverseWord(*pcs) >> 8;
+		const uchar tmpe = reverseWord(*pce) >> 8;
+		*pcs++ = tmpe, *pce-- = tmps;
+	}
+}
+
+//reverse bitarray with bit in [0, bitleng) with bitleng > 0
+//swap the kth and (bitleng - kth - 1) bit value of bitarray
+static void reverseBitArray(utype bitarray[], const int bitleng)
+{
+	const int bitremains = bitleng % 8;
+	reverseByteArray((uchar*)bitarray, (bitleng + 8 - bitremains) / 8);
+	shiftBitToLow((uchar*)bitarray, bitleng + 16, 8 - bitremains);
+	packQwordBit1(bitarray, bitleng);
+}
+#endif
+
 //make sure no divide overflow
 //improvement of 100%
 static inline int
@@ -726,7 +773,7 @@ asmMulDiv(const uint moudle, const uint pattern, uint p)
 {
 #ifdef NO_ASM_X86
 	p = ((uint64)moudle) * pattern % p;
-#elif !defined _MSC_VER
+#elif __GNUC__
 	__asm
 	(
 #if 0
@@ -762,7 +809,7 @@ asmMulDivSub(const uint moudle, const uint pattern, uint p, const uint leng)
 {
 #ifdef NO_ASM_X86
 	p = (((uint64)moudle) * pattern - leng) % p + leng;
-#elif !(defined _MSC_VER)
+#elif __GNUC__
 	__asm
 	(
 #if 1
@@ -821,7 +868,7 @@ static int simpleEratoSieve(const uint sqrtn)
 	int primes = 1;
 
 	utype bitarray[30000 >> (BSHIFT + 1)] = {0};
-	assert(sqrtn < sizeof(bitarray) * 16);
+	//assert(sqrtn < sizeof(bitarray) * 16);
 
 	uint lastprime = Prime[primes++] = 2;
 
@@ -853,7 +900,7 @@ static void initBitTable( )
 	//1. init WordNumBit1 table in 0-2^16, can use popcnt replace it
 	int i;
 
-#if 0 == POPCNT && 0 == TREE2
+#if 0 == TREE2
 	WordNumBit1[0] = 0;
 	for (i = 1; i < sizeof(WordNumBit1) / sizeof(WordNumBit1[0]); i++) {
 		WordNumBit1[i] = WordNumBit1[i >> 1] + (i & 1);
@@ -873,14 +920,14 @@ static void initBitTable( )
 	}
 #endif
 
-	//4. init LeftMostBit1 table
+	//3. init LeftMostBit1 table
 	for (int m = 2; m < sizeof(LeftMostBit1) / sizeof(LeftMostBit1[0]); m += 2) {
 		LeftMostBit1[m + 0] = LeftMostBit1[m >> 1] + 1;
 		LeftMostBit1[m + 1] = 0;
 	}
 
 #if FAST_CROSS
-	//3. init CrossedTpl table, pre sieve the factor in array sievefactor
+	//4. init CrossedTpl table, pre sieve the factor in array sievefactor
 	sieveWheelFactor(CrossedTpl, 0, sizeof(CrossedTpl) * 16, SEGMENT_SIZE);
 #endif
 }
@@ -1109,7 +1156,7 @@ static void printProgress(int tid, double time_use, int aves, int pcnt)
 	double currper = 100.0 * pcnt / Gp.Patterns;
 	double totaltime = time_use / (10 * currper);
 
-	printf("thread[%2d]: (%.2lf%%), time ~= ", tid, currper);
+	printf("thread[%d]: (%.2lf%%), time ~= ", tid, currper);
 	if (totaltime < 3600 * 3) {
 		printf("%.2lf sec", totaltime);
 	} else {
@@ -1121,16 +1168,12 @@ static void printProgress(int tid, double time_use, int aves, int pcnt)
 
 //thread call: get result form pattern pbegi to pendi
 //calcultate wheel * k + Pattern[pbegi, pendi] <= n
-static uint64 sievePattern(const int pbegi, const int pendi)
+static uint64 sievePattern(const int pbegi, const int pendi, int tid)
 {
-	static int stid = 0;
 	static int scnt = 0;
-
 	if (pbegi == 0) {
-		stid = scnt = 0;
+		scnt = 0;
 	}
-
-	int tid = ++stid;
 
 	double tstart = getTime( );
 
@@ -1335,8 +1378,8 @@ static int getPrime(const int n)
 #endif
 	}
 
-	assert(pi1n < sizeof(Prime) / sizeof(Prime[0]));
 	if (CHECK_FLAG(PRINT_LOG)) {
+		//assert(pi1n < sizeof(Prime) / sizeof(Prime[0]));
 		printf("pi(%d) = %d\n", n, pi1n);
 	}
 
@@ -1424,7 +1467,7 @@ static uint initGp(const uint64 n)
 
 	if (CHECK_FLAG(PRINT_LOG)) {
 		const int factorial = getFactorial(wheel);
-		printf("wheel = %d * %d, sievesize = %dk\n", factorial, wheel /factorial, (n / wheel) >> 13);
+		printf("wheel = %d * %d, sievesize = %dk\n", factorial, wheel /factorial, (int)(n / wheel) >> 13);
 	}
 
 	return wheel;
@@ -1432,44 +1475,35 @@ static uint initGp(const uint64 n)
 
 static void saveTask(struct Task& curtask)
 {
-	if (freopen("prime.ta", "rb", stdin)) {
-		freopen(CONSOLE, "r", stdin);
-		remove("prime.ta.bak");
-		if (rename("prime.ta", "prime.ta.bak") != 0) {
-			perror("back data fail");
-		}
-	}
-
 	if (curtask.Tasks == 0) {
-		curtask.Pendi += Gp.Patterns / 3;
-	} else {
-		curtask.Pendi += Gp.Patterns / curtask.Tasks;
+		curtask.Tasks = 4;
 	}
 
-	if (curtask.Pendi > Gp.Patterns) {
-		curtask.Pendi = Gp.Patterns;
-	}
-
-	freopen("prime.ta", "wb", stdout);
-	printf(TaskFormat, Gp.Wheel, Gp.Patterns, curtask.Tasks, curtask.Pbegi, curtask.Pendi, Gp.N, curtask.Result);
-	freopen(CONSOLE, "r", stdin);
-	freopen(CONSOLE, "w", stdout);
+	freopen("gpa.ta", "at+", stdout);
+	if (curtask.Result > 0)
+		printf("gp[%d-%d]=%lld\n", curtask.Pbegi, curtask.Pendi, curtask.Result);
+	else
+		printf(TaskFormat, Gp.Wheel, Gp.Patterns, curtask.Tasks, Config.CpuL2Size, Gp.N);
+	freopen(CONSOLE, "at", stdout);
 }
 
 static int parseTask(struct Task &curtask)
 {
 	int ret = 0;
 	char linebuf[400] = {0}, taskdata[400] = {0};
-	freopen("prime.ta", "rb", stdin);
+	freopen("gpa.ta", "r", stdin);
 
 	while (gets(linebuf)) {
+		if (linebuf[0] == 'g') {
+			sscanf(linebuf, "gp[%d-%d]=%lld", &curtask.Pendi, &curtask.Pbegi, &curtask.Result);
+			continue;
+		}
 		strcat(taskdata, strcat(linebuf, "\n"));
 	}
 
 	//read last task data
-	int wheel, patterns; uint64 N;
-	if (sscanf(taskdata, TaskFormat,
-				&wheel, &patterns, &curtask.Tasks, &curtask.Pbegi, &curtask.Pendi, &N, &curtask.Result) != 7) {
+	int wheel, patterns, cache; uint64 N;
+	if (sscanf(taskdata, TaskFormat, &wheel, &patterns, &curtask.Tasks, &cache, &N) != 5) {
 		printf("invalid task data format: %s : %s\n", taskdata, TaskFormat);
 		ret = -1;
 	}
@@ -1487,43 +1521,36 @@ static int parseTask(struct Task &curtask)
 //
 static int loadTask(struct Task &curtask)
 {
-	int ret = 0;
-	if (!freopen("prime.ta", "rb", stdin)) {
-		puts("create a default task file prime.ta\n");
-		saveTask(curtask);
-	}
-
-	if (parseTask(curtask) != 0) {
-		curtask.Result = curtask.Pbegi = curtask.Pendi = 0;
-		saveTask(curtask);
-	}
-
 	if (curtask.Tasks == 0) {
 		curtask.Tasks = 4;
 	}
 
-	if (curtask.Tasks > 0) {
-		curtask.Pendi = curtask.Pbegi + Gp.Patterns / curtask.Tasks + 1;
+	if (!freopen("gpa.ta", "rb", stdin)) {
+		puts("create a default task file gpa.ta\n");
+		curtask.Result = curtask.Pbegi = 0;
+		saveTask(curtask);
+	}
+	else if (parseTask(curtask) != 0) {
+		curtask.Result = curtask.Pbegi = 0;
 	}
 
+	curtask.Pendi = curtask.Pbegi + Gp.Patterns / curtask.Tasks + 1;
 	if (curtask.Pendi > Gp.Patterns) {
 		curtask.Pendi = Gp.Patterns;
 	}
 
 	if (CHECK_FLAG(PRINT_LOG)) {
-		printf("load last Task Data with pattern[%d - %d] ok\n", curtask.Pbegi, curtask.Pendi);
+		printf("load last Task Data with pattern[%d - %d] = %lld ok\n", curtask.Pbegi, curtask.Pendi, curtask.Result);
 	}
 
 	freopen(CONSOLE, "r", stdin);
 
-	return ret;
+	return 0;
 }
 
 //
 static uint64 getGp(const uint64 n, int pn)
 {
-	assert(n % 2 == 0);
-
 	if (n >= MINN) {
 		double ts = getTime( );
 		initGp(n);
@@ -1542,8 +1569,8 @@ static uint64 getGp(const uint64 n, int pn)
 	if (pn <= 0 || pn > Gp.Patterns) {
 		pn = Gp.Patterns;
 	}
-	int pbegi = 0;
-	int pendi = pn;
+
+	int pbegi = 0, pendi = pn;
 
 	//load Last Task
 	if (CHECK_FLAG(SAVE_TASK) && loadTask(LastTask) >= 0) {
@@ -1561,19 +1588,18 @@ static uint64 getGp(const uint64 n, int pn)
 		if (oi == Config.Threads - 1) {
 			ei = pn;
 		}
-		gpn += sievePattern(bi + 1, ei);
+		gpn += sievePattern(bi + 1, ei, 1);
 	}
 #else
 	if (pendi - pbegi > 10 && Config.Threads > 1) {
 		gpn += startWorkThread(Config.Threads, pbegi, pendi);
 	} else if (pendi > pbegi) {
-		gpn += sievePattern(pbegi, pendi);
+		gpn += sievePattern(pbegi, pendi, 1);
 	}
 #endif
 
 	//save Current Task
 	if (CHECK_FLAG(SAVE_TASK) && pbegi < pendi) {
-		LastTask.Pbegi = pendi;
 		LastTask.Result = gpn;
 		saveTask(LastTask);
 	}
@@ -1916,7 +1942,7 @@ static void printInfo( )
 	puts(sepator);
 
 	printf("Goldbach partition (n < %s) version %s\n", MAXN, GVERSION);
-	puts("Copyright (c) by Huang Yuanbing 2008 - 2014 bailuzhou@163.com");
+	puts("Copyright (c) by Huang Yuanbing 2008 - 2018 bailuzhou@163.com");
 
 #ifdef _MSC_VER
 	printf("Compiled by MS/vc++ %d", _MSC_VER);
@@ -1983,7 +2009,10 @@ static int parseCmd(char params[][80])
 			case 'P':
 			case 'S':
 			case 'R':
-				Config.Flag ^= (1 << (c - 'A'));
+				if (tmp == 0)
+					Config.Flag ^= (1 << (c - 'A'));
+				else
+					Config.Flag |= (1 << (c - 'A'));
 				break;
 			case 'C':
 				if (tmp <= (MAX_L1SIZE >> 13) && tmp > 15) {
@@ -1993,7 +2022,7 @@ static int parseCmd(char params[][80])
 				}
 				break;
 			case 'F':
-				if (tmp > 0 && tmp < 214748364) {
+				if (tmp > 0 && tmp < (1 << 20)) {
 					Gp.Wheel = tmp;
 				}
 				break;
@@ -2092,7 +2121,7 @@ static bool executeCmd(const char* cmd)
 		} else if (cmdc == 'N') {
 			listPatterns(n1, n2);
 		} else if (cmdc == 'E' || isdigit(cmdc)) {
-			gpartiton(n1, n2);
+			gpartiton(n1 + (n1&1), n2);
 		}
 
 		if (pcmd) {
@@ -2128,8 +2157,8 @@ int main(int argc, char* argv[])
 			executeCmd(argv[i]);
 	}
 
-//	executeCmd("1e10;1e8+112");
-//	executeCmd("t1 d m7 1e14 200; e15 100");
+	executeCmd("d 1e14 1000");
+//executeCmd("t1 d m7 1e14 200; e15 100");
 //	executeCmd("d m7 1e15");
 
 	char ccmd[256] = {0};
@@ -2145,15 +2174,16 @@ int main(int argc, char* argv[])
 /*************************************************************************
 G(1e14) = 90350630388, 6481.20 s AMD X4 820
 
-MINGW: gcc 4.6.3
+
+MINGW: gcc 5.1.0
 CXXFLAGS: -Ofast -msse4 -s -pipe -march=corei7 -funroll-loops
-windows 7 64 bit, AMD X4 641 2.8G/ Intel i3 350M 2.26G
-G(1e11) = 149091160        3.54  | 09.0 sec
-G(1e12) = 1243722370       42.8  | 89.4 sec
-G(1e13) = 10533150855      491.  | 990. sec
-G(1e14) = 90350630388      7323  | 3.20 hour
-G(1e15) = 783538341852     36.0  | 45.4 hour
-G(1e16) =                  400   |
+windows 10 64 bit,   I5 3470 3.2G| i3 350M 2.26G
+G(1e11) = 149091160        3.04  | 09.0 sec
+G(1e12) = 1243722370       30.8  | 89.4 sec
+G(1e13) = 10533150855      320.  | 990. sec
+G(1e14) = 90350630388      3900  | 3.20 h
+G(1e15) = 783538341852     15 h  | 45.4 h
+G(1e16) =                  240h  |
 
   c1600 m5 d t4 e15 1000
 	need 28h amd phoenm x4 830
