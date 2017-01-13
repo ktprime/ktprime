@@ -22,7 +22,7 @@
 enum eConst
 {
 	BLOCK_SIZE   = 510510 * 19,
-	MAX_CACHE    = 120,
+	MAX_CACHE    = 200,
 	SIEVE_SZIE   = MAX_CACHE * (WHEEL << 10) ,
 	FIRST_PRIME  = BLOCK_SIZE % 19 == 0 ? 23 : 19,
 	BUFFER_SIZE  = SIEVE_SZIE / WHEEL,
@@ -181,7 +181,7 @@ static struct Config
 
 //SievedTpl: cross out the first 7/8th Prime's multiple
 static uchar SievedTpl[MAX_SIEVETPL];
-static uchar SievedTpl8[8][MAX_SIEVETPL / 8 - (MAX_SIEVETPL / 8) % 64 + 64];
+static uchar SievedTpl8[8][(MAX_SIEVETPL / 64) * 8 + 64];
 
 //small prime buffer up to 1e7
 #ifdef PRIME_DIFF
@@ -284,7 +284,7 @@ static int setSieveSize(uint sievesize);
 static void getGp2(uint64 minn, int gpcount, uint64 gp[]);
 static void coreSieve1(uint64 minn, int gpcount, uint64 gp[]);
 static void coreSieve2(uint64 minn, int gpcount, uint64 gp[], uint64 start);
-typedef void (*sieve_func)(const uint64,  const uint64,  const uint,  const int,  uint64 []);
+typedef void (*sieve_func)(const uint64, const uint64, const uint, const int, uint64 []);
 
 static double getTime( )
 {
@@ -609,7 +609,7 @@ static int countBit0ArrayOr32(uint bitarray1[], uint bitarray2[], int bitleng)
 {
 	int bit1s = 0;
 	int loops = bitleng >> 5;
-	const uint mask7 = 0x77777777;
+//	const uint mask7 = 0x77777777;
 
 	while (loops-- >= 0) {
 #if 1
@@ -868,7 +868,7 @@ static void reverseBitArray(uchar bitarray[], const int bitleng)
 	const int bitremains = bitleng % CHAR_BIT;
 	reverseByteArray(bitarray, bitleng / CHAR_BIT + (CHAR_BIT + bitremains - 1) / CHAR_BIT);
 	if (bitremains > 0) {
-		copyFromBitPos(bitarray, bitleng, CHAR_BIT - bitremains, bitarray);
+//		copyFromBitPos(bitarray, bitleng, CHAR_BIT - bitremains, bitarray);
 	}
 }
 
@@ -1684,9 +1684,19 @@ static int segmentedGp01(const uint64 start1, const uint64 start2, const uint si
 
 	bitarray1[0] = bitarray2[0] = CON_VTOWHEEL;
 	segmentedSieve(start1, sievesize, bitarray1);
-	segmentedSieve(start2, sievesize, bitarray2);
+
+	int packlen = 0;
+	for (int j = 0; start2 > j && j < 240; j ++) {
+		const int pack = (sievesize + j + (start2 - j) % WHEEL) >> 1;
+		if (pack % CHAR_BIT == 0) {
+			packlen = j;
+			break;
+		}
+	}
+
+	segmentedSieve(start2 - packlen, sievesize + packlen, bitarray2);
 	//10% time use
-	reverseBitArray(bitarray2, (sievesize + start2 % WHEEL) >> 1);
+	reverseBitArray(bitarray2, (sievesize + packlen + (start2 - packlen) % WHEEL) >> 1);
 
 	//bit or to bitarray1
 	for (int i = 0; i * WORD_BIT <= sievesize; i += CHAR_BIT) {
@@ -1783,9 +1793,18 @@ static void segmentedGp1(const uint64 start1, const uint64 start2, const uint si
 
 	bitarray1[0] = bitarray2[0] = CON_VTOWHEEL;
 	segmentedSieve(start1, sievesize, bitarray1);
-	segmentedSieve(start2, sievesize + gpcount * 2, bitarray2);
 
-	const int bitleng = (sievesize + start2 % WHEEL + gpcount * 2 - 2) >> 1;
+	int packlen = 0;
+	for (int j = 0; start2 > j && j < 240; j ++) {
+		const int pack = (sievesize + j + (start2 - j) % WHEEL + gpcount * 2 - 2) >> 1;
+		if (pack % CHAR_BIT == 0) {
+			packlen = j;
+			break;
+		}
+	}
+
+	segmentedSieve(start2 - packlen, sievesize + packlen + gpcount * 2, bitarray2);
+	const int bitleng = (sievesize + packlen + (start2 - packlen) % WHEEL + gpcount * 2 - 2) >> 1;
 	reverseBitArray(bitarray2, bitleng);
 
 	const int mini = 8 < gpcount ? 8 : gpcount;
@@ -1860,8 +1879,8 @@ static void segmentedGp3(const uint64 start1, const uint64 start2, const uint si
 
 	const int begbit = segmentedSieve3(start1, sievesize, bitarray1);
 	const int leng2 = sievesize - 1 + (gpcount - 1) * 2;
-	int packlen = 0;
 
+	int packlen = 0;
 	for (int j = 0; j < 240 && start2 > j; j += 8) {
 		const int pack = getPackLen(start2 - j, leng2 + j);
 		if (pack % CHAR_BIT == 0) {
@@ -2347,8 +2366,8 @@ int main(int argc, char* argv[])
 
 #if 1
 	executeCmd("t1 s200 pr r e9 1 g3; r e9 1 g2; r e9 1 g1; pr");
-//	executeCmd("t1 s63 e9 e3 g1; e9 e3 g2; e9 e3 g3");
-//	executeCmd("t4 e9 e4 g2; e9 e4 g3");
+	executeCmd("t1 s63 e9 e3 g1; e9 e3 g2; e9 e3 g3");
+	executeCmd("t4 e9 e4 g2; e9 e4 g3");
 #endif
 
 	char ccmd[255] = {0};
