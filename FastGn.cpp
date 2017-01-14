@@ -868,7 +868,7 @@ static void reverseBitArray(uchar bitarray[], const int bitleng)
 	const int bitremains = bitleng % CHAR_BIT;
 	reverseByteArray(bitarray, bitleng / CHAR_BIT + (CHAR_BIT + bitremains - 1) / CHAR_BIT);
 	if (bitremains > 0) {
-//		copyFromBitPos(bitarray, bitleng, CHAR_BIT - bitremains, bitarray);
+		copyFromBitPos(bitarray, bitleng, CHAR_BIT - bitremains, bitarray);
 	}
 }
 
@@ -991,16 +991,23 @@ static int setSieveTpl(const uint64 start, const uint sievesize, uchar bitarray[
 	return bitleng / CHAR_BIT;
 }
 
-static int getPackLen(uint64 start, const uint sievesize)
+static int getPackLen(const uint64 start, const uint sievesize)
 {
 	int bitleng = sievesize + (int)(start % WHEEL);
 	bitleng = bitleng / WHEEL * 8 + WheelLeng[bitleng % WHEEL];
-	const int ei = bitleng % CHAR_BIT;
-
-	if (ei != 0) {
-		bitleng += CHAR_BIT - ei;
-	}
+	bitleng += CHAR_BIT - (bitleng % CHAR_BIT);
 	return bitleng / CHAR_BIT;
+}
+
+static int getPackLen2(const uint64 start, const uint sievesize)
+{
+	for (int j = 0; start > j && j < 240; j ++) {
+		const int bitleng = (sievesize + j + (start - j) % WHEEL) >> 1;
+		if (bitleng % CHAR_BIT == 0) {
+			return j;
+		}
+	}
+	return 0;
 }
 
 //init the current segment bitarray and pack sievesize
@@ -1569,8 +1576,7 @@ static int splitCmd(const char* ccmd, char cmdparams[][40])
 		char* pc = cmdparams[i];
 		char c = *ccmd;
 		bool isvalid = false;
-		while (isalnum(c) || c == '^' ||
-				c == '+' || c == '-' || c == '*') {
+		while (isalnum(c) || c == '^' || c == '+' || c == '-' || c == '*') {
 			*pc++ = c;
 			c = *++ccmd;
 			isvalid = true;
@@ -1685,15 +1691,7 @@ static int segmentedGp01(const uint64 start1, const uint64 start2, const uint si
 	bitarray1[0] = bitarray2[0] = CON_VTOWHEEL;
 	segmentedSieve(start1, sievesize, bitarray1);
 
-	int packlen = 0;
-	for (int j = 0; start2 > j && j < 240; j ++) {
-		const int pack = (sievesize + j + (start2 - j) % WHEEL) >> 1;
-		if (pack % CHAR_BIT == 0) {
-			packlen = j;
-			break;
-		}
-	}
-
+	const int packlen = getPackLen2(start2, sievesize);
 	segmentedSieve(start2 - packlen, sievesize + packlen, bitarray2);
 	//10% time use
 	reverseBitArray(bitarray2, (sievesize + packlen + (start2 - packlen) % WHEEL) >> 1);
@@ -1794,15 +1792,7 @@ static void segmentedGp1(const uint64 start1, const uint64 start2, const uint si
 	bitarray1[0] = bitarray2[0] = CON_VTOWHEEL;
 	segmentedSieve(start1, sievesize, bitarray1);
 
-	int packlen = 0;
-	for (int j = 0; start2 > j && j < 240; j ++) {
-		const int pack = (sievesize + j + (start2 - j) % WHEEL + gpcount * 2 - 2) >> 1;
-		if (pack % CHAR_BIT == 0) {
-			packlen = j;
-			break;
-		}
-	}
-
+	const int packlen = getPackLen2(start2, sievesize + gpcount * 2 - 2);
 	segmentedSieve(start2 - packlen, sievesize + packlen + gpcount * 2, bitarray2);
 	const int bitleng = (sievesize + packlen + (start2 - packlen) % WHEEL + gpcount * 2 - 2) >> 1;
 	reverseBitArray(bitarray2, bitleng);
