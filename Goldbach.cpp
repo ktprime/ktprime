@@ -57,11 +57,11 @@ typedef unsigned short ushort;
 typedef unsigned int uint;
 
 #ifdef _WIN32
-	typedef unsigned __int64 uint64;
+	typedef __int64 uint64;
 	#define CONSOLE "CON"
 	#include <windows.h>
 #else
-	typedef unsigned long long uint64;
+	typedef long long uint64;
 	#define CONSOLE "/dev/tty"
 	#include <unistd.h>
 	#include <sys/time.h>
@@ -247,8 +247,7 @@ static void devideTaskData(int threads, int pbegi, int pendi)
 	TData[0].Tasks = 1;
 	for (int i = 1; i < threads; i++) {
 		TData[i].Tasks = i + 1;
-		TData[i].Pbegi = TData[i - 1].Pendi =
-		TData[i - 1].Pbegi + tsize;
+		TData[i].Pbegi = TData[i - 1].Pendi = TData[i - 1].Pbegi + tsize;
 	}
 	TData[threads - 1].Pendi = pendi;
 }
@@ -317,8 +316,8 @@ static int gcd(int a, int b)
 	return b;
 }
 
-//http://en.wikipedia.org/wiki/Extended_Euclidean_algorithm
 /*
+//http://en.wikipedia.org/wiki/Extended_Euclidean_algorithm
 function extended_gcd(a, b)
     if a mod b = 0
         return {0, 1}
@@ -387,8 +386,8 @@ static uint isqrt(const uint64 x)
 	return (uint)g0;
 }
 
-//convert str to uint64 ((x)*E(y)+-*(z))
-//invalid input format: 123456 1234-12 e9 2e7+2^30 2e10-2 10^11-25 2e6*2
+//convert str to uint64 ((x)*E(y)[+-*](z))
+//valid input format: 123456 1234-12 e9 2e7+2^30 2e10-2 10^11-25 2e6*2
 static uint64 atoint64(const char* str, uint64 defaultn = 0)
 {
 	uint64 n = 0;
@@ -606,11 +605,10 @@ static void segmentedSieve(utype bitarray[], const uint64 start, const int leng,
 }
 
 //reverse bit order of a byte with binary representation
-//c = ((c * 0x80200802ULL) & 0x0884422110ULL) * 0x0101010101ULL >> 32;
 static uchar reverseByte(const uchar c)
 {
-	uchar n =
-		(c & 0x55) << 1 | (c & 0xAA) >> 1;
+	uchar n = 0;
+	n = (c & 0x55) << 1 | (c & 0xAA) >> 1;
 	n = (n & 0x33) << 2 | (n & 0xCC) >> 2;
 	n = (n & 0x0F) << 4 | (n & 0xF0) >> 4;
 	return n;
@@ -633,7 +631,7 @@ static int reverseWord(ushort n)
 static inline int countBitOnes(uint64 n)
 {
 #if POPCNT
-	//popcnt instruction : INTEL i7/SSE4.2, AMD Phonem/SSE4A
+	//popcnt instruction : new x86 cpu
 	#if _M_AMD64 || __x86_64__
 	return _mm_popcnt_u64(n);
 	#else
@@ -655,7 +653,6 @@ static inline int countBitOnes(uint64 n)
 }
 
 //count number of bit 0 in binary representation
-//!!! buffer of bitarray after position leng packeked with bit 1
 static int countBitZeros(utype bitarray[], const int leng)
 {
 	int loops = leng >> 6;
@@ -669,7 +666,7 @@ static int countBitZeros(utype bitarray[], const int leng)
 	return bit0s;
 }
 
-#if 0
+#if 1
 //reverse word array bitarray with length = leng
 static void reverseByteArray(ushort bitarray[], const int leng)
 {
@@ -735,6 +732,7 @@ static void shiftBitToLow(uchar bitarray[], const int bitleng, const int lowpos)
 		}
 	}
 }
+
 //reverse word array bitarray with number of byteleng
 static void reverseByteArray(uchar bitarray[], const int byteleng)
 {
@@ -767,7 +765,6 @@ static void reverseBitArray(utype bitarray[], const int bitleng)
 #endif
 
 //make sure no divide overflow
-//improvement of 100%
 static inline int
 asmMulDiv(const uint moudle, const uint pattern, uint p)
 {
@@ -869,11 +866,9 @@ static int simpleEratoSieve(const uint sqrtn)
 
 	utype bitarray[30000 >> (BSHIFT + 1)] = {0};
 	//assert(sqrtn < sizeof(bitarray) * 16);
-
 	uint lastprime = Prime[primes++] = 2;
 
 	for (uint p = 3; p <= sqrtn; p += 2) {
-		//bit position with vlaue 0 is prime number
 		if (!TST_BIT2(bitarray, p)) {
 #if PRIME_DIFF
 			Prime[primes++] = p - lastprime;
@@ -910,7 +905,6 @@ static void initBitTable( )
 	//2. init bit WordReverse table
 #if WORD_REVERSE
 	uchar bytereverse[256] = {0};
-	//reverse bit order of byte(with 8 bit) in [0, 2^8)
 	for (i = 1; i < (1 << 8); i++) {
 		bytereverse[i] = reverseByte((uchar)i);
 	}
@@ -994,7 +988,7 @@ static int getSegpattern(const int n, int start, const int wheel, ptype pattern[
 	return gpn;
 }
 
-//optimize for memory
+//loop buffer optimize for memory
 static int getGppattern(const uint64 n, const uint wheel, ptype pattern[])
 {
 	const uint moudle = (uint)(n % wheel);
@@ -1010,7 +1004,7 @@ static int getGppattern(const uint64 n, const uint wheel, ptype pattern[])
 	return gpn;
 }
 
-//
+//optimize for cpu level 1
 static uint64 sieveGpL1(utype bitarray[], const int pattern1, const int pattern2, const int leng)
 {
 	int k = Gp.FirstIndex;
@@ -1224,7 +1218,6 @@ static uint64 sievePattern(const int pbegi, const int pendi, int tid)
 	return gpn;
 }
 
-//factorial of prime factor of wheel
 static int getFactorial(const uint wheel)
 {
 	int factorial = 1;
@@ -1234,7 +1227,6 @@ static int getFactorial(const uint wheel)
 	return factorial;
 }
 
-//
 static int countPiPattern(uint wheel)
 {
 	int patterns = 1;
@@ -1245,7 +1237,6 @@ static int countPiPattern(uint wheel)
 	return patterns * wheel;
 }
 
-//get the frist prime index in Prime which is not a factor of wheel
 static int getFirstPrime(const uint wheel)
 {
 	int i = 0;
@@ -1352,9 +1343,7 @@ static int getPrime(const int n)
 {
 	int pi1n = 1;
 #if PRIME_DIFF
-	if (Prime) {
-		Prime[2] = 1 - 3;
-	}
+	Prime[2] = 1 - 3;
 #endif
 
 	for (int start = 0, sleng = SEGMENT_SIZE; start < n; start += sleng) {
@@ -1518,21 +1507,18 @@ static int parseTask(struct Task &curtask)
 	return ret;
 }
 
-//
 static int loadTask(struct Task &curtask)
 {
 	if (curtask.Tasks == 0) {
 		curtask.Tasks = 4;
 	}
 
+	curtask.Result = curtask.Pbegi = 0;
 	if (!freopen("gpa.ta", "rb", stdin)) {
 		puts("create a default task file gpa.ta\n");
-		curtask.Result = curtask.Pbegi = 0;
 		saveTask(curtask);
-	}
-	else if (parseTask(curtask) != 0) {
-		curtask.Result = curtask.Pbegi = 0;
-	}
+	} else
+		parseTask(curtask);
 
 	curtask.Pendi = curtask.Pbegi + Gp.Patterns / curtask.Tasks + 1;
 	if (curtask.Pendi > Gp.Patterns) {
@@ -1572,7 +1558,6 @@ static uint64 getGp(const uint64 n, int pn)
 
 	int pbegi = 0, pendi = pn;
 
-	//load Last Task
 	if (CHECK_FLAG(SAVE_TASK) && loadTask(LastTask) >= 0) {
 		pbegi = LastTask.Pbegi;
 		pendi = LastTask.Pendi;
@@ -1598,7 +1583,6 @@ static uint64 getGp(const uint64 n, int pn)
 	}
 #endif
 
-	//save Current Task
 	if (CHECK_FLAG(SAVE_TASK) && pbegi < pendi) {
 		LastTask.Result = gpn;
 		saveTask(LastTask);
@@ -1614,22 +1598,6 @@ static uint64 getGp(const uint64 n, int pn)
 	return gpn + sgn;
 }
 
-static void printResult(const uint64 n, const uint64 gpn, double ts)
-{
-	int pow10 = ilog10(n);
-	if (n % ipow(10, pow10) == 0 && n > 10000) {
-		printf("G(%de%d) = %lld", (int)(n / ipow(10, pow10)), pow10, gpn);
-	} else {
-		printf(PrintFormat, n, gpn);
-	}
-
-	if (CHECK_FLAG(PRINT_TIME)) {
-		printf(" (%.2lf sec)", (getTime() - ts) / 1000);
-	}
-
-	putchar('\n');
-}
-
 static uint64 gpartiton(const uint64 n, int pn)
 {
 	double ts = getTime( );
@@ -1637,7 +1605,16 @@ static uint64 gpartiton(const uint64 n, int pn)
 	uint64 gpn = getGp(n, pn);
 
 	if (CHECK_FLAG(PRINT_RET)) {
-		printResult(n, gpn, ts);
+		int pow10 = ilog10(n);
+		if (n % ipow(10, pow10) == 0 && n > 10000) {
+			printf("G(%de%d) = %lld", (int)(n / ipow(10, pow10)), pow10, gpn);
+		} else {
+			printf(PrintFormat, n, gpn);
+		}
+		if (CHECK_FLAG(PRINT_TIME)) {
+			printf(" (%.2lf sec)", (getTime() - ts) / 1000);
+		}
+		putchar('\n');
 	}
 
 	return gpn;
@@ -1712,7 +1689,6 @@ static int startTest(int tesecase, bool rwflag)
 	return 0;
 }
 
-//list Gpk by the input Result start, end, step
 static void listDiffGp(const char params[][80], int cmdi)
 {
 	double ts = getTime( );
@@ -1766,9 +1742,9 @@ static void listDiffGp(const char params[][80], int cmdi)
 
 static void listPowGp(const char params[][80], int cmdi)
 {
-	int m = atoint64(params[cmdi + 1], 10);
-	int startindex = atoint64(params[cmdi + 2], 5);
-	int endindex = atoint64(params[cmdi + 3], 11);
+	int m = (int)atoint64(params[cmdi + 1], 10);
+	int startindex = (int)atoint64(params[cmdi + 2], 5);
+	int endindex = (int)atoint64(params[cmdi + 3], 11);
 
 	printf("in %d^%d - %d^%d\n", m, startindex, m, endindex);
 
@@ -1808,7 +1784,6 @@ static void listPatterns(uint64 start, int count)
 	}
 }
 
-//benchMark
 static void benchMark(const char params[][80])
 {
 	SET_FLAG(PRINT_RET);
@@ -1843,7 +1818,6 @@ static void benchMark(const char params[][80])
 	freopen(CONSOLE, "w", stdout);
 }
 
-//test pi, pi2, gp function
 static void testGp( )
 {
 	const char* gpdata[][4] =
@@ -1861,14 +1835,14 @@ static void testGp( )
 	};
 
 	Config.CpuL2Size = 1 << 10;
-	Config.PrintGap = 0;
+//	Config.PrintGap = 0;
 	SET_FLAG(PRINT_TIME);
 
 	for (int i = 0; i < sizeof(gpdata) / sizeof(gpdata[0]); i++) {
 		const uint64 n = atoint64(gpdata[i][0], 0);
 		const int psize = atoi(gpdata[i][2]);
 		Gp.Wheel = atoi(gpdata[i][0 + 1]);
-		const int gp = getGp(n, psize);
+		const uint64 gp = getGp(n, psize);
 		if (atoi(gpdata[i][3]) != gp) {
 			printf("%s : %s ~= %d fail !!!\n", gpdata[i][0], gpdata[i][3], gp);
 		}
@@ -1905,7 +1879,6 @@ static void cpuid(int cpuinfo[4], int id)
 #endif
 }
 
-// http://msdn.microsoft.com/en-us/library/hskdteyh%28v=vs.100%29.aspx
 static int getCpuInfo()
 {
 	char cpuName[255] = {-1};
@@ -1933,7 +1906,6 @@ static int getCpuInfo()
 	return cpuinfo[2] >> 16;
 }
 
-//print the Gpk info
 static void printInfo( )
 {
 	const char* const sepator =
@@ -1946,8 +1918,8 @@ static void printInfo( )
 
 #ifdef _MSC_VER
 	printf("Compiled by MS/vc++ %d", _MSC_VER);
-#else
-	printf("Compiled by g++ %s", __VERSION__);
+#elif __GNUC__
+	printf("Compiled by Gnu/g++ %s", __VERSION__);
 #endif
 
 #if _M_AMD64 || __x86_64__
@@ -1984,7 +1956,6 @@ static void doCompile()
 	system(compileLine);
 }
 
-//
 static int parseCmd(char params[][80])
 {
 	int cmdi = -1;
@@ -2084,7 +2055,6 @@ static int splitCmd(const char* ccmd, char params[][80])
 	return ncmds;
 }
 
-//
 static bool executeCmd(const char* cmd)
 {
 	while (cmd) {
@@ -2157,9 +2127,9 @@ int main(int argc, char* argv[])
 			executeCmd(argv[i]);
 	}
 
-	executeCmd("d 1e14 1000");
-//executeCmd("t1 d m7 1e14 200; e15 100");
-//	executeCmd("d m7 1e15");
+	executeCmd("d t4 m8 1e15 1000");
+	//executeCmd("t1 d m7 1e14 200; e15 100");
+	//	executeCmd("d m7 1e15");
 
 	char ccmd[256] = {0};
 	while (true) {
@@ -2183,7 +2153,7 @@ G(1e12) = 1243722370       30.8  | 89.4 sec
 G(1e13) = 10533150855      320.  | 990. sec
 G(1e14) = 90350630388      3900  | 3.20 h
 G(1e15) = 783538341852     15 h  | 45.4 h
-G(1e16) =                  240h  |
+G(1e16) =                  240h  | 700h
 
   c1600 m5 d t4 e15 1000
 	need 28h amd phoenm x4 830
