@@ -175,11 +175,6 @@ static uchar LeftMostBit1[1 << 16];
 static uchar WordNumBit1[1 << 16];
 #endif
 
-#if WORD_REVERSE
-//table of binary representation reverse (i < 2^16 = 65536)
-static ushort WordReverse[1 << 16];
-#endif
-
 //the first 10 even prime numbers
 static const uchar SmallPrime[ ] =
 {
@@ -250,8 +245,7 @@ static void devideTaskData(int threads, int pbegi, int pendi)
 	TData[0].Tasks = 1;
 	for (int i = 1; i < threads; i++) {
 		TData[i].Tasks = i + 1;
-		TData[i].Pbegi = TData[i - 1].Pendi =
-		TData[i - 1].Pbegi + tsize;
+		TData[i].Pbegi = TData[i - 1].Pendi = TData[i - 1].Pbegi + tsize;
 	}
 	TData[threads - 1].Pendi = pendi;
 }
@@ -391,7 +385,7 @@ static uint isqrt(const uint64 x)
 }
 
 //convert str to uint64 ((x)*E(y)+-*(z))
-//invalid input format: 123456 1234-12 e9 2e7+2^30 2e10-2 10^11-25 2e6*2
+//valid input format: 123456 1234-12 e9 2e7+2^30 2e10-2 10^11-25 2e6*2
 static uint64 atoint64(const char* str, uint64 defaultn = 0)
 {
 	uint64 n = 0;
@@ -612,8 +606,8 @@ static void segmentedSieve(utype bitarray[], const uint64 start, const int leng,
 //c = ((c * 0x80200802ULL) & 0x0884422110ULL) * 0x0101010101ULL >> 32;
 static uchar reverseByte(const uchar c)
 {
-	uchar n =
-		(c & 0x55) << 1 | (c & 0xAA) >> 1;
+	uchar n = 0;
+	n = (c & 0x55) << 1 | (c & 0xAA) >> 1;
 	n = (n & 0x33) << 2 | (n & 0xCC) >> 2;
 	n = (n & 0x0F) << 4 | (n & 0xF0) >> 4;
 	return n;
@@ -659,7 +653,6 @@ static int countBitZeros(utype bitarray[], const int leng)
 }
 
 //make sure no divide overflow
-//improvement of 100%
 static inline int
 asmMulDiv(const uint moudle, const uint pattern, uint p)
 {
@@ -761,11 +754,9 @@ static int simpleEratoSieve(const uint sqrtn)
 
 	utype bitarray[30000 >> (BSHIFT + 1)] = {0};
 	//assert(sqrtn < sizeof(bitarray) * 16);
-
 	uint lastprime = Prime[primes++] = 2;
 
 	for (uint p = 3; p <= sqrtn; p += 2) {
-		//bit position with vlaue 0 is prime number
 		if (!TST_BIT2(bitarray, p)) {
 #if PRIME_DIFF
 			Prime[primes++] = p - lastprime;
@@ -790,36 +781,21 @@ static int simpleEratoSieve(const uint sqrtn)
 static void initBitTable( )
 {
 	//1. init WordNumBit1 table in 0-2^16, can use popcnt replace it
-	int i;
-
 #if 0 == TREE2
 	WordNumBit1[0] = 0;
-	for (i = 1; i < sizeof(WordNumBit1) / sizeof(WordNumBit1[0]); i++) {
+	for (int i = 1; i < sizeof(WordNumBit1) / sizeof(WordNumBit1[0]); i++) {
 		WordNumBit1[i] = WordNumBit1[i >> 1] + (i & 1);
 	}
 #endif
 
-	//2. init bit WordReverse table
-#if WORD_REVERSE
-	uchar bytereverse[256] = {0};
-	//reverse bit order of byte(with 8 bit) in [0, 2^8)
-	for (i = 1; i < (1 << 8); i++) {
-		bytereverse[i] = reverseByte((uchar)i);
-	}
-	//reverse bit order of short(with 16 bit) in [0, 2^16)
-	for (i = 1; i < sizeof(WordReverse) / sizeof(WordReverse[0]); i++) {
-		WordReverse[i] = bytereverse[i >> 8] | (bytereverse[i & 255] << 8);
-	}
-#endif
-
-	//3. init LeftMostBit1 table
+	//2. init LeftMostBit1 table
 	for (int m = 2; m < sizeof(LeftMostBit1) / sizeof(LeftMostBit1[0]); m += 2) {
 		LeftMostBit1[m + 0] = LeftMostBit1[m >> 1] + 1;
 		LeftMostBit1[m + 1] = 0;
 	}
 
 #if FAST_CROSS
-	//4. init CrossedTpl table, pre sieve the factor in array sievefactor
+	//3. init CrossedTpl table, pre sieve the factor in array sievefactor
 	sieveWheelFactor(CrossedTpl, 0, sizeof(CrossedTpl) * 16, SEGMENT_SIZE);
 #endif
 }
@@ -994,9 +970,9 @@ static int sieveGp(utype bitarray[], const int pattern1)
 #endif
 
 #if OPT_L2CACHE
-	const int minp = sqrtn < leng ? sqrtn : leng;
+	const uint minp = sqrtn < leng ? sqrtn : leng;
 #else
-	const int minp = sqrtn;
+	const uint minp = sqrtn;
 #endif
 
 	for (; p <= minp; PRIME_NEXT(p, k)) {
@@ -1142,8 +1118,7 @@ static uint64 sievePattern(const int pbegi, const int pendi, int tid)
 		pnext = getNextPattern(pattern, pnext);
 #ifdef CHECK_PATTERNS
 		if (CHECK_FLAG(CHECK_PATTERN)) {
-			if (gcd(Gp.Wheel, pattern) != 1 ||
-				gcd(Gp.Wheel * SGP, NEXT_PAIR(pattern)) != 1)
+			if (gcd(Gp.Wheel, pattern) != 1 || gcd(Gp.Wheel * SGP, NEXT_PAIR(pattern)) != 1)
 				printf("error pattern = %d\n", pattern);
 			continue;
 		}
@@ -1163,7 +1138,7 @@ static uint64 sievePattern(const int pbegi, const int pendi, int tid)
 #else
 		scnt++;
 #endif
-		if ((scnt & Config.PrintGap) == 31) {
+			if ((scnt & Config.PrintGap) == 31) {
 			printProgress(tid, getTime() - tstart, (int)(gpn / (1 + pcuri - pbegi)), scnt);
 		}
 	}
@@ -1209,7 +1184,6 @@ static int getFirstPrime(const uint wheel)
 }
 
 //16 bits number p1, p2 and gcd((p1 + p2), factorial) = 1
-// ---------- gp ------------------*/
 static int initPattern(const uint64 n, const int wheel)
 {
 	double ts = getTime( );
@@ -1312,9 +1286,7 @@ static int getPrime(const int n)
 {
 	int psn = 1;
 #if PRIME_DIFF
-	if (Prime) {
-		Prime[2] = 1 - 3;
-	}
+	Prime[2] = 1 - 3;
 #endif
 
 	for (int start = 0, sleng = SEGMENT_SIZE; start < n; start += sleng) {
@@ -1390,7 +1362,7 @@ static int getSmallGp(const uint64 n)
 	return ret;
 }
 
-//init Prime, Pattern, Moudle1
+//init Prime, Pattern, Moudle
 static uint initGp(const uint64 n)
 {
 	if (n > Gp.N) {
@@ -1422,7 +1394,7 @@ static uint initGp(const uint64 n)
 static void saveTask(struct Task& curtask)
 {
 	if (curtask.Tasks == 0) {
-		curtask.Tasks = 4;
+		curtask.Tasks = 3;
 	}
 
 	freopen("sophie.ta", "at+", stdout);
@@ -1464,24 +1436,20 @@ static int parseTask(struct Task &curtask)
 	return ret;
 }
 
-//
 static int loadTask(struct Task &curtask)
 {
 	if (curtask.Tasks == 0) {
 		curtask.Tasks = 4;
 	}
 
+	curtask.Result = curtask.Pbegi = 0;
 	if (!freopen("sophie.ta", "rb", stdin)) {
 		puts("create a default task file sophie.ta\n");
-		curtask.Result = curtask.Pbegi = 0;
 		saveTask(curtask);
-	}
-	else if (parseTask(curtask) != 0) {
-		curtask.Result = curtask.Pbegi = 0;
-	}
+	} else
+		parseTask(curtask);
 
 	curtask.Pendi = curtask.Pbegi + Gp.Patterns / curtask.Tasks + 1;
-
 	if (curtask.Pendi > Gp.Patterns) {
 		curtask.Pendi = Gp.Patterns;
 	}
@@ -1516,7 +1484,6 @@ static uint64 doGetGp(const uint64 n, int pn, bool addsmall)
 	int pbegi = 0, pendi = pn;
 	uint64 gpn = 0;
 
-	//load Last Task
 	if (CHECK_FLAG(SAVE_TASK) && addsmall == false && loadTask(LastTask) >= 0) {
 		pbegi = LastTask.Pbegi;
 		pendi = LastTask.Pendi;
@@ -1542,7 +1509,6 @@ static uint64 doGetGp(const uint64 n, int pn, bool addsmall)
 	}
 #endif
 
-	//save Current Task
 	if (CHECK_FLAG(SAVE_TASK) && pbegi < pendi && addsmall == false) {
 		LastTask.Result = gpn;
 		saveTask(LastTask);
@@ -1581,22 +1547,6 @@ static uint64 getGp(const uint64 n, int pn)
 	return gptn;
 }
 
-static void printResult(const uint64 n, const uint64 gpn, double ts)
-{
-	int pow10 = ilog10(n);
-	if (n % ipow(10, pow10) == 0 && n > 10000) {
-		printf("S(%de%d) = %lld", (int)(n / ipow(10, pow10)), pow10, gpn);
-	} else {
-		printf(PrintFormat, n, gpn);
-	}
-
-	if (CHECK_FLAG(PRINT_TIME)) {
-		printf(" (%.2lf sec)", (getTime() - ts) / 1000);
-	}
-
-	putchar('\n');
-}
-
 static uint64 sophieGermain(const uint64 n, const int pn)
 {
 	double ts = getTime( );
@@ -1604,13 +1554,24 @@ static uint64 sophieGermain(const uint64 n, const int pn)
 	uint64 gpn = getGp(n, pn);
 
 	if (CHECK_FLAG(PRINT_RET)) {
-		printResult(n, gpn, ts);
+		int pow10 = ilog10(n);
+		if (n % ipow(10, pow10) == 0 && n > 10000) {
+			printf("S(%de%d) = %lld", (int)(n / ipow(10, pow10)), pow10, gpn);
+		} else {
+			printf(PrintFormat, n, gpn);
+		}
+
+		if (CHECK_FLAG(PRINT_TIME)) {
+			printf(" (%.2lf sec)", (getTime() - ts) / 1000);
+		}
+
+		putchar('\n');
 	}
 
 	return gpn;
 }
 
-//list Gpk by the input Result start, end, step
+//list Gp by the input Result start, end, step
 static void listDiffGp(const char params[][80], int cmdi)
 {
 	double ts = getTime( );
@@ -1664,9 +1625,9 @@ static void listDiffGp(const char params[][80], int cmdi)
 
 static void listPowGp(const char params[][80], int cmdi)
 {
-	int m = atoint64(params[cmdi + 1], 10);
-	int startindex = atoint64(params[cmdi + 2], 5);
-	int endindex = atoint64(params[cmdi + 3], 11);
+	int m = (int)atoint64(params[cmdi + 1], 10);
+	int startindex = (int)atoint64(params[cmdi + 2], 5);
+	int endindex = (int)atoint64(params[cmdi + 3], 11);
 
 	printf("in %d^%d - %d^%d\n", m, startindex, m, endindex);
 
@@ -1684,7 +1645,7 @@ static void listPowGp(const char params[][80], int cmdi)
 	}
 
 	CLR_FLAG(PRINT_RET);
-	for (uint64 i = startindex; i <= endindex; i++) {
+	for (int i = startindex; i <= endindex; i++) {
 		uint64 n = ipow(m, i);
 		uint64 r = getGp(n, 0);
 		printf(PrintFormat, i, r);
@@ -1693,7 +1654,6 @@ static void listPowGp(const char params[][80], int cmdi)
 	SET_FLAG(PRINT_RET);
 }
 
-//benchMark
 static void benchMark(const char params[][80])
 {
 	SET_FLAG(PRINT_RET);
@@ -1728,7 +1688,6 @@ static void benchMark(const char params[][80])
 	freopen(CONSOLE, "w", stdout);
 }
 
-//test pi, pi2, gp function
 static void testGp( )
 {
 	const char* gpdata[][4] =
@@ -1753,9 +1712,9 @@ static void testGp( )
 		const uint64 n = atoint64(gpdata[i][0], 0);
 		const int psize = atoi(gpdata[i][2]);
 		Gp.Wheel = atoi(gpdata[i][0 + 1]);
-		const int gp = getGp(n, psize);
+		const uint64 gp = getGp(n, psize);
 		if (atoi(gpdata[i][3]) != gp) {
-			printf("%s : %s ~= %d fail !!!\n", gpdata[i][0], gpdata[i][3], gp);
+			printf("%s : %s ~= %lld fail !!!\n", gpdata[i][0], gpdata[i][3], gp);
 		}
 	}
 }
@@ -1818,7 +1777,6 @@ static int getCpuInfo()
 	return cpuinfo[2] >> 16;
 }
 
-//print the Gpk info
 static void printInfo( )
 {
 	const char* const sepator =
@@ -1869,7 +1827,6 @@ static void doCompile()
 	system(compileLine);
 }
 
-//
 static int parseCmd(char params[][80])
 {
 	int cmdi = -1;
@@ -1894,7 +1851,10 @@ static int parseCmd(char params[][80])
 			case 'P':
 			case 'S':
 			case 'R':
-				Config.Flag ^= (1 << (c - 'A'));
+				if (tmp == 0)
+					Config.Flag ^= (1 << (c - 'A'));
+				else
+					Config.Flag |= (1 << (c - 'A'));
 				break;
 			case 'C':
 				if (tmp <= (MAX_L1SIZE >> 13) && tmp > 15) {
@@ -1971,7 +1931,6 @@ static bool executeCmd(const char* cmd)
 {
 	while (cmd) {
 
-		// split each command by ';'
 		char* pcmd = (char*) strchr(cmd, ';');
 		char params[8][80] = {0};
 
@@ -2015,7 +1974,7 @@ static bool executeCmd(const char* cmd)
 }
 
 //
-static void initSgp( )
+static void initCache( )
 {
 	simpleEratoSieve(10000);
 	initBitTable( );
@@ -2024,7 +1983,7 @@ static void initSgp( )
 
 int main(int argc, char* argv[])
 {
-	initSgp( );
+	initCache( );
 
 	if (argc < 2) {
 		printInfo( );
@@ -2037,7 +1996,7 @@ int main(int argc, char* argv[])
 			executeCmd(argv[i]);
 	}
 
-//	executeCmd("t1 d m7 1e14 200; e15 100");
+	executeCmd("d m10 t4 c1000 1e15 1000");
 //	executeCmd("A d m7 t3 c1200 e12");
 
 	char ccmd[255] = {0};
@@ -2051,40 +2010,38 @@ int main(int argc, char* argv[])
 }
 
 /*************************************************************************
-1		3
-2		10
-3		37
-4		190
-5		1171
-6		7746
-7		56032
-8		423140
-9		3308859
-10		26569515
-11		218116524
-12		1822848478
-13
-
+1     3
+2     10
+3     37
+4     190
+5     1171
+6     7746
+7     56032
+8     423140
+9     3308859
+10    26569515
+1     218116524
+12    1822848478
+13    15462601989
+14    132822315652
+15    1153300805211
 MINGW: gcc 5.1.0
 CXXFLAGS: -Ofast -msse4 -s -pipe -march=corei7 -funroll-loops
 windows 7 64 bit, I5 3470 3.2G / i3 350M 2.26G
 S(1e11) = 218116524        4.64| 14.0 sec
 S(1e12) = 1822848478       52.8| 140.4 sec
-S(1e13) = 15462601989      541.| 1790. sec
-S(1e14) = 13280063038      6423| 5.20 hour
-S(1e15) = 1154538341852    27.8| 91.4 hour
-S(1e16) =                  400 |
-
-feature:
-  1. win32 gui
-  2. detail algorithm and readme
+S(1e13) = 15462601989      505.| 1790. sec
+S(1e14) = 132822315652     6023| 5.20 hour
+S(1e15) = 1153300805211    27.1| 81.4 hour
+S(1e16) =                  400 | 1300 hour
 
 Linux g++:
-  g++ -Wall -march=native -s -pipe -O2 -ffunction-sections -fomit-frame-pointer -lpthread sophieGermain.cpp
+  g++ -Wall -march=native -s -pipe -O2 -pthread SophieGermain.cpp
 Mingw/g++:
   g++ -Wall -mpopcnt -mtune=native -O2 -s -pipe sophieGermain.cpp
 MS vc++:
   cl /O2 /Os sophieGermain.cpp
 
  ****************************************************/
+
 
