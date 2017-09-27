@@ -1,26 +1,26 @@
-/* Fast segmented sieving of prime number which is based on site http://sweet.ua.pt/tos/software/prime_sieve.html ***/
+/*Fast Single-thread segmented sieving of prime number 2^64 ***/
 const char* Benchmark =
 "Mingw: g++ 5.1.0 bailuzhou@163\n"
 "Windows 10 x64               i3-350M, i5-3470, i7-7500u i7-6700\n"
-"pi(1e11, 1e10)  =  394050419     4.80    2.67    2.15   1.90\n"
-"pi(1e12, 1e10)  =  361840208     5.90    3.15    2.50   2.23\n"
-"pi(1e13, 1e10)  =  334067230     7.16    3.66    3.00   2.66\n"
-"pi(1e14, 1e10)  =  310208140     8.65    4.34    3.70   3.14\n"
-"pi(1e15, 1e10)  =  289531946     11.0    5.27    4.49   3.78\n"
-"pi(1e16, 1e10)  =  271425366     13.0    6.25    5.33   4.52\n"
-"pi(1e17, 1e10)  =  255481287     15.1    7.45    6.15   5.31\n"
-"pi(1e18, 1e10)  =  241272176     18.3    8.88    7.35   6.41\n"
-"pi(1e19, 1e10)  =  228568014     25.2    11.9    9.95   8.72\n"
+"pi(1e11, 1e10)  =  394050419     4.80    2.61    2.15   1.90\n"
+"pi(1e12, 1e10)  =  361840208     5.90    3.11    2.50   2.23\n"
+"pi(1e13, 1e10)  =  334067230     7.00    3.60    3.00   2.66\n"
+"pi(1e14, 1e10)  =  310208140     8.60    4.28    3.70   3.14\n"
+"pi(1e15, 1e10)  =  289531946     11.0    5.24    4.49   3.78\n"
+"pi(1e16, 1e10)  =  271425366     13.0    6.17    5.21   4.52\n"
+"pi(1e17, 1e10)  =  255481287     15.1    7.25    6.05   5.31\n"
+"pi(1e18, 1e10)  =  241272176     18.3    8.78    7.23   6.41\n"
+"pi(1e19, 1e10)  =  228568014     25.2    11.8    9.95   8.72\n"
 "pi(0-1e9,1e9)   =  22537866      8.75    4.28    3.92   3.62\n"
 "pi(1e18, 1e6)   =  24280         0.75    0.46    0.34   0.50\n"
 "pi(1e18, 1e8)   =  2414886       1.50    0.81    0.70   0.64\n"
 "pi(1e18, 1e9)   =  24217085      3.80    1.80    1.48   1.40\n"
-"pi(1e14, 1e12)  =  31016203073   880     466     384    314\n"
-"pi(1e16, 1e12)  =  27143405794   1300    640     522    445\n"
-"pi(1e18, 1e12)  =  24127637783   1600    810     642    590\n"
-"pi(1e19, 1e12)  =  22857444126   1800    900     702    625\n"
-"pi(1e18, 1e13)  =  241274558866  16000   8180    6400   5900\n"
-"pi(1e19, 1e13)  =  228575545410  18000   8800    7010   6230\n";
+"pi(1e14, 1e12)  =  31016203073   880     430     384    314\n"
+"pi(1e16, 1e12)  =  27143405794   1260    608     522    445\n"
+"pi(1e18, 1e12)  =  24127637783   1600    777     642    590\n"
+"pi(1e19, 1e12)  =  22857444126   1800    840     702    625\n"
+"pi(1e18, 1e13)  =  241274558866  16000   7770    6400   5900\n"
+"pi(1e19, 1e13)  =  228575545410  18000   8400    7010   6230\n";
 
 #include <ctype.h>
 #include <stdlib.h>
@@ -67,7 +67,7 @@ enum EBUCKET
 {
 	UINT_PIMAX = 203280221, //= pi(2^32)
 	MAX_BUCKET = 0xffffffff / (256 * (1 << 10) * 3) + 4, //5465 (sqrtp * (8 + 2) / sieve_size + 2);
-	WHEEL_SIZE = 1 << 11, //=4096 11: 16k, [10 - 13]
+	WHEEL_SIZE = 1 << 12, //=4096 11: 16k, [10 - 13]
 	MEM_WHEEL  = WHEEL_SIZE * 8, //=32768
 	MEM_BLOCK  = (1 << 19) / WHEEL_SIZE, //=256 1 << 20:8 MB
 	MAX_STOCK  = UINT_PIMAX / WHEEL_SIZE + MAX_BUCKET + MEM_BLOCK, //=55221
@@ -197,9 +197,9 @@ static struct _Threshold
 }
 Threshold =
 {
-	32 << 10, 256 << 10,
+	32 << 10, L2_DCACHE_SIZE << 10,
 	(32 << 10) / ERAT_SMALL, 0, ERAT_SMALL,
-	(256 << 10) / ERAT_MEDIUM, 0, ERAT_MEDIUM,
+	(L2_DCACHE_SIZE << 10) / ERAT_MEDIUM, 0, ERAT_MEDIUM,
 	SIEVE_SIZE * (WHEEL30 << 10) / ERAT_BIG, ERAT_BIG,
 };
 
@@ -214,7 +214,7 @@ _Config Config =
 {
 	SIEVE_SIZE << 10,
 	PRINT_RET | PRINT_TIME,
-	(1 << 4) - 1,
+	(1 << 5) - 1,
 };
 
 struct WheelPrime
@@ -449,15 +449,17 @@ uint64 atoint64(const char* str)
 }
 
 #define poSet(s1,o1,b1,s2,o2,b2,s3,o3,b3,s4,o4,b4,s5,o5,b5,s6,o6,b6,s7,o7,b7)\
-	while (ps /*+ o * s7 + o7*/ <= pend) {\
-		ps[o * 00 + 00] |= BIT##0,  ps[o * s1 + o1] |= BIT##b1; ps[o * s2 + o2] |= BIT##b2, ps[o * s3 + o3] |= BIT##b3;\
-		ps[o * s4 + o4] |= BIT##b4, ps[o * s5 + o5] |= BIT##b5; ps[o * s6 + o6] |= BIT##b6, ps[o * s7 + o7] |= BIT##b7;\
+	while (ps <= pend) {\
+		ps[o * 00 + 00] |= BIT##0,  ps[o * s1 + o1] |= BIT##b1;\
+		ps[o * s2 + o2] |= BIT##b2, ps[o * s3 + o3] |= BIT##b3;\
+		ps[o * s4 + o4] |= BIT##b4, ps[o * s5 + o5] |= BIT##b5;\
+		ps[o * s6 + o6] |= BIT##b6, ps[o * s7 + o7] |= BIT##b7;\
 		ps += p;\
 	}
 
 static int crossOffWheelFactor2(uchar* ps, const uchar* pend, const uint p)
 {
-	const uchar* pstart = ps;
+	const uchar* pbeg = ps;
 	const uint o = p / WHEEL30;
 	switch (WheelInit30[p % WHEEL30].PrimeIndex)
 	{
@@ -487,7 +489,7 @@ static int crossOffWheelFactor2(uchar* ps, const uchar* pend, const uint p)
 			break;
 	}
 
-	return (ps - pstart) * WHEEL30;
+	return (int)(ps - pbeg) * WHEEL30;
 }
 
 static void crossOff2Factor(uchar* ps0, uchar* ps1, const uchar* pend, const ushort smask, const uint p)
@@ -565,7 +567,6 @@ static int setWheelSmall(const uint64 start, uint l1_size = Threshold.L1Size * W
 			offset += (p2 - offset) / l1_size * l1_size;
 		}
 		//assert(p2 < offset);
-
 		uint sieve_index = p - (uint)(offset % p);
 		if (p2 > offset) {
 			sieve_index = (uint)(p2 - offset);
@@ -577,7 +578,7 @@ static int setWheelSmall(const uint64 start, uint l1_size = Threshold.L1Size * W
 
 		SmallSieve[j].Wp = multiples;
 #ifndef SM0
-		SmallSieve[j].Si = -sieve_index;
+		SmallSieve[j].Si = 0 - sieve_index;
 #else
 		SmallSieve[j].Si = sieve_index;
 #endif
@@ -593,9 +594,7 @@ static void setWheelMedium(uchar* bitarray, const uint sieve_size, const uint me
 	Threshold.L2Index = 0;
 	uint msize = MIN(sieve_size, Threshold.L2Size * WHEEL30);
 
-	const int align210 = l1_maxp % WHEEL210; // setWheelSmall(l1_maxp);
-	l1_maxp -= align210;
-	assert(align210 == 1 && medium > l1_maxp && medium < Config.SieveSize * WHEEL30 + Threshold.L1Size * WHEEL30);
+	l1_maxp -= l1_maxp % WHEEL210; // setWheelSmall(l1_maxp);
 
 	const uint pix = PI(medium, 1.2);
 	MediumSieve = (WheelPrime*) malloc(sizeof(WheelPrime) * (pix + 100));
@@ -673,10 +672,6 @@ static void setWheelPrime(uchar* bitarray, uint medium, uint sqrtp, const uint64
 	uint nextp = 0; uint64 remp = 0;
 	if (sqrtp < UINT_MAX) sqrtp ++; //watch overflow if sqrtp = 2^32 - 1
 
-//	int align210 = medium % WHEEL210; //setWheelSmall(medium);
-//	medium -= align210;
-	assert(medium % WHEEL210 == 0);
-
 	const uint irange = (uint)((range >> 32) > WHEEL30 ? UINT_MAX : range / WHEEL30);
 	for (uint l2size = L2_DCACHE_SIZE * WHEEL30 << 10; medium < sqrtp; medium += l2size) {
 		if (l2size > sqrtp - medium)
@@ -684,7 +679,7 @@ static void setWheelPrime(uchar* bitarray, uint medium, uint sqrtp, const uint64
 
 		const int bytes = segmentedSieve2(bitarray, medium, l2size);
 		stype mask = 0, *sbitarray = (stype*)bitarray; //little endian
-		uint offset = medium - medium % WHEEL30 - sizeof(mask) * WHEEL30;
+		uint offset = medium - sizeof(mask) * WHEEL30;
 		const uint pn = 2 + bytes / sizeof(mask);
 
 		for (uint j = 0; j < pn; ) {
@@ -743,40 +738,24 @@ static void setWheelPrime(uchar* bitarray, uint medium, uint sqrtp, const uint64
 
 static int sieveSmall0(uchar bitarray[], const uchar* pend, const uint p, uint offset, ushort multiples)
 {
-	uchar* ppbeg[8], windex;
+	uchar* ppbeg[8], wi;
 	for (int i = 0; i < 8; i ++) {
-		windex = WheelInit30[offset % WHEEL30].WheelIndex;
-		ppbeg[windex] = bitarray + offset / WHEEL30;
+		wi = WheelInit30[offset % WHEEL30].WheelIndex;
+		ppbeg[wi] = bitarray + offset / WHEEL30;
 		offset += (multiples % 4) * 2 * p; multiples /= 4;
 	}
 
 	#define OR_ADD(n) *ps##n |= BIT##n, ps##n += p
-	//whii[windex] ++; //7 2 6 3 4 1 5 0
 	uchar* ps0 = ppbeg[0], *ps1 = ppbeg[1], *ps2 = ppbeg[2], *ps3 = ppbeg[3];
 	uchar* ps4 = ppbeg[4], *ps5 = ppbeg[5], *ps6 = ppbeg[6], *ps7 = ppbeg[7];
 
-#if 1
-	uchar* pmax = ppbeg[windex];
+	uchar* pmax = ppbeg[wi] - p;
 	while (pmax <= pend) {
 		pmax += p;
 		OR_ADD(0); OR_ADD(5); OR_ADD(1); OR_ADD(4);
 		OR_ADD(3); OR_ADD(6); OR_ADD(2); OR_ADD(7);
 	}
-	*ps0 |= BIT0; *ps5 |= BIT5; *ps1 |= BIT1; *ps4 |= BIT4;
-	*ps3 |= BIT3; *ps6 |= BIT6; *ps2 |= BIT2; *ps7 |= BIT7;
-#else
-	while (ps4 <= pend) {
-		OR_ADD(0); OR_ADD(5); OR_ADD(1); OR_ADD(4);
-	}
-
-	while (ps7 <= pend) {
-		OR_ADD(3); OR_ADD(6); OR_ADD(2); OR_ADD(7);
-	}
-	*ps0 |= BIT0; *ps5 |= BIT5; *ps1 |= BIT1;
-	*ps3 |= BIT3; *ps6 |= BIT6; *ps2 |= BIT2;
-#endif
-
-	return (pmax - ppbeg[windex]) * WHEEL30 + offset;
+	return (int)(pmax - ppbeg[wi]) * WHEEL30 + offset;
 }
 
 static void sieveSmall1(uchar bitarray[], const uchar* pend, const uint p, uint offset, ushort multiples)
@@ -808,11 +787,11 @@ static int sieveSmall3(uchar bitarray[], const uchar* pend, const uint p, uint o
 	return crossOffWheelFactor2(bitarray + offset / WHEEL30, pend, p) + offset;
 }
 
-static void preSieve(uchar bitarray[], const uint64 start, const uint sieve_size, int copy_pos, int copy_size)
+static void preSieve(uchar bitarray[], const uint64 start, const uint sieve_size)
 {
 	const uint offset = (uint)(start % PRIME_PRODUCT) / WHEEL30;
 	const uint bits = sieve_size / WHEEL30 * 8 + WheelInit30[sieve_size % WHEEL30].WheelIndex;
-	int bytes = (bits + 7) / 8, remains = sizeof(PreSieved) - offset;
+	uint bytes = (bits + 7) / 8, remains = sizeof(PreSieved) - offset;
 	if (remains > bytes) {
 		memcpy(bitarray, PreSieved + offset, bytes);
 	} else {
@@ -827,11 +806,6 @@ static void preSieve(uchar bitarray[], const uint64 start, const uint sieve_size
 		bitarray[0] = BIT0;
 	}
 
-	//copy last segment with overflow bit set !!!
-	for (int i = 0; i < copy_size; i += sizeof(uint64)) {
-		uint64& c = *(uint64*)(bitarray + i + copy_pos);
-		*(uint64*)(bitarray + i) |= c, c = 0;
-	}
 	//fill the last byte with bit 1
 	if (bits % 8 != 0)
 		bitarray[bits >> 3] |= ~((1 << (bits & 7)) - 1);
@@ -870,7 +844,7 @@ static void eratSieveL1(uchar bitarray[], const uint64 start, const uint sieve_s
 		if ((int)offset > 0) {
 			offset += crossOffWheelFactor2(bitarray + offset / WHEEL30, pend, p) - sieve_size;
 		} else {
-			offset = sieveSmall3(bitarray, pend, p, -offset, SmallSieve[j].Wp) - sieve_size;
+			offset = sieveSmall3(bitarray, pend, p, 0 - offset, SmallSieve[j].Wp) - sieve_size;
 		}
 #else
 		offset = sieveSmall0(bitarray, pend, p, offset, SmallSieve[j].Wp) - sieve_size;
@@ -938,11 +912,18 @@ inline static int sieveMedium3(uchar bitarray[], const uint sieve_byte, WheelPri
 
 	while ((int)offset0 < 0) {
 		SAFE_SET(0);
+#if 1
+		if ((int)offset1 >= 0) break;
+		SAFE_SET(1);
+		if ((int)offset2 >= 0) break;
+		SAFE_SET(2);
+#else
 		if ((int)offset1 < 0) { SAFE_SET(1); }
 		if ((int)offset2 < 0) { SAFE_SET(2); }
+#endif
 	}
 
-//	while ((int)offset0 < 0) { SAFE_SET(0); }
+	while ((int)offset0 < 0) { SAFE_SET(0); }
 	while ((int)offset1 < 0) { SAFE_SET(1); }
 	while ((int)offset2 < 0) { SAFE_SET(2); }
 
@@ -979,9 +960,7 @@ static WheelPrime* sieveMediumW30(uchar bitarray[], const uint sieve_byte, const
 		}
 
 		while ((int)offset < 0) {
-//			SAFE_SET();
 			we = wdata[we.WheelIndex];
-//			bitarray[offset] |= we.UnsetBit;
 			offset += we.Correct + we.NextMultiple * wi;
 		}
 		pwheel ++->Si = offset << SI_BIT | we.WheelIndex;
@@ -1071,8 +1050,8 @@ static void eratSieveBig(uchar bitarray[], const uint sieve_size)
 {
 	uint loops = (uint)(size_t)Bucket[0].Wheel % MEM_WHEEL / sizeof(WheelPrime);
 	if (loops % 2) {
-		//sieveBig1(bitarray, sieve_size, Bucket[0].Wheel - 1), loops --;
-		*(Bucket[0].Wheel) = *(Bucket[0].Wheel - 1), loops ++;
+		sieveBig1(bitarray, sieve_size, Bucket[0].Wheel - 1), loops --;
+		//*(Bucket[0].Wheel) = *(Bucket[0].Wheel - 1), loops ++;
 	} else if (loops == 0) {
 		loops = WHEEL_SIZE;
 	}
@@ -1111,7 +1090,14 @@ static int segmentedSieve(uchar bitarray[], const uint64 start, const uint sieve
 	const uint medium = MIN(sqrtp, Threshold.Medium) + 1;
 	const bool bmsieve = sqrtp >= Threshold.L1Maxp;
 
-	preSieve(bitarray, start, sieve_size, Config.SieveSize, Threshold.L1Maxp);
+	preSieve(bitarray, start, sieve_size);
+	//copy last L1 seg to the first seg
+	const uint copy_size = Threshold.L1Maxp, copy_pos = Config.SieveSize;
+	for (uint i = 0; i < copy_size; i += sizeof(uint64)) {
+		uint64& c = *(uint64*)(bitarray + i + copy_pos);
+		*(uint64*)(bitarray + i) |= c, c = 0;
+	}
+
 	for (uint offset = 0, l2size = Threshold.L2Size * WHEEL30; offset < sieve_size; offset += l2size) {
 		if (l2size + offset > sieve_size)
 			l2size = sieve_size - offset;
@@ -1137,44 +1123,46 @@ static int segmentedSieve(uchar bitarray[], const uint64 start, const uint sieve
 static int segmentedSieve2(uchar bitarray[], uint start, uint sieve_size)
 {
 	const uint sqrtp = isqrt(start + sieve_size);
-//	const uint align30 = (uint)(start % WHEEL30);
-//	start -= align30, sieve_size += align30;
+	const uint align30 = (uint)(start % WHEEL30);
+	const uint l1_maxp = Threshold.L1Maxp;
+	assert(align30 % WHEEL210 == 0);
 	const uint bytes = sieve_size / WHEEL30 + (7 + WheelInit30[sieve_size % WHEEL30].WheelIndex) / 8;
 
-	preSieve(bitarray, start, sieve_size, (L2_DCACHE_SIZE << 10), Threshold.L1Size * 0);
+	preSieve(bitarray, start, sieve_size);
+	*(uint64*)(bitarray + bytes) = ~0;
+
 	for (uint offset = 0, l1size = Threshold.L1Size * WHEEL30; offset < sieve_size; offset += l1size) {
 		if (l1size + offset > sieve_size)
 			l1size = sieve_size - offset;
-		eratSieveL0(bitarray + offset / WHEEL30, start + offset, l1size, Threshold.L1Maxp);
+		eratSieveL0(bitarray + offset / WHEEL30, start + offset, l1size, l1_maxp);
 	}
 
+//	assert(l1_maxp > start / l1_maxp);
 	const uchar* pend = bitarray + sieve_size / WHEEL30;
-	for (uint j = Threshold.L1Index, p = Threshold.L1Maxp; p <= sqrtp; p = Prime[++j]) {
-		const uint offset = p - start % p;
+	for (uint j = Threshold.L1Index, p = l1_maxp; p <= sqrtp; p = Prime[++j]) {
+		uint offset = p - start % p;
+		if (p * p > start)
+			offset = p * p - start;
 		const WheelFirst& wf = WheelFirst30[offset % WHEEL30][WheelInit30[p % WHEEL30].PrimeIndex];
 		const ushort multiples = WHEEL_SKIP >> (wf.NextMultiple * 2);
 		sieveSmall1(bitarray, pend, p, offset + wf.Correct * p, multiples);
 	}
-
-//	bitarray[0] |= (1 << WheelInit30[align30].WheelIndex) - 1;
-//	if (sieve_size != (L2_DCACHE_SIZE << 10) * WHEEL30) {
-		*(uint64*)(bitarray + bytes) = ~0;
-//	}
 
 	return bytes;
 }
 
 static void setThresholdL1()
 {
-	while (Threshold.L1Maxp > Prime[PRIME_SIZE - 30])
-		Threshold.L1Maxp = Threshold.L1Maxp / 8 * 7;
+	if (Threshold.L1Maxp > Prime[PRIME_SIZE - 100])
+		Threshold.L1Maxp = Prime[PRIME_SIZE - 100];
 	for (uint p = Prime[1], j = 1; ; p = Prime[++j]) {
 		if (p >= Threshold.L1Maxp && p % WHEEL210 == 1) {
 			Threshold.L1Index = j;
 			Threshold.L1Maxp = p;
-			break;
+			return;
 		}
 	}
+	//assert(false);
 }
 
 void setCpuCache(int level, uint cache)
@@ -1185,7 +1173,7 @@ void setCpuCache(int level, uint cache)
 		Threshold.L1Size = cache << 10;
 		Threshold.L1Maxp = Threshold.L1Size / Threshold.L1Segs;
 		setThresholdL1();
-	} else if (level == 2 && cache >= 256 && cache <= MAX_SEGMENT) {
+	} else if (level == 2 && cache >= L2_DCACHE_SIZE && cache <= MAX_SEGMENT) {
 		Threshold.L2Size = cache << 10;
 		Threshold.L2Maxp = Threshold.L2Size / Threshold.L2Segs;
 	}
@@ -1194,7 +1182,7 @@ void setCpuCache(int level, uint cache)
 
 void setLevelSegs(uint level, uint segs)
 {
-	if (segs > 0 && segs < 30) {
+	if (segs > 0 && segs <= 6) {
 		if (level == 1) {
 			Threshold.L1Segs = segs;
 			Threshold.L1Maxp = Threshold.L1Size / segs;
@@ -1202,24 +1190,25 @@ void setLevelSegs(uint level, uint segs)
 		} else if(level == 2) {
 			Threshold.L2Segs = segs;
 			Threshold.L2Maxp = Threshold.L2Size /segs;
-		} else if (level == 3 && segs <= 6) {
+		} else if (level == 3 && segs > 1) {
 			Threshold.Msegs = segs;
 		}
 		assert(Threshold.L1Maxp < Threshold.L2Maxp);
 	}
 }
 
-//sieve_size : 32k - 4M 
+//sieve_size : 32k - 4M
 int setSieveSize(uint sieve_size)
 {
-	if (sieve_size <= MAX_SEGMENT && sieve_size >= 32) {
-		sieve_size = 1 << (ilog(sieve_size, 2) + 10);
+	if (sieve_size <= MAX_SEGMENT && sieve_size > L2_DCACHE_SIZE) {
+		sieve_size = (sieve_size / L2_DCACHE_SIZE) * L2_DCACHE_SIZE << 10;//  1 << (ilog(sieve_size, 2) + 10);
+	} else if (sieve_size <= L2_DCACHE_SIZE && sieve_size >= 32) {
+		sieve_size = (sieve_size / 32) * 32 << 10;
 	} else if (sieve_size <= (MAX_SEGMENT >> 10) && sieve_size > 0) {
 		sieve_size = sieve_size << 20;
 	} else {
 		sieve_size = L2_DCACHE_SIZE << 10;
 	}
-
 	return Config.SieveSize = sieve_size;
 }
 
@@ -1347,7 +1336,6 @@ static void printResult(const uint64 start, const uint64 end, uint64 primes)
 	printf("\rpi(%s) = %llu", buff, primes);
 }
 
-//TODO
 static uint setBucketStart(const uint64 start, const uint sqrtp, const uint sieve_size)
 {
 	uint medium = sieve_size / Threshold.Msegs + 1;
@@ -1374,16 +1362,21 @@ uint64 doSieve(const uint64 start, const uint64 end, Cmd* cmd = NULL)
 	const int64 ts = getTime();
 	const uint sqrtp = isqrt(end);
 	uint sieve_size = Config.SieveSize;
+
 	if (sieve_size < Threshold.L2Size && sqrtp > 10000000) {
 		sieve_size = setSieveSize(SIEVE_SIZE);
 	} else if (sieve_size >= Threshold.Msegs << 21) {
 		sieve_size = setSieveSize(SIEVE_SIZE);
+	}
+	if ((sieve_size & (sieve_size - 1)) != 0 && sqrtp > sieve_size * WHEEL30 / Threshold.Msegs) {
+		sieve_size = setSieveSize(1 << ilog(sieve_size >> 10, 2));
 	}
 
 	//init medium sieve
 	const int max_cache = MAX(sieve_size, L2_DCACHE_SIZE * 1024) + Threshold.L1Size;
 	uchar* bitarray = (uchar*) malloc(max_cache + 1024);
 	sieve_size *= WHEEL30;
+
 	const uint medium = setBucketStart(start, sqrtp, sieve_size); //TODO
 	const bool bmsieve = sqrtp >= Threshold.L1Maxp;
 	if (bmsieve) {
@@ -1396,13 +1389,14 @@ uint64 doSieve(const uint64 start, const uint64 end, Cmd* cmd = NULL)
 	if (sqrtp > medium) {
 		setBucketInfo(sieve_size, sqrtp, end - buckets);
 		setWheelPrime(bitarray, medium, sqrtp, buckets, end - buckets);
+		if (BucketInfo.CurStock < BucketInfo.LoopSize)
 		allocWheelBlock(1);
 	} else {
 		buckets = end + 1;
 	}
 
 	setWheelSmall(start);
-	memset(bitarray + max_cache - Threshold.L1Size, 0, Threshold.L1Maxp);
+	memset(bitarray + sieve_size / WHEEL30, 0, Threshold.L1Maxp + 64);
 
 	const int64 ti = getTime();
 	const int64 primes = pi(bitarray, start, end, cmd);
@@ -1417,7 +1411,9 @@ uint64 doSieve(const uint64 start, const uint64 end, Cmd* cmd = NULL)
 		const int64 ta = getTime();
 		printResult(start, end, primes);
 		if (Config.Flag & PRINT_TIME)
-			printf(" (%.2f + %.2f = %.2f sec, %d kb)", (ti - ts) / 1000.0, (ta - ti) / 1000.0, (ta - ts) / 1000.0, Config.SieveSize >> 10);
+			printf(" (%.2f + %.2f = %.2f sec, %d kb L%d1 L%d2 L%d3)",
+					(ti - ts) / 1000.0, (ta - ti) / 1000.0, (ta - ts) / 1000.0, Config.SieveSize >> 10,
+					 Threshold.L1Segs, Threshold.L2Segs, Threshold.Msegs);
 		putchar('\n');
 	}
 #ifndef B_R
@@ -1594,7 +1590,7 @@ static void initWheel210()
 static void fixRangeTest(uint64 lowerBound, const int64 range, uint64 Ret)
 {
 	const int llog10 = ilog(lowerBound, 10), rlog10 = ilog(range, 10);
-	const uint64 maxrange = ipow(2, 30);
+	const uint64 maxrange = ipow(2, 28);
 	uint64 primes = 0, upperBound = lowerBound + range;
 	if (upperBound + 1 == 0)
 		printf("Sieving Pi[2^64-10^%d, 2^64-1] with range 10^%d\n", rlog10, ilog(maxrange, 10));
@@ -1607,11 +1603,12 @@ static void fixRangeTest(uint64 lowerBound, const int64 range, uint64 Ret)
 		if (end > upperBound || end < lowerBound)
 			end = upperBound;
 
+		setCpuCache(1, 32 * (rand() % 2 + 1));
 		setSieveSize(rand() % MAX_SEGMENT + 64);
-		setLevelSegs(1, rand() % 6 + 2), setLevelSegs(2, rand() % 6 + 2), setLevelSegs(3, rand() % 5 + 2);
+		setLevelSegs(1, rand() % 5 + 2), setLevelSegs(2, rand() % 5 + 2), setLevelSegs(3, rand() % 5 + 2);
 
 		primes += doSieve(lowerBound, end - 1);
-		if (lowerBound % 8 == 0)
+		if (lowerBound % 4 == 0)
 		printf("chunk: %.2f%%\r", 100 - (int64)(upperBound - lowerBound) * 100.0 / range);
 		lowerBound = end;
 	}
@@ -1676,19 +1673,19 @@ static void startBenchmark(int flag)
 
 	const uint64 RangeData[][3] =
 	{
-		{-1 - pow11,   pow11, 2254197466ul},
 		{ipow(01, 11), pow11, 4118054813ul},
+		{ipow(10, 17), pow11, 2554712095ul},
 		{ipow(10, 12), pow11, 3612791400ul},
 		{ipow(10, 13), pow11, 3340141707ul},
-		{ipow(10, 17), pow11, 2554712095ul},
 
-		{-1 - pow12,   pow12, pow9 * 22 + 542106206},
+		{-1 - pow11,   pow11, 2254197466ul},
 		{ipow(10, 14), pow12, pow9 * 31 + 16203073},
 		{ipow(10, 15), pow12, pow9 * 28 + 952450479},
 		{ipow(10, 16), pow12, pow9 * 27 + 143405794},
 		{ipow(10, 18), pow12, pow9 * 24 + 127637783},
 		{ipow(10, 19), pow12, pow9 * 22 + 857444126},
 		{ipow(10, 19), pow12, pow9 * 22 + 857444126},
+		{-1 - pow12,   pow12, pow9 * 22 + 542106206},
 		{-1 - pow12*10, pow12*10, pow9 * 225 + 420940155},
 	};
 
@@ -1726,11 +1723,11 @@ static void printInfo()
 	info += sprintf(info, " %s %s\n", __TIME__, __DATE__);
 	info += sprintf(info, "[MARCO] : MEM_WHEEL = %dM, WHEEL_SIZE = %dk, SIEVE_SIZE = %dk, WHEEL = %d\n",
 			MEM_BLOCK * WHEEL_SIZE >> 17 , WHEEL_SIZE >> 7, SIEVE_SIZE, WHEEL);
-	info += sprintf(info, "[ARGS ] : L1Size = %d, L2Size = %d, SieveSize = %d, Loop = %d\n",
+	info += sprintf(info, "[ARGS ] : L1Size = %u, L2Size = %u, SieveSize = %u, Loop = %u\n",
 			Threshold.L1Size >> 10, Threshold.L2Size >> 10, Config.SieveSize >> 10, BucketInfo.LoopSize);
-	info += sprintf(info, "[ARGS ] : L1Segs/L2Segs/Mseg = (%d,%d,%d)\n",
+	info += sprintf(info, "[ARGS ] : L1Segs/L2Segs/Mseg = (%u,%u,%u)\n",
 		Threshold.L1Segs, Threshold.L2Segs, Threshold.Msegs);
-	info += sprintf(info, "[ARGS ] : L1Maxp/L2Maxp/Medium/Large/SieveSize = (%d,%d,%d,%u,%d)",
+	info += sprintf(info, "[ARGS ] : L1Maxp/L2Maxp/Medium/Large/SieveSize = (%u,%u,%u,%u,%u)",
 		 Threshold.L1Maxp, Threshold.L2Maxp, Threshold.Medium, isqrt(Threshold.BucketStart + 1), Config.SieveSize);
 	puts(buff);
 	puts(sepator);
@@ -1743,7 +1740,7 @@ static int parseCmd(const char params[][60])
 	int cdata = 0;
 
 	for (int i = 0; params[i][0]; i ++) {
-		char c = params[i][0], n = params[i][1];
+		unsigned char c = params[i][0], n = params[i][1];
 		if (c == '-')
 			c = params[i][1];
 		if (c >= 'a' && c <= 'z')
@@ -1805,7 +1802,7 @@ static int splitCmd(const char* ccmd, char cmdparams[][60])
 		if (*ccmd == 0 || *ccmd == ';') {
 			break;
 		}
-		char c = *ccmd;
+		unsigned char c = *ccmd;
 		bool isvalid = false;
 		while (isalnum(c) || c == '^' || c == '/' || c == '+' || c == '-' || c == '*') {
 			*pc ++ = c;
@@ -1837,7 +1834,7 @@ static bool executeCmd(const char* cmd)
 			return true;
 		}
 
-		char cmdc = toupper(params[cmdi][0]);
+		unsigned char cmdc = toupper(params[cmdi][0]);
 		uint64 start = atoint64(params[cmdi]);
 		uint64 end = atoint64(params[cmdi + 1]);
 		if (!isdigit(cmdc) && cmdc != 'E') {
@@ -1899,85 +1896,118 @@ void initPrime(int sieve_size)
 
 int main(int argc, char* argv[])
 {
-	if (argc > 1)
+	if (argc == 2)
 		executeCmd(argv[1]);
+
 #if 0
-	if (argc >= 0)
+	else if (argc > 2)
 	{
 	srand(time(0));
 	initPrime(SIEVE_SIZE);
 
 	Config.Progress = 0;
-	Config.Flag &= ~PRINT_TIME;
+	double tl[4][8] = {0};
 
-	for (int i = 0; i > 0; i --)
-	for (int j = 1; j < 10; j ++) {
-		uint64 start = ((uint64)(rand() * rand()) << i) + (uint64)rand() * rand() * rand();
-		int sieve_size = setSieveSize(256 << (rand() % 5));
-		uint64 range = (rand() % 32) * Config.SieveSize * 30 + rand();
-		uint64 rm1 = doSieve(start, start + range, NULL);
-		if (setSieveSize(256 << (rand() % 5 + 0)) == sieve_size)
-		{
-			setSieveSize(sieve_size*2);
+	const uint maxn = 5 * 5;
+	for (int n = 0 ; n < maxn; n++)
+	{
+		int l3 = n % 5 + 2, l2 = n / 5 % 5 + 2, l1 = n / 25 + 2;
+		int64 start = atoint64(argv[1]);
+		int64 range = atoint64(argv[2]);
+
+		if (maxn == 25 && (start < 1e14) || range < 1e8) {
+			int tmp = l1;
+			l1 = l3;
+			l3 = tmp;
 		}
+		setLevelSegs(1, l1); setLevelSegs(2, l2); setLevelSegs(3, l3);
 
-		Config.Flag ^= PRINT_RET;
-		setLevelSegs(3, rand() % 6 + 2); setLevelSegs(2, rand() % 6 + 2), setLevelSegs(1, rand() % 6 + 2);
-		uint64 rm2 = doSieve(start, start + range, NULL);
-		if(rm1 != rm2) { printInfo(); printf("%llu %llu\n", start, range); system("pause"); }
-		if (j % 100 == 0) printf("\r %2d progress ~= %d\n", i, j);
-		Config.Flag ^= PRINT_RET;
+		double ts = getTime();
+		doSieve(start, start + range);
+		double ta = getTime() - ts;
+		tl[1][l1] += ta;
+		tl[2][l2] += ta;
+		tl[3][l3] += ta;
+	}
+	for (int l = 1; l <= 3; l++)
+	{
+		printf("L%d ", l);
+		for (int i = 2; i <= 6; i++)
+			printf("%.2lf, ", tl[l][i] / maxn / 5);
+		printf("\n");
 	}
 
-	Config.Flag &= ~PRINT_TIME;
 	Config.Flag ^= PRINT_RET;
+	Config.Flag &= ~PRINT_TIME;
+		for (int i = 10; i > 0; i --)
+		for (int j = 1; j < 10; j ++) {
+			uint64 start = ((uint64)(rand() * rand()) << i) + (uint64)rand() * rand() * rand();
+			int sieve_size = setSieveSize(rand() % 2000 + 32);
+			uint64 range = (rand() % 32) * Config.SieveSize * WHEEL30 + rand();
+			uint64 rm1 = doSieve(start, start + range, NULL);
+			if (setSieveSize(L2_DCACHE_SIZE << (rand() % 5 + 0)) == sieve_size)
+				setSieveSize(sieve_size*2);
 
-	for (int j = 1; j <= 10000; j ++) {
-#if 1
-		uint64 start = (uint64)(rand() * rand()) * (uint64)(rand() * rand());
-		setSieveSize(SIEVE_SIZE);
-		start -= start % WHEEL210;
-		uint64 range = (rand() % 10 + 10) * Config.SieveSize * 30;
-		uint64 rm1 = doSieve(start, start + range - 1, NULL);
-
-		setSieveSize(MAX_SEGMENT / (rand() % 16 + 1));
-		uint64 rm2 = doSieve(start, start + range, NULL);
-		assert(rm1 == rm2);
-#endif
-
-		char cmd[100] = {0};
-		sprintf(cmd, "[%d] --- %lld %lld c%ld L%d1 L%d2 L%d3",
-				j, start, range, Config.SieveSize >> 10, Threshold.L1Segs, Threshold.L2Segs, Threshold.Msegs);
-
-		for (int i = 2; i <= 6; i ++) {
-			uint sieve_size = Config.SieveSize * 30;
-			uint64 medium = sieve_size / i + WHEEL210;
-			medium -= medium % WHEEL210;
-			uint64 start = medium * medium - sieve_size * (rand() % 2 + 2) + rand();
-			uint64 end = medium * medium + sieve_size * (rand() % 8 + 2) + rand();
-
-			setLevelSegs(3, i + 1); setLevelSegs(2, rand() % 6 + 2), setLevelSegs(1, 6 + 1);
-			const uint64 r1 = doSieve(start, end, NULL);
-			char cmd2[100] = {0};
-			sprintf(cmd2, "  %lld %lld %lld c%d L%d1 L%d2 L%d3",
-					 r1, start, end, sieve_size, Threshold.L1Segs, Threshold.L2Segs, Threshold.Msegs);
-
-			setSieveSize(sieve_size * 2);
-			setLevelSegs(3, i - 1); setLevelSegs(2, rand() % 6 + 2), setLevelSegs(1, rand() % 6 + 1);
-			const uint64 r2 = doSieve(start, end, NULL);
-			if (r1 != r2) {
-				puts(cmd);
-				puts(cmd2);
-				printf("   %lld != %lld, %lld %lld c%d L%d1 L%d2 L%d3\n",
-					r1, r2, start, end, Config.SieveSize >> 10, Threshold.L1Segs, Threshold.L2Segs, Threshold.Msegs);
-			}
+			Config.Flag ^= PRINT_RET;
+			setLevelSegs(3, rand() % 5 + 2); setLevelSegs(2, rand() % 6 + 2), setLevelSegs(1, rand() % 6 + 2);
+			uint64 rm2 = doSieve(start, start + range, NULL);
+			if(rm1 != rm2) { printInfo(); printf("%llu %llu\n", start, range); system("pause"); }
+			if (j % 100 == 0) printf("\r %2d progress ~= %d\n", i, j);
+			Config.Flag ^= PRINT_RET;
 		}
-		if (j % 10 == 0) printf("\rprogress ~= %d\n", j);
-	}}
+
+		Config.Flag &= ~PRINT_TIME;
+		Config.Flag ^= PRINT_RET;
+
+		for (int j = 1; j <= 1000; j ++) {
+			char cmd[100] = {0};
+#if 1
+			setLevelSegs(1, rand() % 8 + 3);
+			uint64 start = (uint64)(rand() * rand()) * (uint64)(rand() * rand());
+			setSieveSize(L2_DCACHE_SIZE * rand() % 8 + L2_DCACHE_SIZE);
+			start -= start % 2;
+			uint64 range = (rand() % 10 + 10) * Config.SieveSize * WHEEL30;
+			uint64 rm1 = doSieve(start, start + range - 1, NULL);
+
+			setCpuCache(1, 32 * (rand() % 2 + 1));
+			setLevelSegs(2, rand() % 8 + 3);
+			setSieveSize(L2_DCACHE_SIZE << (rand() % 5) + 1);
+			uint64 rm2 = doSieve(start, start + range, NULL);
+			sprintf(cmd, "%lld != %lld [%d] --- %lld %lld s%d L%d1 L%d2 L%d3", rm1, rm2,
+					j, start, range, Config.SieveSize >> 10, Threshold.L1Segs, Threshold.L2Segs, Threshold.Msegs);
+			if (rm1 != rm2)
+				puts(cmd);
+#endif
+			for (int i = 2; i <= 6; i ++) {
+				uint sieve_size = Config.SieveSize * WHEEL30;
+				uint64 medium = sieve_size / i + WHEEL210;
+				medium -= medium % WHEEL210;
+				uint64 start = medium * medium - sieve_size * (rand() % 6 + 1) + rand();
+				uint64 end = start + sieve_size * (rand() % 18 + 1) + rand();
+
+				setLevelSegs(3, i); setLevelSegs(2, rand() % 6 + 2), setLevelSegs(1, rand() % 8 + 2);
+				const uint64 r1 = doSieve(start, end, NULL);
+				char cmd2[100] = {0};
+				sprintf(cmd2, "  %lld %lld %lld s%d L%d1 L%d2 L%d3",
+						r1, start, end, (sieve_size / WHEEL30) >> 10, Threshold.L1Segs, Threshold.L2Segs, Threshold.Msegs);
+
+				setSieveSize(2048);
+				setLevelSegs(3, rand() % 5 + 2); setLevelSegs(2, rand() % 6 + 2), setLevelSegs(1, rand() % 8 + 2);
+				const uint64 r2 = doSieve(start, end, NULL);
+				if (r1 != r2) {
+					puts(cmd);
+					puts(cmd2);
+					printf("   %lld != %lld, %lld %lld s%d L%d1 L%d2 L%d3\n",
+							r1, r2, start, end, Config.SieveSize >> 10, Threshold.L1Segs, Threshold.L2Segs, Threshold.Msegs);
+				}
+			}
+			if (j % 10 == 0) printf("\rprogress ~= %d\n", j);
+		}}
 #endif
 
-	executeCmd("e9 h;e12 e9; e14 e9");
+	executeCmd("e9 h;e12 e10; e14 e10");
 	executeCmd("e16 e9;e18 e9;");
+//	executeCmd("9453637706173921257 1728321723 s4 l61 l42 l33 i;");
 
 	while (true) {
 		char ccmd[257];
@@ -1995,4 +2025,5 @@ int main(int argc, char* argv[])
 
 //TODO
 //1.multi-threading
-//2.improve bucket algorithm according to current segment, for ex[1e14, 1e16]
+//2.improve bucket algorithm for big range ex[1e14, 1e16]
+//3.redesign by c++
