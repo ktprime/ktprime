@@ -2,26 +2,26 @@
 const char* Benchmark =
 "Mingw: g++ 5.1.0 bailuzhou@163\n"
 "Windows 10 x64               i3-350M, i5-3470, i7-7500u i7-6700\n"
-"pi(1e11, 1e10)  =  394050419     4.80    2.61    2.15   1.90\n"
-"pi(1e12, 1e10)  =  361840208     5.90    3.11    2.50   2.23\n"
-"pi(1e13, 1e10)  =  334067230     7.00    3.60    3.00   2.66\n"
-"pi(1e14, 1e10)  =  310208140     8.60    4.28    3.70   3.14\n"
-"pi(1e15, 1e10)  =  289531946     11.0    5.24    4.49   3.78\n"
-"pi(1e16, 1e10)  =  271425366     13.0    6.17    5.21   4.52\n"
-"pi(1e17, 1e10)  =  255481287     15.1    7.25    6.05   5.31\n"
-"pi(1e18, 1e10)  =  241272176     18.3    8.78    7.23   6.41\n"
+"pi(1e11, 1e10)  =  394050419     4.60    2.61    2.15   1.90\n"
+"pi(1e12, 1e10)  =  361840208     5.50    3.10    2.50   2.23\n"
+"pi(1e13, 1e10)  =  334067230     6.70    3.60    3.00   2.66\n"
+"pi(1e14, 1e10)  =  310208140     8.03    4.28    3.70   3.14\n"
+"pi(1e15, 1e10)  =  289531946     10.4    5.21    4.49   3.78\n"
+"pi(1e16, 1e10)  =  271425366     12.4    6.15    5.21   4.52\n"
+"pi(1e17, 1e10)  =  255481287     15.0    7.21    6.05   5.31\n"
+"pi(1e18, 1e10)  =  241272176     18.1    8.78    7.23   6.41\n"
 "pi(1e19, 1e10)  =  228568014     25.2    11.8    9.95   8.72\n"
 "pi(0-1e9,1e9)   =  22537866      8.75    4.28    3.92   3.62\n"
 "pi(1e18, 1e6)   =  24280         0.75    0.46    0.34   0.50\n"
 "pi(1e18, 1e8)   =  2414886       1.50    0.81    0.70   0.64\n"
-"pi(1e18, 1e9)   =  24217085      3.80    1.80    1.48   1.40\n"
-"pi(0,    1e12)  =  37607912018   540     280     244    204\n"
-"pi(1e14, 1e12)  =  31016203073   880     430     384    314\n"
-"pi(1e16, 1e12)  =  27143405794   1260    608     522    445\n"
-"pi(1e18, 1e12)  =  24127637783   1600    777     642    590\n"
-"pi(1e19, 1e12)  =  22857444126   1800    840     702    625\n"
-"pi(1e18, 1e13)  =  241274558866  16000   7770    6400   5900\n"
-"pi(1e19, 1e13)  =  228575545410  18000   8400    7010   6230\n";
+"pi(1e18, 1e9)   =  24217085      3.70    1.80    1.48   1.40\n"
+"pi(0,    1e12)  =  37607912018   520     280     234    210\n"
+"pi(1e14, 1e12)  =  31016203073   810     430     384    314\n"
+"pi(1e16, 1e12)  =  27143405794   1220    600     522    445\n"
+"pi(1e18, 1e12)  =  24127637783   1570    767     642    590\n"
+"pi(1e19, 1e12)  =  22857444126   1730    840     702    625\n"
+"pi(1e18, 1e13)  =  241274558866  15700   7670    6400   5900\n"
+"pi(1e19, 1e13)  =  228575545410  17300   8400    7010   6230\n";
 
 #include <ctype.h>
 #include <stdlib.h>
@@ -42,7 +42,7 @@ enum ECONST
 	WHEEL_SKIP    = 0x799b799b,
 	PATTERN_GAP   = 10,//max prime wheel 210 gap
 	PRIME_SIZE    = 6542 + 10,//pi(2^16)
-	MAX_SEGMENT   = 8 << 10,//4M max sieve_size
+	MAX_SEGMENT   = 4 << 10,//4M max sieve_size
 };
 
 //performance marco
@@ -77,9 +77,9 @@ enum EBUCKET
 
 enum EFLAG
 {
+	PRINT_TIME = 1 << ('T' - 'A'),
 	SLOW_TEST  = 1 << ('A' - 'A'),
 	PRINT_RET  = 1 << ('R' - 'A'),
-	PRINT_TIME = 1 << ('T' - 'A'),
 	SAVE_DATA  = 1 << ('F' - 'A'),
 };
 
@@ -310,6 +310,7 @@ struct Cmd
 };
 
 typedef void (*sieve_call)(uint64, uint64);
+static void printInfo();
 void initPrime(int sieve_size);
 uint64 doSieve(const uint64 start, const uint64 end, Cmd* cmd);
 int setSieveSize(uint sieve_size);
@@ -938,31 +939,42 @@ static WheelPrime* sieveMediumW30(uchar bitarray[], const uint sieve_byte, const
 	for (uint wp = pwheel->Wp; wp < minwp; wp = pwheel->Wp) {
 		const uint wi = wp >> SI_BIT, pi = wp % (1 << SI_BIT);
 		const uint p = wi * WHEEL + PATTERN[pi];
-		uint offset = pwheel->Si >> SI_BIT;
-		WheelElement* wdata = WHEEL_MAP[pi], we;
+		WheelElement* wdata = WHEEL_MAP[pi];
 		WheelElement* wheel = wdata + pwheel->Si % (1 << SI_BIT);
 
-		uchar* ps = bitarray + offset;
-		offset += (sieve_byte - offset) / p * p - sieve_byte;
-		const uchar* pend = bitarray + sieve_byte;
-		for (int i = 0; i < 4; i ++) {
+		uchar* ps = bitarray + (pwheel->Si >> SI_BIT);
+		uchar* pend = bitarray + sieve_byte;
+		uchar* pmin = pend + p;
+
+		int nwi, nwa[8];
+		for (int i = 0; i < 8; i += 2) {
 			uchar* ps0 = ps;
-			ushort smask = wheel->UnsetBit;
+			uchar masks0 = wheel->UnsetBit;
 			ps += wheel->Correct + wheel->NextMultiple * wi;
+			nwa[i + 0] = wheel->WheelIndex;
 			wheel = wdata + wheel->WheelIndex;
 
+			nwa[i + 1] = wheel->WheelIndex;
 			uchar* ps1 = ps;
-			smask |= (ushort)wheel->UnsetBit << 8;
+			uchar masks1 = (ushort)wheel->UnsetBit;
 			ps += wheel->Correct + wheel->NextMultiple * wi;
-			we.WheelIndex = wheel->WheelIndex, wheel = wdata + wheel->WheelIndex;
-			crossOff2Factor(ps0, ps1, pend, smask, p);
-		}
+			wheel = wdata + wheel->WheelIndex;
+			while (ps1 < pend) {
+				*ps1 |= masks1, ps1 += p;
+				*ps0 |= masks0, ps0 += p;
+			}
+			if (ps0 < pend) {
+				*ps0 |= masks0, ps0 += p;
+			}
 
-		while ((int)offset < 0) {
-			we = wdata[we.WheelIndex];
-			offset += we.Correct + we.NextMultiple * wi;
+			if (ps1 < pmin) {
+				pmin = ps1; nwi = i;
+			}
+			if (ps0 < pmin) {
+				pmin = ps0; nwi = (i + 7) % 8;
+			}
 		}
-		pwheel ++->Si = offset << SI_BIT | we.WheelIndex;
+		pwheel ++->Si = ((pmin - pend) << SI_BIT) | nwa[nwi];
 	}
 
 	return pwheel;
@@ -979,7 +991,7 @@ static void eratSieveMedium(uchar bitarray[], const uint64 start, const uint sie
 	WheelPrime* pwheel = MediumSieve + wmi;
 
 #if W30
-	uint minwp = MIN(maxp, sieve_byte * 40 / 100);
+	uint minwp = MIN(maxp, sieve_byte * 9 / 10);
 	minwp = (minwp / WHEEL << SI_BIT) + WHEEL_INIT[minwp % WHEEL].PrimeIndex;
 	pwheel = sieveMediumW30(bitarray, sieve_byte, minwp, pwheel);
 #endif
@@ -1241,8 +1253,8 @@ static int64 pi(uchar* bitarray, uint64 start, uint64 end, Cmd* cmd)
 	start -= align210;
 
 	if (++end == 0) end --; //watch overflow if end = 2^64-1
-
-	double lge = end * log(end), lgs = start * log(start + 10);
+ 	//pi(n) ~= n/log(n), complexty ~= n*log(log(n)), replaced by n*log(n) more accurate
+	double lge = end * log(end), lgs = start * log(start + 1);
 	double pie = PI(end, 1.2), pis = PI(start, 1.2);
 
 	for (uint si = 0, sieve_size = Config.SieveSize * WHEEL30; start < end; start += sieve_size) {
@@ -1260,7 +1272,7 @@ static int64 pi(uchar* bitarray, uint64 start, uint64 end, Cmd* cmd)
 		primes += segmentProcessed(bitarray, start, bytes, cmd);
 #if 1
 		if ((si ++ & Config.Progress) == Config.Progress - 1) {
-			const uint64 cur = start + sieve_size;
+			const double cur = start + sieve_size;
 			double lgc = cur * log(cur), pic = PI(cur, 1.2);
 			double tratio = 100.0 * (lgc - lgs) / (lge - lgs);
 			double pratio = 100.0 * (pic - pis) / (pie - pis);
@@ -1308,7 +1320,7 @@ static void printResult(const uint64 start, const uint64 end, uint64 primes)
 	if (end + 1 == 0)
 		sprintf(endbuff, "2^64");
 
-	const int64 range = end - start;
+	const uint64 range = end - start;
 	if (range > 10000)
 		convertSci(range, rangebuff);
 
@@ -1334,7 +1346,7 @@ static void printResult(const uint64 start, const uint64 end, uint64 primes)
 		if (begbuff[0] == 0)
 			sprintf(begbuff, "%llu", start);
 		if (range < start / 10 && endbuff[0] == 0)
-			sprintf(endbuff, "+%lld", range);
+			sprintf(endbuff, "+%llu", range);
 		else if (endbuff[0] == 0)
 			sprintf(endbuff, "%llu", end);
 		sprintf(buff, "%s,%s", begbuff, endbuff);
@@ -1617,7 +1629,7 @@ static void fixRangeTest(uint64 lowerBound, const int64 range, uint64 Ret)
 
 		primes += doSieve(lowerBound, end - 1);
 		if (lowerBound % 4 == 0)
-		printf("chunk: %.2f%%\r", 100 - (int64)(upperBound - lowerBound) * 100.0 / range);
+		printf("chunk: %.2f%%\r", 100 - (int64)(upperBound - lowerBound) * 100.0 / range), fflush(stdout);
 		lowerBound = end;
 	}
 	if (lowerBound + 1 == 0)
@@ -1680,15 +1692,14 @@ static void startBenchmark(int flag)
 	const uint64 pow11 = ipow(10, 11);
 	const uint64 pow12 = pow11 * 10, pow9 = pow11 / 100;
 
-	const uint64 RangeData[][3] =
+	const uint64 rangeData[][3] =
 	{
 		{ipow(01, 11), pow11, 4118054813ul},
+		{-1 - pow11,   pow11, 2254197466ul},
 		{ipow(10, 17), pow11, 2554712095ul},
 		{ipow(10, 12), pow11, 3612791400ul},
 		{ipow(10, 13), pow11, 3340141707ul},
 		{ipow(01, 12), pow12, pow9 * 37 + 607912018},
-
-		{-1 - pow11,   pow11, 2254197466ul},
 		{ipow(10, 14), pow12, pow9 * 31 + 16203073},
 		{ipow(10, 15), pow12, pow9 * 28 + 952450479},
 		{ipow(10, 16), pow12, pow9 * 27 + 143405794},
@@ -1699,8 +1710,8 @@ static void startBenchmark(int flag)
 		{-1 - pow12*10, pow12*10, pow9 * 225 + 420940155},
 	};
 
-	for (int k = 0; k < sizeof(RangeData) / sizeof(RangeData[0]); k ++) {
-		fixRangeTest(RangeData[k][0], RangeData[k][1], RangeData[k][2]);
+	for (int k = 0; k < sizeof(rangeData) / sizeof(rangeData[0]); k ++) {
+		fixRangeTest(rangeData[k][0], rangeData[k][1], rangeData[k][2]);
 	}
 
 	Config.Flag |= PRINT_RET;
@@ -2001,7 +2012,7 @@ int main(int argc, char* argv[])
 			setLevelSegs(3, i); setLevelSegs(2, rand() % 6 + 2), setLevelSegs(1, rand() % 6 + 1);
 			const uint64 r1 = doSieve(start, end, NULL);
 			char cmd2[100] = {0};
-			sprintf(cmd2, "  %lld %lld %lld s%d L%d1 L%d2 L%d3",
+			sprintf(cmd2, "  %llu %llu %llu s%d L%d1 L%d2 L%d3",
 					r1, start, end, (sieve_size / WHEEL30) >> 10, Threshold.L1Segs, Threshold.L2Segs, Threshold.Msegs);
 
 			setSieveSize(2048);
@@ -2010,7 +2021,7 @@ int main(int argc, char* argv[])
 			if (r1 != r2) {
 				puts(cmd);
 				puts(cmd2);
-				printf("   %lld != %lld, %lld %lld s%d L%d1 L%d2 L%d3\n",
+				printf("   %llu != %llu, %llu %llu s%d L%d1 L%d2 L%d3\n",
 						r1, r2, start, end, Config.SieveSize >> 10, Threshold.L1Segs, Threshold.L2Segs, Threshold.Msegs);
 			}
 		}
@@ -2018,8 +2029,8 @@ int main(int argc, char* argv[])
 	}}
 #endif
 
-	executeCmd("e9 h;e12 e10; e14 e10");
-	executeCmd("e16 e9;e18 e9;");
+	executeCmd("e9 h;e12 e10; e14 e10 s2");
+	executeCmd("s1 e16 e9;e18 e9;");
 
 	while (true) {
 		char ccmd[257];
