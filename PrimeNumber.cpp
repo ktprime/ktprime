@@ -1,5 +1,5 @@
 /*Fast Single-thread segmented sieve of Eratosthenes prime number n < 2^64 ***/
-const char* Benchmark =
+static const char* Benchmark =
 "g++ -DSIEVE_SIZE=2048 -DFSL1 -DFDIV -march=native -funroll-loops -O3 -s -pipe\n"
 "Windows 10 x64               i3-350M,i5-3470,i7-7500u,i7-6700,r7-1700\n"
 "pi(0,    1e10) = 455052511    3.10   1.84    1.55     1.40    1.65\n"
@@ -22,6 +22,18 @@ const char* Benchmark =
 "pi(1e18, 1e12) = 24127637783  1505   760     622      560     640\n"
 "pi(1e19, 1e12) = 22857444126  1700   830     702      610     665\n";
 
+static const char* Help = "\
+	[B: Benchmark (0 - 12, 0 - 40)]\n\
+	[D: D[T, R] dump time and result]\n\
+	[M: Progress of calculating (0 - 20)]\n\
+	[C: Cpu L1/L2 data cache size (L1:16-64, L2:256-4096)k]\n\
+	[S: Set the sieve size (32 - 4096)k]\n\
+	[L: Set sieve cache segs L(2-12)1, L(2-8)2 L(2-6)3]\n\
+	[I: Info of programming]\n\
+	[P: Print prime in [start, end]]\n\n\
+Example:\n\
+	1e16 10^10 s1024 c321 c2562";
+
 #include <ctype.h>
 #include <math.h>
 #include <memory.h>
@@ -35,9 +47,75 @@ const char* Benchmark =
 #include <intrin.h>
 #endif
 
-//const
+#if __x86_64__ || __amd64__ || _M_X64 || __amd64 || __x86_64
+	# define X86_64       1
+#endif
+
+#if _M_IX86 | __i386 | __i386__ | _X86_
+	# define X86          1
+#endif
+
+#if _WIN32 && _MSC_VER < 1500
+	typedef unsigned __int64 uint64;
+	typedef __int64 int64;
+#else
+	typedef unsigned long long uint64;
+	typedef long long int64;
+#endif
+
+typedef unsigned int uint;
+typedef unsigned char uchar;
+typedef unsigned short ushort;
+
+#if X86_64 && _MSC_VER
+	# define ASM_X86      0
+	#ifndef __clang_version__
+	# define BIT_SCANF    1
+	#endif
+#elif X86_64 || X86
+	# define ASM_X86      1
+	# define BIT_SCANF    1
+#else
+	# define ASM_X86      0
+	# define BIT_SCANF    0
+#endif
+
+#if BIT_SCANF == 0
+	#define PRIME_OFFSET(mask) Lsb[mask]
+	typedef ushort stype;
+#else
+	#define PRIME_OFFSET(mask) Pattern30[bitScanForward(mask)]
+	#if X86_64
+	typedef uint64 stype;
+	#else
+	typedef uint stype;
+	#endif
+#endif
+
+#ifndef W210 //big sieve wheel
+	# define WHEEL        WHEEL30
+	# define WHEEL_DATA   WheelData30
+	# define WHEEL_INIT   WheelInit30
+	# define WHEEL_FIRST  WheelFirst30
+#else
+	# define WHEEL        WHEEL210
+	# define WHEEL_DATA   WheelData210
+	# define WHEEL_INIT   WheelInit210
+	# define WHEEL_FIRST  WheelFirst210
+#endif
+
+#define MIN(a, b)         (a < b ? a : b)
+#define MAX(a, b)         (a > b ? a : b)
+
 enum ECONST
 {
+	ERAT_SMALL    = 2, //4 - 16
+	ERAT_MEDIUM   = 2, //2 - 6
+
+#ifndef ERAT_BIG
+# define ERAT_BIG   5 //2 - 6
+#endif
+
 	WHEEL30       = 30,
 	WHEEL210      = 210,
 	PRIME_PRODUCT = 210 * 11 * 13 * 17 * 19,
@@ -59,14 +137,7 @@ enum ECONST
 #ifndef SIEVE_SIZE
 	SIEVE_SIZE    = 2048,
 #endif
-
-	ERAT_SMALL    = 2, //4 - 16
-	ERAT_MEDIUM   = 2, //2 - 6
 };
-
-#ifndef ERAT_BIG
-# define ERAT_BIG   5 //2 - 6
-#endif
 
 enum EBUCKET
 {
@@ -93,67 +164,9 @@ enum EBITMASK
 	BIT4 = 1 << 4, BIT5 = 1 << 5, BIT6 = 1 << 6, BIT7 = 1 << 7,
 };
 
-#if __x86_64__ || __amd64__ || _M_X64 || __amd64 || __x86_64
-	# define X86_64       1
-#endif
-
-#if _M_IX86 | __i386 | __i386__ | _X86_
-	# define X86          1
-#endif
-
-#if X86_64 && _MSC_VER
-	# define ASM_X86      0
-	# define BIT_SCANF    1
-#elif X86_64 || X86
-	# define ASM_X86      1
-	# define BIT_SCANF    1
-#else
-	# define ASM_X86      0
-	# define BIT_SCANF    0
-#endif
-
-#if _WIN32 && _MSC_VER < 1500
-	typedef unsigned __int64 uint64;
-	typedef __int64 int64;
-#else
-	typedef unsigned long long uint64;
-	typedef long long int64;
-#endif
-
-typedef unsigned int uint;
-typedef unsigned char uchar;
-typedef unsigned short ushort;
-
-#define MIN(a, b)         (a < b ? a : b)
-#define MAX(a, b)         (a > b ? a : b)
-
-#if BIT_SCANF == 0
-	#define PRIME_OFFSET(mask) Lsb[mask]
-	typedef ushort stype;
-#else
-	#define PRIME_OFFSET(mask) Pattern30[bitScanForward(mask)]
-#if X86_64
-	typedef uint64 stype;
-#else
-	typedef uint stype;
-#endif
-#endif
-
-static const char* Help = "\
-	[B: Benchmark (0 - 12, 0 - 40)]\n\
-	[D: D[T, R] dump time and result]\n\
-	[M: Progress of calculating (0 - 20)]\n\
-	[C: Cpu L1/L2 data cache size (L1:16-64, L2:256-4096)k]\n\
-	[S: Set the sieve size (32 - 4096)k]\n\
-	[L: Set sieve cache segs L(2-12)1, L(2-8)2 L(2-6)3]\n\
-	[I: Info of programming]\n\
-	[P: Print prime in [start, end]]\n\n\
-Example:\n\
-	1e16 10^10 s1024 c321 c2562";
-
-static struct _Threshold
+struct _Threshold
 {
-	uint L1Size; //cpu L1/L2 cache size
+	uint L1Size;
 	uint L2Size;
 
 	uint L1Maxp;
@@ -170,14 +183,6 @@ static struct _Threshold
 	uint L3Maxp;
 	uint L3Index;
 	uint64 BucketStart; //min bucket start
-}
-Threshold =
-{
-	32 << 10, L2_DCACHE_SIZE << 10,
-	(32 << 10) / ERAT_SMALL, 0, ERAT_SMALL,
-	(L2_DCACHE_SIZE << 10) / ERAT_MEDIUM, 0, ERAT_MEDIUM,
-	SIEVE_SIZE * (WHEEL30 << 10) / ERAT_BIG, ERAT_BIG,
-	100000000,
 };
 
 struct _Config
@@ -187,11 +192,25 @@ struct _Config
 	uint Flag;
 };
 
-struct _Config Config =
+struct WheelElement
 {
-	SIEVE_SIZE << 10,
-	(1 << 6) - 1,
-	PRINT_RET | PRINT_TIME,
+	char WheelIndex;
+	uchar MaskBit;
+	uchar Correct;
+	uchar Multiple;
+};
+
+struct WheelInit
+{
+	char WheelIndex;
+	uchar MaskBit;
+};
+
+struct _SmallPrime
+{
+	uint Prime;
+	uint Multiple;
+	uint Si;
 };
 
 struct SievingPrime
@@ -214,18 +233,6 @@ struct _BucketInfo
 	uint PoolSize;
 };
 
-static _BucketInfo BucketInfo;
-
-/**********************************
-stock pool for big sieve
-bucket.array[n]
-|----
-|3|.|----     ----------------
-|2|2| | |---> |s1->s2->...->sn|---> wheel.array(4k size)
-|1|1|.|n|     ----------------
----------       stock.list
-b1.b2.bn
-****************************/
 struct Stock
 {
 	SievingPrime* Sprime; //read only
@@ -237,79 +244,6 @@ struct _Bucket
 	SievingPrime* Sprime; //write only
 	Stock* Head; //Head->s1->s2->....->sn
 };
-
-//stock pool
-static Stock* StockHead;
-static Stock  StockCache [MAX_STOCK];
-
-//bucket and wheel pool
-static _Bucket Bucket [MAX_BUCKET];
-static SievingPrime* WheelPool [MAX_POOL];
-
-//small and medium pool
-static SievingPrime* MediumPrime;
-
-struct _SmallPrime
-{
-	uint Prime;
-	uint Multiple;
-	uint Si;
-};
-
-static _SmallPrime SmallPrime[PI_65536];
-
-//presieved with prime <= 19
-static uchar PreSieved[PRIME_PRODUCT / WHEEL30];
-
-#if BIT_SCANF == 0
-static uchar Lsb[1 << 16];
-#endif
-
-#if POPCNT == 0
-//number of bits 1 binary representation table in Range[0-2^16)
-static uchar WordNumBit1[1 << 16];
-#else
-# include <popcntintrin.h>
-#endif
-
-struct WheelElement
-{
-	char WheelIndex;
-	uchar MaskBit;
-	uchar Correct;
-	uchar Multiple;
-};
-
-struct WheelInit
-{
-	char WheelIndex;
-	uchar MaskBit;
-};
-
-static uchar Pattern30[64], Pattern210[48];
-typedef WheelElement WheelFirst;
-
-static WheelFirst WheelFirst30[WHEEL30][8];
-static WheelFirst WheelFirst210[WHEEL210][48];
-
-static WheelInit WheelInit30[WHEEL30];
-static WheelInit WheelInit210[WHEEL210];
-
-static WheelElement WheelData30[8][8];
-static WheelElement WheelData210[48][48];
-
-//medium sieve
-#ifndef W210 //fast on some cpu i7
-	# define WHEEL        WHEEL30
-	# define WHEEL_DATA   WheelData30
-	# define WHEEL_INIT   WheelInit30
-	# define WHEEL_FIRST  WheelFirst30
-#else
-	# define WHEEL        WHEEL210
-	# define WHEEL_DATA   WheelData210
-	# define WHEEL_INIT   WheelInit210
-	# define WHEEL_FIRST  WheelFirst210
-#endif
 
 //api start
 typedef void (*callback)(void* pdata, const uint64 prime);
@@ -326,6 +260,78 @@ uint64 doSieve(const uint64 start, const uint64 end, PrimeCall* pcall);
 uint setSieveSize(uint sieve_size);
 void setCacheSegs(uint level, uint cachesegs);
 void setCacheSize(uint level, uint cachecpu);
+
+////////////////thread/task data //////////////////////////////
+/**********************************
+stock pool for big sieve
+bucket.array[n]
+|----
+|3|.|----     ----------------
+|2|2| | |---> |s1->s2->...->sn|---> wheel.array(4k size)
+|1|1|.|n|     ----------------
+---------       stock.list
+b1.b2.bn
+****************************/
+
+static _BucketInfo BucketInfo;
+static Stock* StockHead;
+static Stock  StockCache [MAX_STOCK];
+
+//big/bucket wheel pool
+static _Bucket Bucket [MAX_BUCKET];
+static SievingPrime* WheelPool [MAX_POOL];
+
+//medium pool
+static SievingPrime* MediumPrime;
+
+//small  pool
+static _SmallPrime SmallPrime[PI_65536];
+
+/*****
+init next cache data
+*/
+//presieved with prime <= 19
+static uchar PreSieved[PRIME_PRODUCT / WHEEL30];
+
+#if BIT_SCANF == 0
+static uchar Lsb[1 << 16];
+#endif
+
+#if POPCNT == 0
+//number of bits 1 binary representation table in Range[0-2^16)
+static uchar WordNumBit1[1 << 16];
+#else
+# include <popcntintrin.h>
+#endif
+
+//cpu data cache
+static struct _Threshold Threshold =
+{
+	32 << 10, L2_DCACHE_SIZE << 10,
+	(32 << 10) / ERAT_SMALL, 0, ERAT_SMALL,
+	(L2_DCACHE_SIZE << 10) / ERAT_MEDIUM, 0, ERAT_MEDIUM,
+	SIEVE_SIZE * (WHEEL30 << 10) / ERAT_BIG, ERAT_BIG,
+	100000000,
+};
+
+static struct _Config Config =
+{
+	SIEVE_SIZE << 10,
+	(1 << 6) - 1,
+	PRINT_RET | PRINT_TIME,
+};
+
+typedef WheelElement WheelFirst;
+
+static uchar Pattern30[64], Pattern210[48];
+static WheelFirst WheelFirst30[WHEEL30][8];
+static WheelFirst WheelFirst210[WHEEL210][48];
+
+static WheelInit WheelInit30[WHEEL30];
+static WheelInit WheelInit210[WHEEL210];
+
+static WheelElement WheelData30[8][8];
+static WheelElement WheelData210[48][48];
 
 //code start
 static int64 getTime()
@@ -1055,7 +1061,8 @@ static void eratSieveBig(uchar bitarray[], const uint sieve_size)
 		Stock* pnext = pStock->Next; pStock->Next = StockHead; StockHead = pStock;
 		SievingPrime* pSprime = StockHead->Sprime;
 		while (loops) {
-			pSprime += crossBig2(bitarray, sieve_size, pSprime);
+			crossBig2(bitarray, sieve_size, pSprime);
+			pSprime += 2;
 			loops -= 2;
 		}
 		BucketInfo.CurStock ++;
@@ -1208,7 +1215,7 @@ static int segmentedSieve2(uchar bitarray[], const uint start, const uint sieve_
 static void setL1Index()
 {
 	if (Threshold.L1Maxp > 65521)
-		Threshold.L1Maxp = 65521; //the bigest prime % 210 = 1 and < 2^16
+		Threshold.L1Maxp = 65521; //the bigest prime % WHEEL210 = 1 and < 2^16
 	for (uint p = 0, j = 300; ; p = SmallPrime[++j].Prime) {
 		if (p >= Threshold.L1Maxp && p % WHEEL210 == 1) {
 			Threshold.L1Index = j;
@@ -1682,6 +1689,8 @@ static void cpuidInfo(int cpuinfo[4], int id)
 		:"=a"(cpuinfo[0]),"=b"(cpuinfo[1]),"=c"(cpuinfo[2]),"=d"(cpuinfo[3])
 		:"a"(id)
 	);
+#elif __clang_version__
+
 #endif
 }
 
@@ -1727,7 +1736,9 @@ void initPrime(int sieve_size)
 {
 	if (SmallPrime[2].Prime == 0) {
 #if X86_64 || X86
+#ifndef __clang_version__
 		getCpuInfo();
+#endif
 #endif
 		eratoSimple();
 		initBitTable();
@@ -1855,7 +1866,7 @@ void printInfo()
 	puts(sepator);
 	puts("Fast implementation of the segmented sieve of Eratosthenes 2^64\n"
 	"Copyright (C) by 2010-2018 Huang Yuanbing 22738078@qq.com/bailuzhou@163.com\n"
-	"Compile: g++ -DSIEVE_SIZE=2048 -DFSL1 -DFDIV -march=native -funroll-loops -O3 -s -pipe PrimeNumber.cpp\n");
+	"Compile: g++ -DSIEVE_SIZE=2048 -DFSL1 -DFDIV -march=native -funroll-loops -O3 -s -pipe PrimeNumber.cpp -o prime\n");
 
 	char buff[500];
 	char* info = buff;
@@ -2152,14 +2163,14 @@ int main(int argc, char* argv[])
 	executeCmd("e16 e10;");
 #else
 	if (Threshold.L2Size == 512 << 10) executeCmd("L41 L42;");
-	executeCmd("1e12 1e10; e14 e10; e10+0");
+//	executeCmd("1e12 1e10; e14 e10 s2; s1 e10+0");
 	executeCmd("10^12 1e9; e16 e9; e18 e9*1; i 0-e9 0-1");
 #endif
 
 	while (true) {
 		char ccmd[257];
 		printf(">> ");
-		if (fgets(ccmd, 100, stdin) || !executeCmd(ccmd))
+		if (!fgets(ccmd, 100, stdin) || !executeCmd(ccmd))
 			break;
 	}
 
