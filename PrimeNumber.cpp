@@ -567,7 +567,7 @@ inline static uint bitScanForward(const stype n)
 		mov index, eax
 	}
 	#endif
-	return index;
+	return (uint)index;
 #elif __GNUC__
 	return __builtin_ffsll(n) - 1;
 	#if X86_64
@@ -575,13 +575,13 @@ inline static uint bitScanForward(const stype n)
 	return __builtin_ffsl(n) - 1;
 	#endif
 #else
-	stype pos = 0;
+	stype index;
 	#if X86_64
-	__asm__ ("bsfq %1, %0" : "=r" (pos) : "rm" (n));
-	return (uint)pos;
+	__asm__ ("bsfq %1, %0" : "=r" (index) : "rm" (n));
+	return (uint)index;
 #else
-	__asm__ ("bsfl %1, %0\n" : "=r" (pos) : "rm" (n) : "cc");
-	return pos;
+	__asm__ ("bsfl %1, %0\n" : "=r" (index) : "rm" (n) : "cc");
+	return index;
 	#endif
 #endif
 }
@@ -664,13 +664,17 @@ static uint countBit0sArray(const uint64 bitarray[], const uint bytes)
 //////////////////////// core code  //////////////////////////////////
 static void allocWheelBlock(const uint blocks)
 {
-	SievePrime *pSprime = (SievePrime*) malloc((MEM_BLOCK + 1) * MEM_WHEEL);
+#if 0
+	SievePrime *pSprime = (SievePrime*)_aligned_malloc(MEM_BLOCK * MEM_WHEEL, MEM_WHEEL);
 	WheelPool[BucketInfo.PoolSize ++] = pSprime;
+#else
+	SievePrime *pSprime = (SievePrime*)malloc((MEM_BLOCK + 1) * MEM_WHEEL);
+	WheelPool[BucketInfo.PoolSize++] = pSprime;
+	pSprime = (SievePrime*)((size_t)pSprime + MEM_WHEEL - (size_t)pSprime % MEM_WHEEL);
+#endif
 	//assert (BucketInfo.PoolSize < sizeof(WheelPool) / sizeof(WheelPool[0]));
 	//assert (BucketInfo.StockSize + blocks < sizeof(StockCache) / sizeof(StockCache[0]));
 
-	//align by MEM_WHEEL
-	pSprime = (SievePrime*)((size_t)pSprime + MEM_WHEEL - (size_t)pSprime % MEM_WHEEL);
 	Stock* pStock = StockCache + BucketInfo.StockSize;
 	for (uint i = 0; i < MEM_BLOCK; i ++) {
 		pStock->Sprime = pSprime + WHEEL_SIZE * i;
@@ -711,7 +715,6 @@ static void setWheelSmall(const uint64 start, const uint maxp)
 		if (p2 > sstart && p2 > sstart + l1_size) //overflow
 			sstart += (p2 - sstart) / l1_size * l1_size;
 
-		//assert(p2 < sstart);
 		uint sieve_index = p - (uint)(sstart % p);
 		if (p2 > sstart)
 			sieve_index = (uint)(p2 - sstart);
@@ -993,10 +996,10 @@ static int crossMedium2(uchar bitarray[], const uint sieve_byte, SievePrime* pSp
 	WheelElement* wd2 = WHEEL_DATA[sp2 % (1 << SI_BIT)];
 	WheelElement we2; we2.WheelIndex = si2 % (1 << SI_BIT);
 
-	while ((int)offset1 < 0) {
-		MEDIUM_SET(1);
-		if ((int)offset2 >= 0) break;
+	while ((int)offset2 < 0) {
 		MEDIUM_SET(2);
+		if ((int)offset1 >= 0) break;
+		MEDIUM_SET(1);
 	}
 
 	while ((int)offset1 < 0) { MEDIUM_SET(1); } pSprime[0].Si = offset1 << SI_BIT | we1.WheelIndex;
@@ -1169,7 +1172,7 @@ static void eratSieveMedium1(uchar bitarray[], const uint64 start, const uint si
 	SievePrime* pSprime = MediumPrime + spi;
 
 #ifndef W210
-	const uint minsp = MIN(maxp, (sieve_byte * 80 / 100)) / 30 << SI_BIT;
+	const uint minsp = MIN(maxp, (sieve_byte * 100 / 100)) / 30 << SI_BIT;
 	pSprime = crossMediumW30(bitarray, sieve_byte, minsp, pSprime);
 #endif
 
@@ -1254,7 +1257,7 @@ static int segmentProcessed(uchar bitarray[], const uint64 start, uint bytes, Pr
 {
 	//pack last qword
 	if (bytes % sizeof(uint64)) {
-		*(uint64*)(bitarray + bytes) = ~0;
+		memset(bitarray + bytes, ~0, sizeof(uint64));
 		bytes += sizeof(uint64) - bytes % sizeof(uint64);
 	}
 
@@ -1298,9 +1301,9 @@ static int segmentedSieve(uchar bitarray[], const uint64 start, const uint sieve
 
 	//copy last L1 seg to the first seg
 	const uint copy_from = Config.SieveSize;
-	for (uint i = 0; i < l1_maxp; i += sizeof(uint64)) {
-		uint64* pc = (uint64*)(bitarray + i + copy_from);
-		*(uint64*)(bitarray + i) |= *pc; *pc = 0;
+	for (uint i = 0; i < l1_maxp; i += sizeof(uint)) {
+		uint* pc = (uint*)(bitarray + i + copy_from);
+		*(uint*)(bitarray + i) |= *pc; *pc = 0;
 	}
 
 	for (uint offset = 0, l2size = Threshold.L2Size * WHEEL30; offset < sieve_size; offset += l2size) {
@@ -1337,9 +1340,9 @@ static int segmentedSieve2(uchar bitarray[], const uint start, const uint sieve_
 #if FSL1
 	const uint copy_from = L2_DCACHE_SIZE << 10;
 	if (sieve_size <= copy_from * WHEEL30 && bcopy) {
-		for (uint i = 0; i < l1_maxp; i += sizeof(uint64)) {
-			uint64* pc = (uint64*)(bitarray + i + copy_from);
-			*(uint64*)(bitarray + i) |= *pc; *pc = 0;
+		for (uint i = 0; i < l1_maxp; i += sizeof(uint)) {
+			uint* pc = (uint*)(bitarray + i + copy_from);
+			*(uint*)(bitarray + i) |= *pc; *pc = 0;
 		}
 	}
 	eratSieveL1(bitarray, start, sieve_size);
@@ -1382,7 +1385,7 @@ static int segmentedSieve2(uchar bitarray[], const uint start, const uint sieve_
 
 	uint bytes = sieve_size / WHEEL30 + (7 + WheelInit30[sieve_size % WHEEL30].WheelIndex) / 8;
 	if (bytes % sizeof(uint64)) {
-		*(uint64*)(bitarray + bytes) = ~0;
+		memset(bitarray + bytes, ~0, sizeof(uint64));
 		bytes += sizeof(uint64) - bytes % sizeof(uint64);
 	}
 
@@ -1990,7 +1993,7 @@ static int parseCmd(char params[][60])
 
 		switch (c)
 		{
-//			case 'H': puts(Benchmark); if (n) puts(Help);   break;
+			case 'H': puts(Benchmark); if (n) puts(Help);   break;
 			case 'S': setSieveSize(cdata);                  break;
 			case 'C': setCacheSize(cdata % 10, cdata / 10); break;
 			case 'L': setCacheSegs(cdata % 10, cdata / 10); break;
@@ -2194,9 +2197,9 @@ int main(int argc, char* argv[])
 	executeCmd("e16 e10;");
 #else
 	if (Threshold.L2Size == 512 << 10 || Config.SieveSize == 4096 << 10)
-		executeCmd("L41 L42;");
+		executeCmd("L41 L42 c321 i;");
 	executeCmd("1e12 1e10; e14 e10 ;  e10+0");
-	executeCmd("10^12 1e9; e16 e9; e18 e9*1; i 0-e9 0-1");
+//	executeCmd("10^12 1e9; e16 e9; e18 e9*1; i 0-e9 0-1");
 #endif
 
 	while (true) {
