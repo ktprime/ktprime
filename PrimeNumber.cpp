@@ -4,18 +4,18 @@ static const char* Benchmark =
 "Windows 10 x64               i3-350M,i5-3470,i7-7500u,i7-6700,r7-1700\n"
 "Pi(0,    1e10) = 455052511    3.10   1.84    1.55     1.40    1.65\n"
 "Pi(1e11, 1e10) = 394050419    4.35   2.50    2.02     1.83    2.00\n"
-"Pi(1e12, 1e10) = 361840208    5.40   3.00    2.40     2.14    2.30\n"
-"Pi(1e13, 1e10) = 334067230    6.60   3.50    2.85     2.50    2.70\n"
+"Pi(1e12, 1e10) = 361840208    5.30   3.00    2.40     2.14    2.25\n"
+"Pi(1e13, 1e10) = 334067230    6.52   3.50    2.85     2.50    2.67\n"
 "Pi(1e14, 1e10) = 310208140    7.90   4.20    3.50     3.00    3.20\n"
-"Pi(1e15, 1e10) = 289531946    10.2   5.10    4.32     3.67    3.91\n"
-"Pi(1e16, 1e10) = 271425366    12.1   6.10    5.11     4.34    4.75\n"
-"Pi(1e17, 1e10) = 255481287    14.4   7.09    5.95     5.17    5.75\n"
-"Pi(1e18, 1e10) = 241272176    17.5   8.58    7.17     6.25    7.16\n"
-"Pi(1e19, 1e10) = 228568014    24.0   11.6    9.86     8.64    9.82\n"
-"Pi(0-1e9,10^9) = 22537866     8.15   4.28    3.92     3.42    3.82\n"
+"Pi(1e15, 1e10) = 289531946    10.1   5.10    4.32     3.67    3.91\n"
+"Pi(1e16, 1e10) = 271425366    12.1   6.10    5.11     4.34    4.73\n"
+"Pi(1e17, 1e10) = 255481287    14.4   7.09    5.95     5.17    5.63\n"
+"Pi(1e18, 1e10) = 241272176    17.5   8.58    7.17     6.25    6.88\n"
+"Pi(1e19, 1e10) = 228568014    24.0   11.6    9.86     8.64    9.50\n"
+"Pi(0-1e9,10^9) = 22537866     8.15   4.28    3.92     3.42    3.64\n"
 "Pi(1e18, 10^6) = 24280        0.65   0.46    0.34     0.52    0.60\n"
-"Pi(1e18, 10^8) = 2414886      1.30   0.81    0.70     0.64    0.80\n"
-"Pi(1e18, 10^9) = 24217085     3.58   1.80    1.58     1.40    1.55\n"
+"Pi(1e18, 10^8) = 2414886      1.30   0.81    0.70     0.64    0.70\n"
+"Pi(1e18, 10^9) = 24217085     3.58   1.80    1.58     1.40    1.50\n"
 "Pi(0,    1e12) = 37607912018  500    270     224      200     220\n"
 "Pi(1e14, 1e12) = 31016203073  790    420     354      295     320\n"
 "Pi(1e16, 1e12) = 27143405794  1200   600     512      430     485\n"
@@ -61,9 +61,9 @@ typedef unsigned int uint;
 typedef unsigned char uchar;
 typedef unsigned short ushort;
 
-#if (X86_64 || X86) && (__GNUC__ || _MSC_VER || __TINYC__)
+#if (X86_64 || X86) && (__GNUC__ || _MSC_VER || __clang__ || __TINYC__)
 	# define BIT_SCANF    1
-	#if (__GNUC__ || __TINYC__) || (_MSC_VER && X86)
+	#if X86 || _MSC_VER == 0
 		# define ASM_X86  1
 	#endif
 #endif
@@ -296,8 +296,6 @@ static uchar Lsb[1 << 16];
 #if POPCNT == 0
 //number of bits 1 binary representation table in Range[0-2^16)
 static uchar WordNumBit1[1 << 16];
-#elif _MSC_VER >= 1400 //vc2005 - 2019
-
 #elif __GNUC__
 # include <popcntintrin.h>
 #endif
@@ -350,7 +348,7 @@ static struct Config_ Config =
 
 ////////////////basic func //////////////////////////////
 
-//the simple sieve of Eratosthenes implementated by bit packing
+//the simple sieve of Eratosthenes p < 16
 static int eratoSimple()
 {
 	int primes = 1;
@@ -511,8 +509,8 @@ static int64 getTime()
 {
 #ifdef _WIN32
 	FILETIME ptime[4] = {0};
-	GetProcessTimes(GetCurrentProcess(), &ptime[0], &ptime[1], &ptime[2], &ptime[3]);
-	return (((uint64)(ptime[2].dwHighDateTime + ptime[3].dwHighDateTime) << 32) + (ptime[2].dwLowDateTime + ptime[3].dwLowDateTime)) / 10000;
+	GetThreadTimes(GetCurrentThread(), &ptime[0], &ptime[1], &ptime[2], &ptime[3]);
+	return (/*((uint64)(ptime[2].dwHighDateTime + ptime[3].dwHighDateTime) << 32) +*/ ptime[2].dwLowDateTime + ptime[3].dwLowDateTime) / 10000;
 	//return clock();
 #elif __linux__
 	struct rusage rup;
@@ -538,7 +536,7 @@ static int ilog(uint64 x, const uint n)
 }
 
 //x^n < 2^64, n < 64
-static uint64 ipow(const uint x, uint n)
+static uint64 mpow(const uint x, uint n)
 {
 	uint64 pown = 1;
 	while (n --)
@@ -574,9 +572,11 @@ inline static uint bitScanForward(const stype n)
 	#endif
 #elif __GNUC__
 	#if X86_64
-	uint index = __builtin_ffsll(n) - 1;
+//	uint index = __builtin_ffsll(n) - 1;
+	uint index = __builtin_ctzll(n);
 	#else
-	uint index = __builtin_ffsl(n) - 1;
+	//uint index = __builtin_ffsl(n) - 1;
+	uint index = __builtin_ctzl(n);
 	#endif
 #elif ASM_X86
 	stype index;
@@ -639,11 +639,11 @@ static uint64 atoint64(const char* str)
 
 	if (*str && isdigit(str[1])) {
 		if (str[0] == '^') {
-			ret = ipow((uint)ret, atoi(str + 1));
+			ret = mpow((uint)ret, atoi(str + 1));
 		} else if (str[0] == 'e' || str[0] == 'E') {
 			if (ret == 0)
 				ret = 1;
-			ret *= ipow(10, atoi(str + 1));
+			ret *= mpow(10, atoi(str + 1));
 		}
 	}
 
@@ -669,7 +669,11 @@ static uint countBit0sArray(uint64 bitarray[], const uint bytes)
 	while (loops -- > 0) {
 		const uint64 qw = *bitarray++;
 #if POPCNT
+#if __GNUC__
+		bit2s += __builtin_popcountll(qw);
+#else
 		bit2s += _mm_popcnt_u64(qw);
+#endif
 #else
 		const uint hig = (uint)(qw >> 32);
 		const uint low = (uint)(qw);
@@ -1473,7 +1477,7 @@ uint setSieveSize(uint sieve_size)
 	} else if (sieve_size <= (MAX_SEGMENT >> 10) && sieve_size > 0) {
 		sieve_size = sieve_size << 20;
 	} else {
-		sieve_size = L2_DCACHE_SIZE << 10;
+		sieve_size = SIEVE_SIZE << 10;
 	}
 
 	return Config.SieveSize = sieve_size;
@@ -1547,7 +1551,7 @@ static int64 pi(uchar* bitarray, uint64 start, uint64 end, PrimeCall* pcall)
 static void convertSci(uint64 n, char buff[40])
 {
 	const int logn = ilog(n, 10);
-	const uint64 pown = ipow(10, logn);
+	const uint64 pown = mpow(10, logn);
 	if (n % pown == 0)
 		sprintf(buff, "%de%d", (int)(n / pown), logn);
 	else if (n % (pown / 10) == 0)
@@ -1557,7 +1561,7 @@ static void convertSci(uint64 n, char buff[40])
 	else if (n > 1000000000l) {
 		uint64 r = n - (int)(n / pown) * pown;
 		const int logr = ilog(r, 10);
-		const uint64 powr = ipow(10, logr);
+		const uint64 powr = mpow(10, logr);
 		if (r % powr == 0 && logr > 4)
 			sprintf(buff, "%de%d+%de%d", (int)(n / pown), logn, (int)(r / powr), logr);
 		else if (r % powr == 0)
@@ -1690,10 +1694,8 @@ uint64 doSieve(const uint64 start, const uint64 end, PrimeCall* pcall)
 		Threshold.BucketStart = end + 1;
 
 	//init small sieve
-	{
-		setWheelSmall(start, l1_maxp);
-		memset(bitarray + sieve_size / WHEEL30, 0, max_cache - sieve_size / WHEEL30);
-	}
+	setWheelSmall(start, l1_maxp);
+	memset(bitarray + sieve_size / WHEEL30, 0, max_cache - sieve_size / WHEEL30);
 
 	const int64 ti = getTime();
 	const int64 primes = pi(bitarray, start, end, pcall);
@@ -1743,66 +1745,170 @@ static void cpuidInfo(int cpuinfo[4], int id)
 #endif
 }
 
+static int getIntelL3info(uint *size /*, uint *assoc, uint *linesize*/)
+{
+	int regs[4];
+	int i;
+
+	cpuidInfo(regs, 0); /* Maximum Input Value */
+	int max_leaf = regs[0];
+	if (max_leaf < 2) {
+		return -1; /* no way to find L3 cache info */
+	}
+
+	cpuidInfo(regs, 1); /* Additional Information */
+	int family = (regs[0] >> 8) & 0xF;
+	int model = (regs[0] >> 4) & 0xF;
+
+	cpuidInfo(regs, 2); /* Cache and TLB Information */
+
+	regs[0] &= 0xFFFFFF00; /* least significant byte of EAX is invalid */
+	for (i = 0; i < 4; i++) {
+		if (regs[i] < 0) { /* invalid if most significant bit set */
+			regs[i] = 0;
+		}
+	}
+
+	unsigned char *descriptors = (unsigned char *) regs;
+
+	const int kb = 1024;
+	const int mb = 1024 * kb;
+
+	#define RETINFO(s, a, l) *size = (s); /* *assoc = (a); *linesize = (l);*/ return 0
+
+	int use_leaf_4 = 0;
+	for (i = 0; i < 32; i++) {
+		switch(descriptors[i]) {
+			case 0x22: RETINFO(512 * kb, 4, 64);
+			case 0x23: RETINFO(1 * mb, 8, 64);
+			case 0x25: RETINFO(2 * mb, 8, 64);
+			case 0x29: RETINFO(4 * mb, 8, 64);
+			case 0x40: RETINFO(0, 0, 0); /* no L3 cache */
+			case 0x46: RETINFO(4 * mb, 4, 64);
+			case 0x47: RETINFO(8 * mb, 8, 64);
+			case 0x49:
+					 if (family == 0x0F && model == 0x06) {
+						RETINFO(4 * mb, 16, 64);
+					 }
+					break;
+			case 0x4A: RETINFO(6 * mb, 12, 64);
+			case 0x4B: RETINFO(8 * mb, 16, 64);
+			case 0x4C: RETINFO(12 * mb, 12, 64);
+			case 0x4D: RETINFO(16 * mb, 16, 64);
+			case 0xD0: RETINFO(512 * kb, 4, 64);
+			case 0xD1: RETINFO(1 * mb, 4, 64);
+			case 0xD6: RETINFO(1 * mb, 8, 64);
+			case 0xD7: RETINFO(2 * mb, 8, 64);
+			case 0xD8: RETINFO(4 * mb, 8, 64);
+			case 0xDC: RETINFO(1 * mb + 512 * kb, 12, 64);
+			case 0xDD: RETINFO(3 * mb, 12, 64);
+			case 0xDE: RETINFO(6 * mb, 12, 64);
+			case 0xE2: RETINFO(2 * mb, 16, 64);
+			case 0xE3: RETINFO(4 * mb, 16, 64);
+			case 0xE4: RETINFO(8 * mb, 16, 64);
+			case 0xEA: RETINFO(12 * mb, 24, 64);
+			case 0xEB: RETINFO(18 * mb, 24, 64);
+			case 0xEC: RETINFO(24 * mb, 24, 64);
+			case 0xFF:
+					use_leaf_4 = 1;
+					break;
+		}
+	}
+
+	if (!use_leaf_4 || max_leaf < 4) {
+		return -1; /* failed, no L3 info found */
+	}
+
+	i = 0;
+	while(1) {
+#if _MSC_VER >= 1400
+		__cpuidex(regs, 4, i); /* Deterministic Cache Parameters */
+#else
+		cpuidInfo(regs, 4); /* Deterministic Cache Parameters */
+#endif
+		if ((regs[0] & 0x1F) == 0) {
+			return RETINFO(0, 0, 0); /* no L3 cache */
+		}
+		if (((regs[0] >> 5) & 0x7) == 3) {
+			int lsize = (regs[1] & 0xFFF) + 1;
+			int partitions = ((regs[1] >> 12) & 0x3FF) + 1;
+			int ways = ((regs[1] >> 22) & 0x3FF) + 1;
+			int sets = regs[2] + 1;
+			RETINFO(ways * partitions * lsize * sets,
+					ways, lsize);
+		}
+		i++;
+	}
+
+	return 0;
+}
+
 static int getCpuInfo()
 {
-	char cpuName[257] = {0};
-	int  (*pTmp)[4] = (int(*)[4])cpuName;
+	char vendor[0x40] = {0};
+	int (*pTmp)[4] = (int(*)[4])vendor;
 	cpuidInfo(*pTmp ++, 0x80000002);
 	cpuidInfo(*pTmp ++, 0x80000003);
 	cpuidInfo(*pTmp ++, 0x80000004);
 
-	for (int i = 0; cpuName[i]; i ++) {
-		if (cpuName[i] != ' ' || cpuName[i + 1] != ' ')
-			putchar(cpuName[i]);
+	for (int i = 0; vendor[i]; i ++) {
+		if (vendor[i] != ' ' || vendor[i + 1] != ' ')
+			putchar(vendor[i]);
 	}
 
 	int cpuinfo1[4]; cpuidInfo(cpuinfo1, 0x80000005); //work for amd cpu
 	int cpuinfo2[4]; cpuidInfo(cpuinfo2, 0x80000006);
-//	int cpuinfo3[4]; cpuidInfo(cpuinfo3, 0x2);
 
-	if (cpuinfo1[2] >> 24 >= 16) {
+	//cpu L1
+	if ((uint)cpuinfo1[2] >> 24 >= 16) { //ecx
 		Threshold.L1Size = (cpuinfo1[2] >> 24) << 10;
 		Threshold.L1Maxp = Threshold.L1Size / Config.L1Segs;
-	} else if (cpuName[0] == 'I') { //intel cpu is too complexty to get l1_size
+	} else if (strstr(vendor, "Intel") != NULL) {
 		cpuinfo1[2] = (32 << 24);
 		Threshold.L1Size = (cpuinfo1[2] >> 24) << 10;
 		Threshold.L1Maxp = Threshold.L1Size / Config.L1Segs;
 	}
 
+	//cpu L2
 	//cat /sys/devices/system/cpu/cpu0/cache/index0/size
-	if (cpuinfo2[2] >> 16 >= 64) {
+	if ((uint)cpuinfo2[2] >> 16 >= 256) { //ecx
 		Threshold.L2Size = (cpuinfo2[2] >> 16) << 10;
 		Threshold.L2Maxp = Threshold.L2Size / Config.L2Segs;
 	}
 
-	printf("  Cpu Cache L1Dsize = %dk, L2Size = %dk,l3Size = %dk\n", cpuinfo1[2] >> 24, cpuinfo2[2] >> 16, cpuinfo2[3] >> 12);
-//	printf(" %x %x %x %x", cpuinfo3[3], cpuinfo3[2], cpuinfo3[1], cpuinfo3[0]);
+	uint l3Size = 0;
+	if (strstr(vendor, "Intel") != NULL) {
+		getIntelL3info(&l3Size);
+		setSieveSize(l3Size / 2);
+	}
+	else {
+		l3Size = ((cpuinfo2[3] >> 18) * 512) << 10; //edx
+		setSieveSize(l3Size / 2);
+	}
 
+	printf(" Cpu Cache L1Dsize = %dk, L2Size/L3Size = %d/%dk\n", cpuinfo1[2] >> 24, cpuinfo2[2] >> 16, l3Size >> 10);
+//	printf(" %x %x %x %x", cpuinfo3[3], cpuinfo3[2], cpuinfo3[1], cpuinfo3[0]);
 	return Threshold.L2Size;
 }
 #endif
-
 void initPrime(int sieve_size)
 {
 	if (SmallPrime[20].Prime == 0) {
-#if X86_64 || X86
-#ifndef __clang__
+#if (X86_64 || X86) && !(__clang__ && __llvm__ == 0)
 		getCpuInfo();
-#endif
 #endif
 		eratoSimple();
 		initBitTable();
 		initWheel30();
 		initWheel210();
 		setL1Index();
-		setSieveSize(sieve_size);
 	}
 }
 
 static void fixRangeTest(uint64 lowerBound, const int64 range, uint64 Ret)
 {
 	const int llog10 = ilog(lowerBound, 10), rlog10 = ilog(range, 10);
-	const uint64 maxrange = ipow(2, 34);
+	const uint64 maxrange = mpow(2, 34);
 	uint64 primes = 0, upperBound = lowerBound + range;
 	if (upperBound + 1 == 0)
 		printf("Sieving Pi[2^64-10^%d, 2^64-1] with range 10^%d\n", rlog10, ilog(maxrange, 10));
@@ -1865,13 +1971,13 @@ static void startTest(int flag)
 	uint64 primes = 0;
 	Config.Progress = 0;
 	for (int i = 1; i <= 10; i ++) {
-		primes = doSieve(0, ipow(10, i), NULL);
+		primes = doSieve(0, mpow(10, i), NULL);
 		printf("pi(10^%2d) = %llu\n", i, primes);
 	}
 
 	srand((uint)time(0));
 	for (int j = 12; primeCounts[j]; j ++) {
-		uint64 start = ipow(10, j), end = start + ipow(2, 30);
+		uint64 start = mpow(10, j), end = start + mpow(2, 30);
 		setCacheSegs(1, rand() % 6 + 2), setCacheSegs(2, rand() % 6 + 2); setCacheSegs(3, rand() % 6 + 2);
 		primes = doSieve(start, end, NULL);
 		if (primes == primeCounts[j])
@@ -1882,22 +1988,22 @@ static void startTest(int flag)
 	printf("Time elapsed %.f sec\n\n", (getTime() - ts) / 1000.0);
 	puts("All Big tests passed SUCCESSFULLY!\nStart Rand Test");
 
-	const uint64 pow11 = ipow(10, 11);
+	const uint64 pow11 = mpow(10, 11);
 	const uint64 pow12 = pow11 * 10, pow9 = pow11 / 100;
 
 	const uint64 rangeData[][3] =
 	{
-		{ipow(01, 11), pow11, 4118054813ul},
-		{ipow(01, 12), pow12, pow9 * 37 + 607912018},
-		{ipow(10, 17), pow11, 2554712095ul},
-		{ipow(10, 12), pow11, 3612791400ul},
-		{ipow(10, 13), pow11, 3340141707ul},
-		{ipow(10, 14), pow12, pow9 * 31 + 16203073},
-		{ipow(10, 15), pow12, pow9 * 28 + 952450479},
-		{ipow(10, 16), pow12, pow9 * 27 + 143405794},
-		{ipow(10, 18), pow12, pow9 * 24 + 127637783},
-		{ipow(10, 19), pow12, pow9 * 22 + 857444126},
-		{ipow(10, 19), pow12, pow9 * 22 + 857444126},
+		{mpow(01, 11), pow11, 4118054813ul},
+		{mpow(01, 12), pow12, pow9 * 37 + 607912018},
+		{mpow(10, 17), pow11, 2554712095ul},
+		{mpow(10, 12), pow11, 3612791400ul},
+		{mpow(10, 13), pow11, 3340141707ul},
+		{mpow(10, 14), pow12, pow9 * 31 + 16203073},
+		{mpow(10, 15), pow12, pow9 * 28 + 952450479},
+		{mpow(10, 16), pow12, pow9 * 27 + 143405794},
+		{mpow(10, 18), pow12, pow9 * 24 + 127637783},
+		{mpow(10, 19), pow12, pow9 * 22 + 857444126},
+		{mpow(10, 19), pow12, pow9 * 22 + 857444126},
 		{-1 - pow11,   pow11, 2254197466ul},
 		{-1 - pow12,   pow12, pow9 * 22 + 542106206},
 //		{-1 - pow12*10, pow12*10, pow9 * 225 + 420940155},
@@ -1916,26 +2022,29 @@ static void printInfo()
 	puts(sepator);
 	puts("Fast implementation of the segmented sieve of Eratosthenes 2^64\n"
 	"Copyright (C) by 2010-2018 Huang Yuanbing 22738078@qq.com/bailuzhou@163.com\n"
-	"Compile: gcc -std=c11 -DSIEVE_SIZE=2048 -DFSL1 -DFDIV -march=native -funroll-loops -O3 -s -pipe PrimeNumber.c -o prime\n");
+	"Compile: clang/gcc -std=c11 -DSIEVE_SIZE=2048 -DFSL1 -DFDIV -march=native -funroll-loops -O3 -s -pipe PrimeNumber.c -o prime\n");
 
 	char buff[500];
 	char* info = buff;
 #ifdef __clang__
 	info += sprintf(info, "clang %s", __clang_version__); //vc/gcc/llvm
+#if __llvm__
+	info += sprintf(info, " on llvm/");
+#endif
 #endif
 
-#if __llvm__
-	info += sprintf(info, " Compiled by llvm");
-#elif _MSC_VER
-	info += sprintf(info, " Compiled by vc %d", _MSC_VER);
+#if _MSC_VER
+	info += sprintf(info, "Compiled by vc %d", _MSC_VER);
 #elif __GNUC__
-	info += sprintf(info, " Compiled by gcc %s", __VERSION__);
+	info += sprintf(info, "Compiled by gcc %d.%d.%d", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
 #elif __TINYC__
-	info += sprintf(info, " Compiled by tcc %s", __TINYC__);
+	info += sprintf(info, "Compiled by tcc %d", __TINYC__);
+#elif  __INTEL_COMPILER
+	info += sprintf(info, "Compiled by intel %d", __INTEL_COMPILER);
 #endif
 
 #if __cplusplus
-	info += sprintf(info, " c++ %d", (int)__cplusplus);
+	info += sprintf(info, " c++ version %d", (int)__cplusplus);
 #endif
 
 #if X86_64
@@ -2101,22 +2210,24 @@ static bool executeCmd(const char* cmd)
 			end = -1;
 
 		if (cmdc == 'B') {
-			if (isdigit(params[cmdi + 1][0])) {
-				int powi = atoi(params[cmdi + 1]);
-				uint64 range = powi > 12 ? ipow(2, powi) : ipow(10, powi);
-				for (int j = 11; j < 20 && powi > 0; j ++) {
-					uint64 start2 = ipow(10, j);
+			puts(Benchmark);
+			if (isdigit(params[cmdi + 2][0])) {
+				int powi = atoi(params[cmdi + 2]);
+				uint64 range = powi > 12 ? mpow(2, powi) : mpow(10, powi);
+				for (int i = 32; i < 64 && powi > 0; i ++) {
+					uint64 start2 = mpow(2, i);
 					doSieve(start2, start2 + range, NULL);
 				}
 			}
-			if (isdigit(params[cmdi + 2][0])) {
-				int powi = atoi(params[cmdi + 2]);
-				uint64 range = powi > 12 ? ipow(2, powi) : ipow(10, powi);
-				for (int i = 32; i < 64 && powi > 0; i ++) {
-					uint64 start2 = ipow(2, i);
+			if (isdigit(params[cmdi + 1][0])) {
+				int powi = atoi(params[cmdi + 1]);
+				uint64 range = powi > 12 ? mpow(2, powi) : mpow(10, powi);
+				for (int j = 11; j < 20 && powi > 0; j ++) {
+					uint64 start2 = mpow(10, j);
 					doSieve(start2, start2 + range, NULL);
 				}
-			} else
+			}
+			else
 				startTest(0);
 		} else if (cmdc == 'P') {
 #if PC
@@ -2183,7 +2294,7 @@ int main(int argc, char* argv[])
 #if 1
 		setCacheSize(1, 32 * (rand() % 1 + 1)); setCacheSize(2, L2_DCACHE_SIZE * (rand() % 2 + 1));
 		setCacheSegs(1, rand() % 6 + 1);
-		uint64 beg = (uint64)(rand() * rand()) * (uint64)(rand() * rand()) % ipow(10, 12);
+		uint64 beg = (uint64)(rand() * rand()) * (uint64)(rand() * rand()) % mpow(10, 12);
 		setSieveSize(L2_DCACHE_SIZE * rand() % 8 + L2_DCACHE_SIZE);
 		beg -= beg % 2;
 		uint64 range = (rand() % 64 + 2) * Config.SieveSize * WHEEL30;
@@ -2232,7 +2343,7 @@ int main(int argc, char* argv[])
 	executeCmd("e16 e10;");
 #else
 	if (Threshold.L2Size == 512 << 10 || Config.SieveSize == 4096 << 10)
-		executeCmd("L41 L42 c64i i 2^31;");
+		executeCmd("L41 L42 2^31;");
 	executeCmd("1e12 1e10; e14 e10 ;  e10+0");
 	executeCmd("10^12 1e9; e16 e9; e18 e9*1; i 0-e9 0-1");
 #endif
