@@ -2,8 +2,8 @@
 #include <numeric>
 #include <queue>
 #include <cstdio>
-#include <cstring>
-#include <cstdlib>
+//#include <cstring>
+//#include <cstdlib>
 #include <ctime>
 #include <cassert>
 #include <climits>
@@ -20,13 +20,13 @@ public:
 	maxheap(int maxk)
 	{
 		size = 0;
-		a = new T[2*maxk + 2];
+		a = (T*)malloc(sizeof(T) * (2*maxk + 2));
 		a[0] = INT_MAX;
 		for (int i = 0; i <= maxk; i++)
 			a[maxk + i] = INT_MIN;
 	}
 
-	~maxheap() { delete []a; }
+	~maxheap() { free(a); }
 	T top() const { return a[1]; }
 
 	void push(const T x)
@@ -243,19 +243,17 @@ void merge_sort(int a[], int n, const int k)
 	std::sort(a, a + k);
 
 	int* best_a = a + k;
-	int maxe = a[k - 1];
-	int bestn = 0;
+	int maxe = a[k - 1], bestn = 0;
 	for (int i = k; i < n; i++) {
 		if (a[i] < maxe) {
 			best_a[bestn++] = a[i];
-			if (bestn >= k) {
+			if (bestn >= k / 8) {
 				std::sort(best_a, best_a + bestn);
-				if (a[k - 1] <= best_a[0] && bestn == k) {
+//				if (a[k - 1] <= best_a[0] && bestn == k) {
 //					memcpy(a, best_a, sizeof(a[0]) * bestn);
-					a += k; best_a = a + k;
-				} else
-					std::inplace_merge(a, best_a, best_a + bestn);
-				//std::sort(a, best_a + bestn);
+//					a += k; best_a = a + k;
+//				} else
+				std::inplace_merge(a, best_a, best_a + bestn);
 				maxe = a[k - 1];
 				bestn = 0;
 			}
@@ -276,14 +274,15 @@ void merge_array(int a[], int b[], const int k)
 		return;
 	}
 
-	int i = k / 100 * 51 + 100, s = 16;
+	int i = k / 100 * 52 + 16, s = 16;
 	int j = k - 1 + s;
-	while (i > s && a[i - s] > b[j - i]) {
+
+	if (a[k / 2] > b[k / 2])
+		i = k / 2;
+	else if (j < i || a[i - s] <= b[j - i])
+		i = k - 1;
+	while (i > s && a[i - s] > b[j - i])
 		i -= s;
-	}
-
-//	printf("%d %d\n", i , k);
-
 	for (; i >= 0; i--) {
 		j = k - 1 - i;
 		if (a[i] > b[j])
@@ -311,8 +310,7 @@ void merge_sort2(int a[], int n, const int k)
 	a[-1] = INT_MIN;
 
 	int* best_a = a + k;
-	int bestn = 0;
-	int maxe = a[k - 1];
+	int maxe = a[k - 1], bestn = 0;
 	for (int i = k; i < n; i++) {
 		if (a[i] < maxe) {
 			best_a[bestn++] = a[i];
@@ -330,31 +328,79 @@ void merge_sort2(int a[], int n, const int k)
 	printf("sort-merge2     %4ld ms, a[%d] = %d, sum = %d\n", getTime() - ts, k, maxe, sum);
 }
 
-static int arr[MAXN];
+static void printInfo()
+{
+	const char* sepator =
+		"------------------------------------------------------------------------------------------------------------";
+	puts(sepator);
+	puts("Copyright (C) by 2010-2018 Huang Yuanbing 22738078@qq.com/bailuzhou@163.com\n");
+
+	char buff[500];
+	char* info = buff;
+#ifdef __clang__
+	info += sprintf(info, "clang %s", __clang_version__); //vc/gcc/llvm
+#if __llvm__
+	info += sprintf(info, " on llvm/");
+#endif
+#endif
+
+#if _MSC_VER
+	info += sprintf(info, "Compiled by vc++ %d", _MSC_VER);
+#elif __GNUC__
+	info += sprintf(info, "Compiled by gcc %d.%d.%d", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+#elif __INTEL_COMPILER
+	info += sprintf(info, "Compiled by intel c++ %d", __INTEL_COMPILER);
+#elif __TINYC__
+	info += sprintf(info, "Compiled by tcc %d", __TINYC__);
+#endif
+
+#if __cplusplus
+	info += sprintf(info, " __cplusplus = %d", (int)__cplusplus);
+#endif
+
+#if __x86_64__ || __amd64__ || _M_X64 || __amd64 || __x86_64
+	info += sprintf(info, " x86-64");
+#elif __i386__ | _M_IX86 | _X86_ | __i386
+	info += sprintf(info, " x86");
+#elif __arm64__
+	info += sprintf(info, " arm64");
+#elif __arm__
+	info += sprintf(info, " arm");
+#else
+	info += sprintf(info, " unknow");
+#endif
+
+	puts(buff);
+	puts(sepator);
+}
+
 int main(int argc, char* argv[])
 {
-	int maxn = MAXN, k = 10000, type = 0;
+	int maxn = MAXN, k = 1000, type = 0;
 	srand(time(NULL));
-
-	printf("\ncmd:topk k(<=%d) n(<=%d) type[0 rand,1 decrease,2 increase,3 wavy]\n\n", MAXK, MAXN);
+	printf("\ncmd:topk k(<=%d) n(<=%d) type[0 rand,1 decrease,2 increase,3 wavy, 4 dup]\n\n", MAXK, MAXN);
+	printInfo();
 
 	if (argc > 1) { k = atoi(argv[1]); }
 	if (argc > 2) { maxn = atoi(argv[2]); if (maxn <= 0 || maxn > MAXN) maxn = MAXN; }
 
+	int* arr = (int *)malloc(sizeof(int) * maxn);
 	assert(k < MAXN / 2 && maxn <= MAXN);
 
 	for (int j = 0; j <= 4; j ++) {
 		int s = rand(), r = 0;
 		type = j;
 		for (int i = 0; i < maxn; i++) {
+			if (i % RAND_MAX == 0)
+				srand(time(NULL));
 			if (type == 0)
-				r = rand() * rand() + rand();
+				r = (rand() << 16) + rand(); //
 			else if (type == 1)
 				r =  i;
 			else if (type == 2)
 				r = maxn - i;
 			else if (type == 3)
-				r = ((s + i) * (s - 0)) % (MAXN + 1);
+				r = ((s + i) * rand()) % (MAXN + 1);
 			else if (type == 4)
 				r = (s - i) * i;
 			if (r < 0)
@@ -363,11 +409,13 @@ int main(int argc, char* argv[])
 		}
 
 		printf("maxn = %d, topk = %d, type = %d\n", maxn, k, type);
-//		stl_nth(arr, maxn, k);
+#if __cplusplus
+		stl_nth(arr, maxn, k);
 //		bucket_sort(arr, maxn, k);
 		max_heap(arr, maxn, k);
 		stl_priqueue(arr, maxn, k);
 		stl_makeheap(arr, maxn, k);
+#endif
 		merge_sort2(arr, maxn, k);
 		merge_sort(arr, maxn, k);
 		putchar('\n'); putchar('\n');
@@ -382,4 +430,3 @@ int main(int argc, char* argv[])
 // http://rextester.com/l/cpp_online_compiler_gcc 8
 // https://www.onlinegdb.com/ 9
 // https://www.ideone.com/3rCdob
-// https://www.ideone.com/
