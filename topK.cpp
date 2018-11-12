@@ -22,7 +22,7 @@ public:
 		a[0] = INT_MAX;
 		for (int i = 0; i <= k; i++) {
 			a[k + i] = INT_MIN;
-}
+		}
 	}
 
 	~maxheap() { free(a); }
@@ -52,12 +52,12 @@ public:
 			c *= 2;
 			if (a[c + 1] > a[c]) {
 				c++;
-}
+			}
 		}
 		a[p] = x;
 	}
 
-//private:
+	//private:
 
 	T *a;
 	int size;
@@ -66,7 +66,7 @@ public:
 void rand_swap(stype a[], int n, int k)
 {
 	const int step = n / k;
-//	std::sort(a, a + k);
+	//	std::sort(a, a + k);
 	for (int i = 1; i < k; i ++) {
 #if 0
 		int h = rand() % k, t = i * step + rand() % step;
@@ -88,11 +88,11 @@ void check(const stype a[], int n, int k)
 {
 	if (a[2*n] < 0) {
 		return;
-}
+	}
 
 	for (int i = 0; i < k; i++) {
 		assert(a[i] == a[n * 2 + i]);
-}
+	}
 }
 
 #if __linux__
@@ -137,7 +137,7 @@ void stl_nth(stype a[], int n, const int k)
 
 	std::nth_element(a, a + k, a + n);
 	std::sort(a, a + k);
-//	std::partial_sort(a, a + k, a + n);
+	//	std::partial_sort(a, a + k, a + n);
 
 	stype maxe = a[k - 1];
 	stype sum =  std::accumulate(a, a + k, 0);
@@ -179,7 +179,7 @@ void stl_priqueue(stype a[], int n, const int k)
 	std::priority_queue<stype> pri_queue;
 	for (int m = 0; m < k; m++) {
 		pri_queue.push(a[m]);
-}
+	}
 
 	stype maxe = pri_queue.top();
 	for (int i = k; i < n; i++) {
@@ -210,7 +210,7 @@ void max_heap(stype a[], int n, const int k)
 	maxheap<int> my_heap(k);
 	for (int i = 0; i < k; i++) {
 		my_heap.push(a[i]);
-}
+	}
 
 	stype maxe = my_heap.top();
 	for (int j = k; j < n; j++) {
@@ -242,7 +242,7 @@ void bucket_sort(stype a[], int n, const int k)
 		bucket[bindex] ++;
 		if (bindex < 4 && mink ++ >= k) { // why
 			break;
-}
+		}
 	}
 
 	stype maxe = 1 << segment;
@@ -275,7 +275,7 @@ void swap_array(stype a[], const int k)
 {
 	for (int i = 0; i < k / 2; i ++) {
 		std::swap(a[i], a[k - i - 1]);
-}
+	}
 }
 
 void merge_sort(stype a[], int n, const int k)
@@ -292,12 +292,12 @@ void merge_sort(stype a[], int n, const int k)
 	int auxn = k / 2 + 10, bestn = 0;
 #endif
 	if (auxn > k) { auxn = k;
-}
+	}
 
 	for (int i = k; i < n; i++) {
 		if (a[i] >= maxe) {
 			continue ;
-}
+		}
 
 		best_a[bestn++] = a[i];
 		if (bestn >= auxn) {
@@ -313,7 +313,7 @@ void merge_sort(stype a[], int n, const int k)
 #endif
 			} else {
 				std::inplace_merge(a, best_a, best_a + bestn);
-}
+			}
 			maxe = a[k - 1];
 			bestn = 0;
 		}
@@ -328,8 +328,8 @@ void merge_sort(stype a[], int n, const int k)
 
 void merge_array2(stype a[], stype b[], const int k)
 {
-//	if (!std::is_sorted(b, b + k, std::greater<stype>()))
-		std::sort(b, b + k);
+	//	if (!std::is_sorted(b, b + k, std::greater<stype>()))
+	std::sort(b, b + k);
 	if (a[0] >= b[k - 1]) {
 		memcpy(a, b, sizeof(stype) * k);
 		return;
@@ -342,14 +342,14 @@ void merge_array2(stype a[], stype b[], const int k)
 		i = k / 2;
 	} else if (j < i || a[i - s] <= b[j - i]) {
 		i = k - 1;
-}
+	}
 	while (i > s && a[i - s] > b[j - i]) {
 		i -= s;
-}
+	}
 	for (j = k - 1 - i; i >= 0;) {
 		if (a[i--] <= b[j++]) {
 			break;
-}
+		}
 	}
 
 	//merge a[0, i]/b[0, j - 1]
@@ -357,7 +357,7 @@ void merge_array2(stype a[], stype b[], const int k)
 	int m = k - 1; j --;
 	while (j >= 0) {
 		a[m --] = a[i] <= b[j] ? b[j --] : a[i --];
-}
+	}
 #else
 	memcpy(a + i + 1, b, sizeof(stype) * j);
 	std::inplace_merge(a, a + i + 1, a + k);
@@ -398,7 +398,7 @@ static void printInfo()
 	const char* sepator =
 		"------------------------------------------------------------------------------------------------------------";
 	puts(sepator);
-//	puts("Copyright (C) by 2018-2020 Huang Yuanbing 22738078@qq.com/bailuzhou@163.com\n");
+	//	puts("Copyright (C) by 2018-2020 Huang Yuanbing 22738078@qq.com/bailuzhou@163.com\n");
 
 	char cbuff[500];
 	char* info = cbuff;
@@ -447,15 +447,13 @@ int main(int argc, char* argv[])
 	int n = MAXN , k = MAXN / 10000, type = 0;
 	if (argc > 1 && isdigit(argv[1][0])) {
 		int r = atoi(argv[1]);
-		if (r > 0) { k = r;
-		}
+		if (r > 0) { k = r; }
 	}
 	if (argc > 2) {
 		int r = atoi(argv[2]);
-		if (r >= -100 && r < 0) { n = MAXN / (-r);
-		} else if (r <= 100 && r > 0) { n = MAXN * r;
-		} else if (r > 0) { n = r;
-		}
+		if (r >= -100 && r < 0) { n = MAXN / (-r); }
+		else if (r <= 100 && r > 0) { n = MAXN * r; }
+		else if (r > 0) { n = r; }
 	}
 	if (k > n) {
 		k = n;
