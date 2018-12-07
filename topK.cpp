@@ -10,6 +10,7 @@
 #include <random>
 
 using stype = int;
+static int AK = 2;
 
 template<class T>
 class maxheap
@@ -286,13 +287,8 @@ void merge_sort(stype a[], int n, const int k)
 	std::sort(a, a + k);
 	stype* best_a = a + k;
 	stype maxe = a[k - 1];
-#ifdef AK
 	int auxn = k / AK + 10, bestn = 0;
-#else
-	int auxn = k / 2 + 10, bestn = 0;
-#endif
-	if (auxn > k) { auxn = k;
-	}
+	if (auxn > k) { auxn = k; }
 
 	for (int i = k; i < n; i++) {
 		if (a[i] >= maxe) {
@@ -441,20 +437,28 @@ static void printInfo()
 int main(int argc, char* argv[])
 {
 	srand(time(nullptr));
-	printf("\ncmd:topk k(<=%d) n(<=%d) [type = 0 rand,1 increase,2 wavy,3 wavy, 4,5 rand, 6 decrease]\n\n", 1000000, MAXN);
+	printf("\ncmd:topk -k(<=%d) -n(<=%d) -r(2-16) [type = 0 rand,1 increase,2 wavy,3 wavy, 4,5 rand, 6 decrease]\n\n", 1000000, MAXN);
 	printInfo();
 
-	int n = MAXN , k = MAXN / 10000, type = 0;
-	if (argc > 1 && isdigit(argv[1][0])) {
-		int r = atoi(argv[1]);
-		if (r > 0) { k = r; }
+	int n = MAXN, k = MAXN / 10000, type = 0;
+	for (int i = 1; i < argc; i++)
+	{
+		char c = argv[i][0];
+		int disgi = (c == '-') ? 1 : 0;
+		c = argv[i][disgi];
+		int r = atoi(argv[i] + disgi + 1);
+
+		if (c == 'k') {
+			if (r > 0) { k = r; }
+		} else if (c == 'n') {
+			if (r >= -100 && r < 0) { n = MAXN / (-r); }
+			else if (r <= 100 && r > 0) { n = MAXN * r; }
+			else if (r > 0) { n = r; }
+		} else if (c == 'r' && r > 0) {
+			AK = r;
+		}
 	}
-	if (argc > 2) {
-		int r = atoi(argv[2]);
-		if (r >= -100 && r < 0) { n = MAXN / (-r); }
-		else if (r <= 100 && r > 0) { n = MAXN * r; }
-		else if (r > 0) { n = r; }
-	}
+
 	if (k > n) {
 		k = n;
 	}
@@ -469,7 +473,7 @@ int main(int argc, char* argv[])
 	std::normal_distribution<> d(1 << 25, 1 << 12);
 	std::exponential_distribution<> p(0.1);
 
-	printf("n = %d, topk = %d\n", n, k);
+	printf("n = %d, topk = %d, r = %d\n", n, k, AK);
 	for (int j = 0; j <= 6; j ++) {
 		stype s = rand(), r = 0;
 		type = j;
@@ -501,8 +505,7 @@ int main(int argc, char* argv[])
 		stl_nth(arr, n, k);
 
 #if __cplusplus
-		if (sizeof(stype) <= sizeof(int)) { bucket_sort(arr, n, k);
-		}
+		if (sizeof(stype) <= sizeof(int)) { bucket_sort(arr, n, k); }
 		max_heap(arr, n, k);
 		stl_priqueue(arr, n, k);
 		stl_makeheap(arr, n, k);
