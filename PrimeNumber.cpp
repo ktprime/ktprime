@@ -743,7 +743,7 @@ static void setWheelSmall(const uint64 start, const uint maxp)
 		if (p2 > offset)
 			sieve_index = (uint)(p2 - offset);
 
-		const int pi = WheelInit30[p % WHEEL].WheelIndex;
+		const int pi = WheelInit30[p % WHEEL30].WheelIndex;
 		const WheelFirst& wf = WheelFirst30[sieve_index % WHEEL30][pi];
 		const uint multiples = (NEXT_MULTIPLE >> (wf.Multiple * 3)) | (NEXT_MULTIPLE << (24 - wf.Multiple * 3));
 		sieve_index += wf.Correct * p;
@@ -780,8 +780,9 @@ static void setWheelMedium(uchar* bitarray, const uint sieve_size, const uint me
 
 		const uint p = noffset + PRIME_OFFSET(mask); mask &= mask - 1;
 		if (Threshold.L2Index == 0 && p >= Threshold.L2Maxp) {
+			MediumPrime[j + 0].Sp = MediumPrime[j + 1].Sp = UINT_MAX;
 			Threshold.L2Maxp = p;
-			Threshold.L2Index = j;
+			Threshold.L2Index = j += 2;
 			segsize = sieve_size;
 		}
 #if FM
@@ -800,11 +801,19 @@ static void setWheelMedium(uchar* bitarray, const uint sieve_size, const uint me
 		if (p2 > offset)
 			sieve_index = (uint)(p2 - offset);
 
-		const int pi = WHEEL_INIT[p % WHEEL].WheelIndex;
-		const WheelFirst& wf = WHEEL_FIRST[(sieve_index + (uint)(offset % WHEEL)) % WHEEL][pi];
-		sieve_index += wf.Correct * p;
-		MediumPrime[j + 0].Sp = (p / WHEEL << SI_BIT) + pi;
-		MediumPrime[j ++ ].Si = (sieve_index / WHEEL30 << SI_BIT) + wf.WheelIndex;
+		if (Threshold.L2Index == 0 || WHEEL == WHEEL30) {
+			const int pi = WheelInit30[p % WHEEL30].WheelIndex;
+			const WheelFirst& wf = WheelFirst30[(sieve_index + (uint)(offset % WHEEL30)) % WHEEL30][pi];
+			sieve_index += wf.Correct * p;
+			MediumPrime[j + 0].Sp = (p / WHEEL30 << SI_BIT) + pi;
+			MediumPrime[j ++ ].Si = (sieve_index / WHEEL30 << SI_BIT) + wf.WheelIndex;
+		} else {
+			const int pi = WheelInit210[p % WHEEL210].WheelIndex;
+			const WheelFirst& wf = WheelFirst210[(sieve_index + (uint)(offset % WHEEL210)) % WHEEL210][pi];
+			sieve_index += wf.Correct * p;
+			MediumPrime[j + 0].Sp = (p / WHEEL210 << SI_BIT) + pi;
+			MediumPrime[j ++ ].Si = (sieve_index / WHEEL30 << SI_BIT) + wf.WheelIndex;
+		}
 	}
 	MediumPrime[j + 0].Sp = MediumPrime[j + 1].Sp = MediumPrime[j + 2].Sp = UINT_MAX;
 }
@@ -1007,7 +1016,7 @@ static int crossMedium1(uchar bitarray[], const uint sieve_byte, MediumSieve* pS
 	}
 
 	const uint wi = pSprime->Sp >> SI_BIT;
-	WheelElement* wd = WHEEL_DATA[pSprime->Sp % (1 << SI_BIT)];
+	WheelElement* wd = WheelData30[pSprime->Sp % (1 << SI_BIT)];
 	WheelElement we; we.WheelIndex = si % (1 << SI_BIT);
 
 	do {
@@ -1020,6 +1029,53 @@ static int crossMedium1(uchar bitarray[], const uint sieve_byte, MediumSieve* pS
 
 //cross out 2 medium prime from array
 static int crossMedium2(uchar bitarray[], const uint sieve_byte, MediumSieve* pSprime)
+{
+	uint& si1 = pSprime[0].Si, sp1 = pSprime[0].Sp;
+	uint wi1 = sp1 >> SI_BIT, offset1 = (si1 >> SI_BIT) - sieve_byte;
+	WheelElement* wd1 = WheelData30[sp1 % (1 << SI_BIT)];
+	WheelElement we1; we1.WheelIndex = si1 % (1 << SI_BIT);
+
+	uint& si2 = pSprime[1].Si, sp2 = pSprime[1].Sp;
+	uint wi2 = sp2 >> SI_BIT, offset2 = (si2 >> SI_BIT) - sieve_byte;
+	WheelElement* wd2 = WheelData30[sp2 % (1 << SI_BIT)];
+	WheelElement we2; we2.WheelIndex = si2 % (1 << SI_BIT);
+
+	while ((int)offset1 < 0) {
+		MEDIUM_SET(1);
+		if ((int)offset2 >= 0) break;
+		MEDIUM_SET(2);
+	}
+
+	while ((int)offset1 < 0) { MEDIUM_SET(1); } si1 = offset1 << SI_BIT | we1.WheelIndex;
+	while ((int)offset2 < 0) { MEDIUM_SET(2); } si2 = offset2 << SI_BIT | we2.WheelIndex;
+
+	return 2;
+}
+
+//cross out one medium prime from array
+static int crossMedium3(uchar bitarray[], const uint sieve_byte, MediumSieve* pSprime)
+{
+	uint& si = pSprime->Si;
+	int offset = (si >> SI_BIT) - sieve_byte;
+	if (offset >= 0) {
+		si -= sieve_byte << SI_BIT;
+		return 1;
+	}
+
+	const uint wi = pSprime->Sp >> SI_BIT;
+	WheelElement* wd = WHEEL_DATA[pSprime->Sp % (1 << SI_BIT)];
+	WheelElement we; we.WheelIndex = si % (1 << SI_BIT);
+
+	do {
+		MEDIUM_SET();
+	} while (offset < 0);
+
+	si = (offset << SI_BIT) | we.WheelIndex;
+	return 1;
+}
+
+//cross out 2 medium prime from array
+static int crossMedium4(uchar bitarray[], const uint sieve_byte, MediumSieve* pSprime)
 {
 	uint& si1 = pSprime[0].Si, sp1 = pSprime[0].Sp;
 	uint wi1 = sp1 >> SI_BIT, offset1 = (si1 >> SI_BIT) - sieve_byte;
@@ -1205,12 +1261,10 @@ static void eratSieveMedium1(uchar bitarray[], const uint64 start, const uint si
 	const uint sieve_byte = sieve_size / WHEEL30 + (sieve_size % WHEEL30 ? 1 : 0);
 	MediumSieve* pSprime = MediumPrime + spi;
 
-#ifndef W210
 	const uint minsp = MIN(maxp, (sieve_byte * 4 / 8)) / 30 << SI_BIT;
 	pSprime = crossMediumW30(bitarray, sieve_byte, minsp, pSprime);
-#endif
 
-	const uint maxsp = (maxp / WHEEL << SI_BIT) + WHEEL_INIT[maxp % WHEEL].WheelIndex;
+	const uint maxsp = (maxp / WHEEL30 << SI_BIT) + WheelInit30[maxp % WHEEL30].WheelIndex;
 	bitarray += sieve_byte;
 
 	while (pSprime[1].Sp < maxsp)
@@ -1232,32 +1286,11 @@ static void eratSieveMedium2(uchar bitarray[], const uint64 start, const uint si
 	const uint maxsp = (maxp / WHEEL << SI_BIT) + WHEEL_INIT[maxp % WHEEL].WheelIndex;
 	bitarray += sieve_byte;
 
-	while (pSprime[0].Sp < maxsp) {
-#if 0
-		pSprime += crossMedium1(bitarray, sieve_byte, pSprime);
-#else
-		uint& si = pSprime->Si;
-		int offset = (si >> SI_BIT) - sieve_byte;
-		if (offset >= 0) {
-			si -= sieve_byte << SI_BIT;
-			pSprime ++;
-			continue;
-		}
+	while (pSprime[1].Sp < maxsp)
+		pSprime += crossMedium4(bitarray, sieve_byte, pSprime);
 
-		const uint wi = pSprime->Sp >> SI_BIT;
-		WheelElement* wd = WHEEL_DATA[pSprime->Sp % (1 << SI_BIT)];
-		WheelElement we; we.WheelIndex = si % (1 << SI_BIT);
-
-		MEDIUM_SET();
-		if (offset < 0)
-		{
-			MEDIUM_SET();
-		}
-
-		si = (offset << SI_BIT) | we.WheelIndex;
-		pSprime ++;
-#endif
-	}
+	if (pSprime[0].Sp < maxsp)
+		crossMedium3(bitarray, sieve_byte, pSprime + 0);
 }
 
 //This implementation uses a sieve array with WHEEL210 numbers per byte and
@@ -1328,8 +1361,6 @@ static int segmentedSieve(uchar bitarray[], const uint64 start, const uint sieve
 	const uint medium2 = Threshold.Medium + 1;
 	const uint big_size = 1 << BucketInfo.Log2Size;
 	const uint l2Maxp =  Threshold.L2Maxp;
-//	if (Threshold.L2Size == big_size)
-//		l2Maxp = medium2;
 
 	preSieve(bitarray, start, sieve_size);
 
@@ -1350,10 +1381,14 @@ static int segmentedSieve(uchar bitarray[], const uint64 start, const uint sieve
 
 #ifndef FM
 	if (medium2 > l2Maxp)
+	#if W210
+		eratSieveMedium2(bitarray, start, sieve_size, Threshold.L2Index, medium2);
+	#else
 		eratSieveMedium1(bitarray, start, sieve_size, Threshold.L2Index, medium2);
+	#endif
 #else
 	const uint medium1 = Threshold.L3Maxp + 1;
-	if (medium1 > Threshold.l2Maxp)
+	if (medium1 > l2Maxp)
 		eratSieveMedium1(bitarray, start, sieve_size, Threshold.L2Index, medium1);
 	if (medium2 > Threshold.L3Maxp)
 		eratSieveMedium2(bitarray, start, sieve_size, Threshold.L3Index + 1, medium2);
@@ -2405,8 +2440,8 @@ int main(int argc, char* argv[])
 #else
 	if (Threshold.L2Size >= 512 << 10 || Config.SieveSize >= 4096 << 10)
 		executeCmd("L41 L42 2^31;");
-	executeCmd("e9; 1e12 1e10; e14 e10 ;  e10+0");
-	executeCmd("10^12 1e9; e16 e9; e18 e9*1; 0-e9 0-1 i");
+	executeCmd("1e12 1e10; e14 e10 ;  e10+0");
+	executeCmd("10^12 1e9; e16 e9; e18 e9*1; i");
 #endif
 
 	while (true) {
