@@ -80,7 +80,7 @@ typedef unsigned short ushort;
 	#endif
 #endif
 
-#ifndef W210 //big sieve wheel
+#ifndef M210 //big sieve wheel
 	# define WHEEL        WHEEL30
 	# define WHEEL_DATA   WheelData30
 	# define WHEEL_INIT   WheelInit30
@@ -109,6 +109,10 @@ typedef unsigned short ushort;
 #define MIN(a, b)         (a < b ? a : b)
 #define MAX(a, b)         (a > b ? a : b)
 
+#ifndef WHEEL210
+#define WHEEL210  210
+#endif
+
 enum ECONST
 {
 	ERAT_SMALL    = 2, //4 - 16
@@ -119,19 +123,26 @@ enum ECONST
 #endif
 
 	WHEEL30       = 30,
-	WHEEL210      = 210,
 	PRIME_PRODUCT = 210 * 11 * 13 * 17 * 19,
 	FIRST_INDEX   = PRIME_PRODUCT / 9699690 + 7,
 	NEXT_MULTIPLE = 0x5A28A6, //magic number from 0x799b799b. 4 bit shrift into 3 bit
-	MAX_WHEEL_GAP = 11 - 1,   //max prime wheel 210 gap
 	PI_65536      = 6542 + 1, //pi(2^16) + 1
 	MAX_SEGMENT   = 8 << 10,  //4Mkb
 #ifndef UINT_MAX
 	UINT_MAX      = 0-1u,
 #endif
 
-	SP_BIT        = 6, //48 < 2^SP_BIT < WHEEL210
-	SI_BIT        = 8, //[8 - 10]
+#if WHEEL210 < 2310
+	PWS           = 48,
+	SP_BIT        = 6, //PWS < 2^SP_BIT < 210 [6-7]
+	SI_BIT        = 8, //SI_BIT >= SP_BIT [8 - 10]
+	MAX_WHEEL_GAP = 11 - 1,   //max prime wheel 210 gap
+#else
+	PWS           = 480,
+	SP_BIT        = 10, //PWS < 2^SP_BIT < 2310 [9-10]
+	SI_BIT        = 10, //SI_BIT >= SP_BIT [8 - 10]S
+	MAX_WHEEL_GAP = 15 - 1,   //max prime wheel 210 gap
+#endif
 
 #if (L2_DCACHE_SIZE < 256 || L2_DCACHE_SIZE > 4096)
 	L2_DCACHE_SIZE= 256,
@@ -200,16 +211,42 @@ struct Config_
 
 struct WheelElement
 {
-	char WheelIndex;
-	uchar MaskBit;
-	uchar Correct;
+#if WHEEL210 < 2310
+	uchar WheelIndex;
 	uchar Multiple;
+	uchar Correct;
+	uchar MaskBit;
+#else
+	ushort WheelIndex;
+	ushort Multiple;
+	ushort Correct;
+	uchar MaskBit;
+#endif
 };
+
+/**
+struct WheelFirst
+{
+#if WHEEL210 < 2310
+	uchar WheelIndex;
+	uchar Multiple;
+	uchar Correct;
+#else
+	ushort WheelIndex;
+	ushort Multiple;
+	ushort Correct;
+#endif
+};**/
 
 struct WheelInit
 {
-	char WheelIndex;
+#if WHEEL210 < 2310
+	uchar WheelIndex;
 	uchar MaskBit;
+#else
+	ushort WheelIndex;
+	uchar MaskBit;
+#endif
 };
 
 struct SmallSieve
@@ -271,15 +308,15 @@ void setCacheSize(uint level, uint cachecpu);
 
 //common cache
 typedef WheelElement WheelFirst;
-static uchar Pattern30[64], Pattern210[48];
+static uchar Pattern30[64];
 static WheelFirst WheelFirst30[WHEEL30][8];
-static WheelFirst WheelFirst210[WHEEL210][48];
+static WheelFirst WheelFirst210[WHEEL210][PWS];
 
 static WheelInit WheelInit30[WHEEL30];
 static WheelInit WheelInit210[WHEEL210];
 
 static WheelElement WheelData30[8][8];
-static WheelElement WheelData210[48][48];
+static WheelElement WheelData210[PWS][PWS];
 //presieved with prime <= 19
 static uchar PreSieved[PRIME_PRODUCT / WHEEL30];
 
@@ -427,9 +464,9 @@ static void initWheel30()
 				next = i + Pattern30[pi] * (multiples += 2);
 
 			int wi = WheelInit30[next % WHEEL30].WheelIndex;
-			WheelElement* wf = &WheelFirst30[i][pi];
-			wf->Multiple = (nextMultiple[wi] >> (pi * 4)) & 15;
+			WheelFirst* wf = &WheelFirst30[i][pi];
 			wf->WheelIndex = wi;
+			wf->Multiple = (nextMultiple[wi] >> (pi * 4)) & 15;
 			wf->Correct = multiples;
 		}
 	}
@@ -442,10 +479,10 @@ static void initWheel30()
 				next = Pattern30[wi] + Pattern30[pi] * (multiples += 2);
 
 			WheelElement* we30 = &WheelData30[pi][wi];
+			we30->WheelIndex = WheelInit30[next % WHEEL30].WheelIndex;
 			we30->Multiple = multiples;
 			we30->Correct = next / WHEEL30 - Pattern30[wi] / WHEEL30;
-			we30->WheelIndex = WheelInit30[next % WHEEL30].WheelIndex;
-			we30->MaskBit = WheelInit30[Pattern30[wi]].MaskBit;
+			we30->MaskBit = 1 << wi;
 		}
 	}
 }
@@ -453,46 +490,57 @@ static void initWheel30()
 static void initWheel210()
 {
 	int wi = 0, i = 0;
-	const int psize = sizeof(Pattern210) /sizeof(Pattern210[0]);
-	uchar wpattern[WHEEL210];
+	const int psize = PWS;
+	uint wpattern[PWS];
 
-	for (i = 0; i < WHEEL210; i ++) {
-		const uchar mask = WheelInit30[i % WHEEL30].MaskBit;
-		WheelInit210[i].MaskBit = mask;
-		WheelInit210[i].WheelIndex = wi;
-		if (mask && i % (WHEEL210 / WHEEL30)) {
-			Pattern210[wi] = wpattern[wi] = i;
-			wi ++;
-		}
+#if WHEEL210 < 2310
+	const ushort pattern[] = {3, 5, 7, 2311};
+#else
+	const ushort pattern[] = {3, 5, 7, 11, 2311};
+#endif
+
+	for (int j = 1; j < WHEEL210; j += 2) {
+		int i = 0;
+		while (i < sizeof(pattern) / sizeof(pattern[0]) && j % pattern[i] != 0)
+			i++;
+		if (i == sizeof(pattern) / sizeof(pattern[0]))
+			wpattern[wi++] = j;
+	}
+
+	for (int j = 0, wj = 0; j < WHEEL210; j++) {
+		WheelInit210[j].WheelIndex = wj;
+		if (j == wpattern[wj])
+			wj++;
 	}
 
 	for (i = 0; i < WHEEL210; i ++) {
 		for (int pi = 0; pi < psize; pi ++) {
 			int multiples = 1 - (i % 2);
-			int next = i + wpattern[pi] * multiples;
+			uint next = i + wpattern[pi] * multiples;
 
-			WheelElement* wf = &WheelFirst210[i][pi];
+			WheelFirst* wf = &WheelFirst210[i][pi];
 			while (WheelInit210[next % WHEEL210].WheelIndex == WheelInit210[(next + 1) % WHEEL210].WheelIndex)
 				next = i + wpattern[pi] * (multiples += 2);
-
 			wf->WheelIndex = WheelInit210[next % WHEEL210].WheelIndex;
 			wf->Correct = multiples;
+			assert(multiples < MAX_WHEEL_GAP);
 		}
 	}
 
 	for (int pi = 0; pi < psize; pi ++) {
 		for (wi = 0; wi < psize; wi ++) {
 			int multiples = 2;
-			int next = wpattern[wi] + wpattern[pi] * 2;
+			uint next = wpattern[wi] + wpattern[pi] * 2;
 
 			while (WheelInit210[next % WHEEL210].WheelIndex == WheelInit210[(next + 1) % WHEEL210].WheelIndex) {
 				next += wpattern[pi] * 2;
 				multiples += 2;
 			}
 
+			assert(multiples <= MAX_WHEEL_GAP);
 			WheelElement* we210 = &WheelData210[pi][wi];
 			we210->Correct = next / WHEEL30 - wpattern[wi] / WHEEL30;
-			we210->MaskBit = WheelInit210[wpattern[wi]].MaskBit;
+			we210->MaskBit = WheelInit30[wpattern[wi] % WHEEL30].MaskBit;
 			we210->WheelIndex = WheelInit210[next % WHEEL210].WheelIndex;
 			we210->Multiple = multiples * (WHEEL210 / WHEEL30);
 		}
@@ -721,7 +769,7 @@ static int setBucketInfo(const uint sieve_size, const uint sqrtp, const uint64 r
 	BucketInfo.LoopSize  = sqrtp / (sieve_size / MAX_WHEEL_GAP) + 2; //add the first, last bucket
 	BucketInfo.Log2Size  = ilog(sieve_size / WHEEL30, 2);
 	BucketInfo.ModuloSize = (1 << BucketInfo.Log2Size) - 1;
-	//assert (BucketInfo.Log2Size <= (32 - SI_BIT) && SI_BIT >= SP_BIT);
+	assert (BucketInfo.Log2Size <= (32 - SI_BIT) && SI_BIT >= SP_BIT);
 	return 0;
 }
 
@@ -785,12 +833,6 @@ static void setWheelMedium(uchar* bitarray, const uint sieve_size, const uint me
 			Threshold.L2Index = j += 2;
 			segsize = sieve_size;
 		}
-#if FM
-		if (Threshold.L3Index == 0 && p > Threshold.L3Maxp) {
-			Threshold.L3Maxp = p;
-			Threshold.L3Index = j;
-		}
-#endif
 
 		uint64 offset = start;
 		const uint64 p2 = (uint64)p * p;
@@ -818,7 +860,7 @@ static void setWheelMedium(uchar* bitarray, const uint sieve_size, const uint me
 	MediumPrime[j + 0].Sp = MediumPrime[j + 1].Sp = MediumPrime[j + 2].Sp = UINT_MAX;
 }
 
-inline static void pushBucket(const uint offset, const uint sp, const uchar wi)
+inline static void pushBucket(const uint offset, const uint sp, const ushort wi)
 {
 	const uint next_bucket = offset >> BucketInfo.Log2Size;
 #ifndef B_R
@@ -1261,7 +1303,7 @@ static void eratSieveMedium1(uchar bitarray[], const uint64 start, const uint si
 	const uint sieve_byte = sieve_size / WHEEL30 + (sieve_size % WHEEL30 ? 1 : 0);
 	MediumSieve* pSprime = MediumPrime + spi;
 
-	const uint minsp = MIN(maxp, (sieve_byte * 4 / 8)) / 30 << SI_BIT;
+	const uint minsp = MIN(maxp, (sieve_byte / Config.L2Segs)) / 30 << SI_BIT;
 	pSprime = crossMediumW30(bitarray, sieve_byte, minsp, pSprime);
 
 	const uint maxsp = (maxp / WHEEL30 << SI_BIT) + WheelInit30[maxp % WHEEL30].WheelIndex;
@@ -1274,6 +1316,7 @@ static void eratSieveMedium1(uchar bitarray[], const uint64 start, const uint si
 		crossMedium1(bitarray, sieve_byte, pSprime + 0);
 }
 
+#if M210
 //sieve prime multiples in [start, start + sieve_size) with medium algorithm
 static void eratSieveMedium2(uchar bitarray[], const uint64 start, const uint sieve_size, const uint spi, uint maxp)
 {
@@ -1292,6 +1335,7 @@ static void eratSieveMedium2(uchar bitarray[], const uint64 start, const uint si
 	if (pSprime[0].Sp < maxsp)
 		crossMedium3(bitarray, sieve_byte, pSprime + 0);
 }
+#endif
 
 //This implementation uses a sieve array with WHEEL210 numbers per byte and
 //a modulo wheel that skips multiples of 2, 3, 5 and 7.
@@ -1379,20 +1423,13 @@ static int segmentedSieve(uchar bitarray[], const uint64 start, const uint sieve
 		eratSieveMedium1(pnextseg, start + offset, l2_size, Threshold.L1Index, l2Maxp);
 	}
 
-#ifndef FM
 	if (medium2 > l2Maxp)
-	#if W210
+	#if M210
 		eratSieveMedium2(bitarray, start, sieve_size, Threshold.L2Index, medium2);
 	#else
 		eratSieveMedium1(bitarray, start, sieve_size, Threshold.L2Index, medium2);
 	#endif
-#else
-	const uint medium1 = Threshold.L3Maxp + 1;
-	if (medium1 > l2Maxp)
-		eratSieveMedium1(bitarray, start, sieve_size, Threshold.L2Index, medium1);
-	if (medium2 > Threshold.L3Maxp)
-		eratSieveMedium2(bitarray, start, sieve_size, Threshold.L3Index + 1, medium2);
-#endif
+
 
 	if (start >= Threshold.BucketStart) {
 		for (uint offset = 0; offset < copy_from; offset += big_size)
@@ -1465,10 +1502,16 @@ static int segmentedSieve2(uchar bitarray[], const uint start, const uint sieve_
 
 static void setL1Index()
 {
-	if (Threshold.L1Maxp > 65521)
+#if WHEEL210 < 2310
+	if (Threshold.L1Maxp > 65521) //
 		Threshold.L1Maxp = 65521; //the bigest prime % WHEEL210 = 1 and < 2^16
+#else
+	if (Threshold.L1Maxp > 57751) //57751
+		Threshold.L1Maxp = 57751; //the bigest prime % 2310 = 1 and < 2^16
+#endif
+
 	for (uint p = 0, j = 300; ; p = SmallPrime[++j].Sp) {
-		if (p >= Threshold.L1Maxp && p % WHEEL210 == 1) {
+		if (p >= Threshold.L1Maxp && p % 210 == 1) {
 			Threshold.L1Index = j;
 			Threshold.L1Maxp = p;
 			break;
@@ -2438,9 +2481,9 @@ int main(int argc, char* argv[])
 #elif GCOV
 	executeCmd("e18 e9");
 #else
-	if (Threshold.L2Size >= 512 << 10 || Config.SieveSize >= 4096 << 10)
-		executeCmd("L41 L42 2^31;");
-	executeCmd("1e12 1e10; e14 e10 ;  e10+0");
+//	if (Threshold.L2Size >= 512 << 10 || Config.SieveSize >= 4096 << 10)
+//		executeCmd("L41 L42 2^31;");
+	executeCmd("e9; 1e12 1e10; e14 e10 ;  e10+0");
 	executeCmd("10^12 1e9; e16 e9; e18 e9*1; i");
 #endif
 
