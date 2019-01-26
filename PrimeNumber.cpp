@@ -1729,15 +1729,16 @@ static uint setBucketStart(const uint64 start, const uint sqrtp, const uint siev
 
 static uint adjustConfig(uint sieve_size, const uint sqrtp)
 {
-	if (sieve_size < Threshold.L2Size && sqrtp > 10000000)
+	uint medium = (sieve_size * WHEEL30) / Config.Msegs + 1;
+	if (sieve_size < Threshold.L2Size && sqrtp > medium)
 		sieve_size = setSieveSize(SIEVE_SIZE);
 	else if (sieve_size >= Config.Msegs << 21)
 		sieve_size = setSieveSize(SIEVE_SIZE);
 
-	if ((sieve_size & (sieve_size - 1)) != 0 && sqrtp > sieve_size * WHEEL30 / Config.Msegs)
+	if ((sieve_size & (sieve_size - 1)) != 0 && sqrtp > (sieve_size * WHEEL30) / Config.Msegs)
 		sieve_size = setSieveSize(1 << ilog(sieve_size >> 10, 2));
 
-	const uint medium = sieve_size / Config.Msegs + 1;
+	medium = (sieve_size * WHEEL30) / Config.Msegs + 1;
 	if (sqrtp > medium) {
 		const int l2segs = sieve_size / (Threshold.L2Size);
 		assert(l2segs > 0 && sieve_size >= (128 << 10));
