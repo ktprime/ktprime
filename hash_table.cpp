@@ -3,6 +3,9 @@
 //   This software is dual-licensed to the public domain and under the following
 //   license: you are granted a perpetual, irrevocable license to copy, modify,
 //   publish, and distribute this file as you see fit.
+//http://www.ilikebigbits.com/2016_08_28_hash_table.html
+
+
 //code from http://www.ilikebigbits.com/2016_08_28_hash_table.html and improved get
 
 //some others 
@@ -16,6 +19,11 @@
 
 //#define unordered_map emilib::HashMap
 //#include <loguru.hpp>
+#if 1
+    #define HASH_FUNC     _hasher
+#else
+    #define HASH_FUNC(v)   (unsigned int)v
+#endif
 
 namespace emilib2 {
 
@@ -484,7 +492,7 @@ public:
     /// return false if element was not found
     bool erase(const KeyT& key)
     {
-        auto bucket = find_filled_bucket(key);
+        auto bucket = erase_bucket (key);
         if (bucket != (size_t)-1) {
             _states[bucket] = State::INACTIVE;
             _pairs[bucket].~PairT();
@@ -501,10 +509,17 @@ public:
     {
         //DCHECK_EQ_F(it._map, this);
         //DCHECK_LT_F(it._bucket, _num_buckets);
-        _states[it._bucket] = State::INACTIVE;
-        _pairs[it._bucket].~PairT();
+        auto bucket = it._bucket;
+        if (_states[bucket] > State::FILLED) {
+             bucket = erase_bucket(it->first);
+        }
+
+        _states[bucket] = State::INACTIVE;
+        _pairs[bucket].~PairT();
         _num_filled -= 1;
-        return ++it;
+        if (bucket == it._bucket)
+            it ++;
+        return it;
     }
 
     /// Remove all elements, keeping full capacity.
@@ -580,28 +595,43 @@ private:
         reserve(_num_filled + 1);
     }
 
-    // Find the bucket with this key, or return (size_t)-1
-    template<typename KeyLike>
-    size_t find_filled_bucket(const KeyLike& key) const
+    size_t erase_bucket(const KeyT& key) const
     {
-
         //if (empty()) { return (size_t)-1; } // Optimization
+        const auto hash_value = HASH_FUNC(key);
+        auto bucket = hash_value & _mask;
+        auto& max_probe_length = _states[bucket];
+        if (max_probe_length == State::INACTIVE)
+            return (size_t)-1;
+        else if (_eq(_pairs[bucket].first, key)) {
+            if (max_probe_length == State::FILLED) 
+                return bucket;
+            auto nbucket = (hash_value + (int)max_probe_length) & _mask;
+			//if ((int)max_probe_length > 2)
+			//    max_probe_length = (State)((int)max_probe_length - 1);
+            std::swap(_pairs[nbucket], _pairs[bucket]);
+            return nbucket; 
+        }
+        else if (max_probe_length == State::FILLED)
+            return (size_t)-1;
 
-        const auto hash_value = _hasher(key);
-#if 0
-        for (int offset=0; offset<=_max_probe_length; ++offset) {
-            auto bucket = (hash_value + offset) & _mask;
-            if (_states[bucket] == State::FILLED) {
-                if (_eq(_pairs[bucket].first, key)) {
-                    return bucket;
-                }
-            } else if (_states[bucket] == State::INACTIVE) {
-                return (size_t)-1; // End of the chain!
+        for (int offset = (int)max_probe_length; offset >= 0; offset--) {
+            auto nbucket = (hash_value + offset) & _mask;
+            if (_states[nbucket] != State::INACTIVE && _eq(_pairs[nbucket].first, key)) {
+                return nbucket;
             }
         }
-#else
+
+        return (size_t)-1;
+    }
+
+    // Find the bucket with this key, or return (size_t)-1
+    size_t find_filled_bucket(const KeyT& key) const
+    {
+        //if (empty()) { return (size_t)-1; } // Optimization
+        const auto hash_value = HASH_FUNC(key);
         auto bucket = hash_value & _mask;
-        const auto max_probe_length = _states[bucket];
+        auto& max_probe_length = _states[bucket];
         if (max_probe_length == State::INACTIVE)
             return (size_t)-1;
         else if (_eq(_pairs[bucket].first, key))
@@ -609,147 +639,101 @@ private:
         else if (max_probe_length == State::FILLED)
             return (size_t)-1;
 
-//       for (int offset = 1; offset <= (int)max_probe_length; ++offset) {
-        for (int offset = (int)max_probe_length; offset >= 0; offset--) {
+        for (int offset = (int)max_probe_length; offset > 0; offset--) {
             bucket = (hash_value + offset) & _mask;
             if (_states[bucket] != State::INACTIVE && _eq(_pairs[bucket].first, key))
                 return bucket;
         }
-#endif
+
+        max_probe_length == State::INACTIVE;
         return (size_t)-1;
     }
+
+    void inline reset_main_bucket(size_t main_bucket, size_t bucket)
+    {
+        if (_states[main_bucket] == State::INACTIVE) {
+            _pairs[main_bucket] = _pairs[bucket];
+            //_pairs[bucket].swap(_pairs[main_bucket]);
+            _states[main_bucket] = State::FILLED;
+        }
+        else {
+            const auto new_bucket = find_empty_bucket((int)main_bucket + 1);
+            //_pairs[bucket].swap(_pairs[new_bucket]);
+            _pairs[new_bucket] = _pairs[bucket];
+            _states[new_bucket] = State::FILLED;
+            if (new_bucket > main_bucket + (int)_states[main_bucket])
+                _states[main_bucket] = (State)(new_bucket - main_bucket);
+            else if (new_bucket < main_bucket)
+                _states[main_bucket] = (State)(_num_buckets + new_bucket - main_bucket);
+        }
+    }
+
 
     // Find the bucket with this key, or return a good empty bucket to place the key in.
     // In the latter case, the bucket is expected to be filled.
     size_t find_or_allocate(const KeyT& key)
     {
-#if 0
-        auto hash_value = _hasher(key);
-        size_t hole = (size_t)-1;
-        int offset=0;
-        for (; offset<=_max_probe_length; ++offset) {
-            auto bucket = (hash_value + offset) & _mask;
-
-            if (_states[bucket] == State::FILLED) {
-                if (_eq(_pairs[bucket].first, key)) {
-                    return bucket;
-                }
-            } else if (_states[bucket] == State::INACTIVE) {
-                return bucket;
-            } else {
-                // ACTIVE: keep searching
-                if (hole == (size_t)-1) {
-                    hole = bucket;
-                }
-            }
-        }
-
-        // No key found - but maybe a hole for it
-
-        //DCHECK_EQ_F(offset, _max_probe_length+1);
-
-        if (hole != (size_t)-1) {
-            return hole;
-        }
-
-        // No hole found within _max_probe_length
-        for (; ; ++offset) {
-            auto bucket = (hash_value + offset) & _mask;
-
-            if (_states[bucket] == State::INACTIVE) {
-                _max_probe_length = offset;
-                return bucket;
-            }
-        }
-#else
-        const auto hash_value = _hasher(key);
-        size_t hole = (size_t)-1;
-        int offset = 0;
+        const auto hash_value = HASH_FUNC(key);
         auto bucket = hash_value & _mask;
         auto& max_probe_length = _states[bucket];
-        for (; offset <= (int)max_probe_length; ++offset) {
-//        for (offset = (int)max_probe_length; offset >= 0; offset--) {
-            bucket = (hash_value + offset) & _mask;
-            if (_states[bucket] != State::INACTIVE) {
-                if (_eq(_pairs[bucket].first, key)) {
-                    return bucket;
-                }
-            } else
-                hole = bucket;
-        }
+        const auto& bucket_key = _pairs[bucket].first;
+        if (max_probe_length == State::INACTIVE || _eq(bucket_key, key))
+            return bucket;
 
-        if (hole != (size_t)-1) {
-            return hole;
-        }
-
-//        offset = (int)max_probe_length + 1;
-        for (; ; ++offset) {
-            auto bucket = (hash_value + offset) & _mask;
-            if (_states[bucket] == State::INACTIVE) {
-                if (offset > (int)max_probe_length) {
-                    if (offset != 0)
-                         max_probe_length = (State)offset;
-                }
-
-                return bucket;
-            }
-        }
-#endif
-    }
-
-    size_t check_main_bucket(const KeyT& key)
-    {
-        const auto bucket = _hasher(key) & _mask;
-        auto& max_probe_length = _states[bucket];
-        if (max_probe_length == State::INACTIVE) {
-            max_probe_length = State::FILLED;
+        //find main postion    
+        const auto main_bucket = HASH_FUNC(bucket_key) & _mask;
+        if (main_bucket != bucket) {
+            reset_main_bucket(main_bucket, bucket);
+            _states[bucket] = State::INACTIVE;
             return bucket;
         }
 
-        return (size_t)-1;
+        //find exits
+        size_t hole = (size_t)-1;
+        for (int offset = (int)max_probe_length; offset > 0; offset--) {
+            bucket = (hash_value + offset) & _mask;
+            if (_states[bucket] != State::INACTIVE) {
+                if (_eq(_pairs[bucket].first, key))
+                    return bucket;
+            } else if (hole == (size_t)-1)
+                hole = bucket;
+        }
+
+        if (hole != (size_t)-1)
+            return hole;
+
+        //find a new empty
+        int offset = (int)max_probe_length + 1;
+        for (; ; ++offset) {
+            bucket = (hash_value + offset) & _mask;
+            if (_states[bucket] == State::INACTIVE) {
+                max_probe_length = (State)offset;
+                return bucket;
+            }
+        }
     }
     
     size_t find_main_bucket(const KeyT& key)
     {
-        auto hash_value = _hasher(key);
+        const auto hash_value = HASH_FUNC(key);
         auto bucket = hash_value & _mask;
         auto& max_probe_length = _states[bucket];
         if (max_probe_length == State::INACTIVE) {
             max_probe_length = State::FILLED;
             return bucket;
         }
-
-        auto ohash_value = _hasher(_pairs[bucket].first);
-        if (ohash_value != hash_value) {
-            //find cur man postion
-            auto omain_bucket = ohash_value & _mask;
-            if (_states[omain_bucket] == State::INACTIVE) {
-                _pairs[omain_bucket] = _pairs[bucket];
-                //_pairs[bucket].swap(_pairs[omain_bucket]);
-                _states[omain_bucket] = State::FILLED;
-            }
-            else {
-                auto new_bucket = find_empty_bucket(_pairs[bucket].first);
-                //_pairs[bucket].swap(_pairs[new_bucket]);
-                _pairs[new_bucket] = _pairs[bucket];
-                _states[new_bucket] = State::FILLED;
-                if (new_bucket > omain_bucket + (int)_states[omain_bucket])
-                    _states[omain_bucket] = (State)(new_bucket - omain_bucket);
-                else if (new_bucket < omain_bucket)
-                    _states[omain_bucket] = (State)(_num_buckets + new_bucket - omain_bucket);
-            }
-            if (omain_bucket != bucket)
-                max_probe_length = State::FILLED;
+        //find main postion    
+        const auto main_bucket = HASH_FUNC(_pairs[bucket].first) & _mask;
+        if (main_bucket != bucket) {
+            reset_main_bucket(main_bucket, bucket);
             return bucket;
         }
 
         for (int offset = 1; ; ++offset) {
             const auto bucket = (hash_value + offset) & _mask;
             if (_states[bucket] == State::INACTIVE) {
-                if (offset > (int)max_probe_length) {
+                if (offset > (int)max_probe_length)
                     max_probe_length = (State)offset;
-                }
-
                 _states[bucket] = State::FILLED;
                 return bucket;
             }
@@ -757,11 +741,10 @@ private:
     }
 
     // key is not in this map. Find a place to put it.
-    size_t find_empty_bucket(const KeyT& key)
+    size_t find_empty_bucket(int bucket_from)
     {
-        auto hash_value = _hasher(key);
         for (int offset=0; ; ++offset) {
-            auto bucket = (hash_value + offset) & _mask;
+            auto bucket = (bucket_from + offset) & _mask;
             if (_states[bucket] == State::INACTIVE) {
                 if (offset > _max_probe_length) {
                     _max_probe_length = offset;
@@ -772,7 +755,7 @@ private:
     }
 
 private:
-    enum class State : int16_t
+    enum class State : int32_t
     {
         INACTIVE = -1, // Never been touched
         FILLED  = 0   // Is set with key/value
