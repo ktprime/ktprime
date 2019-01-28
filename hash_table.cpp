@@ -3,9 +3,9 @@
 //   This software is dual-licensed to the public domain and under the following
 //   license: you are granted a perpetual, irrevocable license to copy, modify,
 //   publish, and distribute this file as you see fit.
-//code from http://www.ilikebigbits.com/2016_08_28_hash_table.html and improved get
+//   http://www.ilikebigbits.com/2016_08_28_hash_table.html
 
-//some others 
+//some others
 //https://tessil.github.io/2016/08/29/benchmark-hopscotch-map.html
 
 #pragma once
@@ -14,12 +14,11 @@
 #include <iterator>
 #include <utility>
 
-//#define unordered_map emilib::HashMap
 //#include <loguru.hpp>
 #if 1
     #define HASH_FUNC     _hasher
 #else
-    #define HASH_FUNC(v)   (v % 2)
+    #define HASH_FUNC(v)   (v & 0xFFFFFFFF) //for integer test.
 #endif
 
 namespace emilib2 {
@@ -490,7 +489,7 @@ public:
     /// return false if element was not found
     bool erase(const KeyT& key)
     {
-        auto bucket = erase_bucket (key);
+        auto bucket = erase_from_bucket (key);
         if (bucket != (size_t)-1) {
             _states[bucket] = State::INACTIVE;
             _pairs[bucket].~PairT();
@@ -509,7 +508,7 @@ public:
         //DCHECK_LT_F(it._bucket, _num_buckets);
         auto bucket = it._bucket;
         if (_states[bucket] > State::FILLED) {
-             bucket = erase_bucket(it->first);
+             bucket = erase_from_bucket(it->first);
         }
 
         _states[bucket] = State::INACTIVE;
@@ -594,7 +593,7 @@ private:
         reserve(_num_filled + 1);
     }
 
-    size_t erase_bucket(const KeyT& key) const
+    size_t erase_from_bucket(const KeyT& key) const
     {
         //if (empty()) { return (size_t)-1; } // Optimization
         const auto bucket = HASH_FUNC(key) & _mask;
@@ -602,7 +601,7 @@ private:
         if (max_probe_length == State::INACTIVE)
             return (size_t)-1;
         else if (_eq(_pairs[bucket].first, key)) {
-            if (max_probe_length == State::FILLED) 
+            if (max_probe_length == State::FILLED)
                 return bucket;
 
             //erase last bucket
@@ -635,8 +634,7 @@ private:
     size_t find_filled_bucket(const KeyT& key) const
     {
         //if (empty()) { return (size_t)-1; } // Optimization
-        const auto hash_value = HASH_FUNC(key);
-        const auto bucket = hash_value & _mask;
+        const auto bucket = HASH_FUNC(key) & _mask;
         auto& max_probe_length = _states[bucket];
         if (max_probe_length == State::INACTIVE)
             return (size_t)-1;
@@ -657,23 +655,22 @@ private:
 
     void inline reset_main_bucket(size_t main_bucket, size_t bucket)
     {
-        if (_states[main_bucket] == State::INACTIVE) {
-            _pairs[main_bucket] = _pairs[bucket];
-            //_pairs[bucket].swap(_pairs[main_bucket]);
-            _states[main_bucket] = State::FILLED;
-        }
-        else {
+        if (_states[main_bucket] != State::INACTIVE) {
             const auto new_bucket = find_empty_bucket((int)main_bucket + 1);
-            //_pairs[bucket].swap(_pairs[new_bucket]);
-            _pairs[new_bucket] = _pairs[bucket];
             _states[new_bucket] = State::FILLED;
+            new(_pairs + new_bucket) PairT(_pairs[bucket].first, _pairs[bucket].second);
             if (new_bucket > main_bucket + (int)_states[main_bucket])
                 _states[main_bucket] = (State)(new_bucket - main_bucket);
             else if (new_bucket < main_bucket)
                 _states[main_bucket] = (State)(_num_buckets + new_bucket - main_bucket);
+            //_pairs[main_bucket] = _pairs[bucket];
+            //_pairs[bucket].swap(_pairs[new_bucket]);
+        }
+        else {
+            new(_pairs + main_bucket) PairT(_pairs[bucket].first, _pairs[bucket].second);
+            _states[main_bucket] = State::FILLED;
         }
     }
-
 
     // Find the bucket with this key, or return a good empty bucket to place the key in.
     // In the latter case, the bucket is expected to be filled.
@@ -685,7 +682,7 @@ private:
         if (max_probe_length == State::INACTIVE || _eq(bucket_key, key))
             return bucket;
 
-        //find main postion    
+        //find main postion
         const auto main_bucket = HASH_FUNC(bucket_key) & _mask;
         if (main_bucket != bucket) {
             reset_main_bucket(main_bucket, bucket);
@@ -717,7 +714,7 @@ private:
             }
         }
     }
-    
+
     size_t find_main_bucket(const KeyT& key)
     {
         const auto bucket = HASH_FUNC(key) & _mask;
@@ -725,7 +722,7 @@ private:
         if (max_probe_length == State::INACTIVE)
             return bucket;
 
-        //find main postion    
+        //find main postion
         const auto main_bucket = HASH_FUNC(_pairs[bucket].first) & _mask;
         if (main_bucket != bucket) {
             reset_main_bucket(main_bucket, bucket);
@@ -753,7 +750,7 @@ private:
     }
 
 private:
-    enum class State : int16_t
+    enum class State : int32_t
     {
         INACTIVE = -1, // Never been touched
         FILLED   = 0   // Is set with key/value
