@@ -556,7 +556,7 @@ public:
             throw std::bad_alloc();
         }
 
-        //auto old_num_filled  = _num_filled;
+        auto old_num_filled  = _num_filled;
         auto old_num_buckets = _num_buckets;
         auto old_pairs       = _pairs;
 
@@ -565,24 +565,49 @@ public:
         _mask        = _num_buckets - 1;
         _pairs       = new_pairs;
 
-        for (size_t i = 0; i < num_buckets; i++)
-            MAX_LEN(new_pairs, i) = State::INACTIVE;
+        for (size_t bucket = 0; bucket < num_buckets; bucket++)
+            MAX_LEN(_pairs, bucket) = State::INACTIVE;
 
-        for (size_t src_bucket=0; src_bucket<old_num_buckets; src_bucket++) {
+        int collision = 0;
+        //set all main bucket first
+        for (size_t src_bucket=0; src_bucket < old_num_buckets && _num_filled < old_num_filled ; src_bucket++) {
             if (MAX_LEN(old_pairs, src_bucket) == State::INACTIVE) {
                 continue;
             }
 
             auto& src_pair = old_pairs[src_bucket];
-            auto dst_bucket = find_main_bucket(src_pair.second.first);
-             new(_pairs + dst_bucket) PairT(std::move(src_pair));
-             MAX_LEN(_pairs,dst_bucket) = State::FILLED;
-             _num_filled += 1;
-             src_pair.~PairT();
+            const auto main_bucket = HASH_FUNC(src_pair.second.first) & _mask;
+            auto& max_probe_length = MAX_LEN(_pairs, main_bucket);
+            if (max_probe_length == State::INACTIVE) {
+                //new(_pairs + main_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
+                memcpy(&_pairs[main_bucket], &src_pair, sizeof(src_pair));
+                max_probe_length = State::FILLED;
+                _num_filled += 1;               
+            } else {
+                //move collision bucket to head
+                //new(old_pairs + collision ++) PairT(std::move(src_pair)); src_pair.~PairT();
+                memcpy(&old_pairs[collision++], &src_pair, sizeof(src_pair));
+            }
         }
 
-        //DCHECK_EQ_F(old_num_filled, _num_filled);
+        if (_num_filled > 0)
+            printf("    _num_filled/num_buckets = %d/%d, collision = %d, ration = %.2lf%%\n", _num_filled, old_num_buckets, collision, (collision * 100.0 / (num_buckets + 1)));
+        //reset all collisions bucket
+        for (size_t src_bucket=0; src_bucket < collision; src_bucket++) {
+            auto& src_pair = old_pairs[src_bucket];
+            const auto main_bucket = HASH_FUNC(src_pair.second.first) & _mask;
+            auto& max_probe_length = MAX_LEN(_pairs, main_bucket);
+            const auto new_bucket = find_empty_bucket(main_bucket + 1);
+            //new(_pairs + dst_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
+            memcpy(&_pairs[new_bucket], &src_pair, sizeof(src_pair));
+            if (new_bucket > main_bucket + max_probe_length)
+                max_probe_length = (int)(new_bucket - main_bucket);
+            else if (new_bucket < main_bucket)
+                max_probe_length = (int)(_num_buckets + new_bucket - main_bucket);
+            _num_filled += 1;           
+        }
 
+        assert(old_num_filled == _num_filled);
         free(old_pairs);
     }
 
