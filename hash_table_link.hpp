@@ -28,7 +28,7 @@
 #define STAT_POS(s,n) s[n].first
 
 
-namespace emilib3 {
+namespace emilib2 {
 enum State
 {
     INACTIVE = -1, // Never been touched
@@ -501,8 +501,8 @@ public:
     {
         auto bucket = erase_from_bucket (key);
         if (bucket != (size_t)-1) {
-            NEXT_POS(_pairs,bucket) = State::INACTIVE;
             _pairs[bucket].~PairT();
+            NEXT_POS(_pairs,bucket) = State::INACTIVE;
             _num_filled -= 1;
             return true;
         } else {
@@ -517,16 +517,13 @@ public:
         //DCHECK_EQ_F(it._map, this);
         //DCHECK_LT_F(it._bucket, _num_buckets);
         auto bucket = it._bucket;
-        auto check = NEXT_POS(_pairs, bucket) != bucket;
-        if (check) {
-             bucket = erase_from_bucket(it->first);
-//             assert(bucket != size_t(-1));
-        }
+        bucket = erase_from_bucket(it->first);
 
-        NEXT_POS(_pairs,bucket) = State::INACTIVE;
         _pairs[bucket].~PairT();
+        NEXT_POS(_pairs,bucket) = State::INACTIVE;
         _num_filled -= 1;
-        it ++;
+        if (bucket == it._bucket)
+            it ++;
         return it;
     }
 
@@ -636,7 +633,7 @@ private:
                 NEXT_POS(_pairs, bucket) = bucket;
             else
                 NEXT_POS(_pairs, bucket) = nbucket;
-            return next_bucket;    
+            return next_bucket;
         }
 #if 1
         else if (next_bucket == bucket)
@@ -645,23 +642,19 @@ private:
 
         auto prev_bucket = bucket;
         while (true) {
+            const auto nbucket = NEXT_POS(_pairs, next_bucket);
             if (GET_KEY(_pairs, next_bucket) == key) {
-                //check is next
-                const auto nbucket = NEXT_POS(_pairs, next_bucket);
                 //assert(nbucket > State::INACTIVE);
                 if (nbucket == next_bucket)
                     NEXT_POS(_pairs, prev_bucket) = prev_bucket;
                 else
-                    NEXT_POS(_pairs, prev_bucket) = next_bucket;
+                    NEXT_POS(_pairs, prev_bucket) = nbucket;
                 return next_bucket;
             }
-            const auto nbucket = NEXT_POS(_pairs, next_bucket);
             if (nbucket == next_bucket)
                 break;
             prev_bucket = next_bucket;
-            if (nbucket == State::INACTIVE)
-                break;
-
+            //assert(nbucket != State::INACTIVE);
             next_bucket = nbucket;
         }
 
@@ -741,10 +734,8 @@ private:
         //find next linked bucket and check key
         while (true) {
             const auto nbucket = NEXT_POS(_pairs, next_bucket);
-            if (GET_KEY(_pairs, next_bucket) == key) {
-                //assert(nbucket != State::INACTIVE);
+            if (GET_KEY(_pairs, next_bucket) == key)
                 return next_bucket;
-            }
             else if (nbucket == next_bucket)
                 break;
             next_bucket = nbucket;
@@ -801,11 +792,9 @@ private:
     {
         while (true) {
             const auto nbucket = NEXT_POS(_pairs, next_bucket);
-            if (GET_KEY(_pairs, next_bucket) == key) {
-                //assert(nbucket != State::INACTIVE);
+            if (GET_KEY(_pairs, next_bucket) == key) 
                 return next_bucket;
-            }
-            if (nbucket == next_bucket)
+			else if (nbucket == next_bucket)
                 break;
             next_bucket = nbucket;
         }
