@@ -13,12 +13,19 @@
 #include <cstdlib>
 #include <iterator>
 #include <utility>
+#include <cstring>
 
 //#include <loguru.hpp>
 #if 1
     #define HASH_FUNC     _hasher
 #else
     #define HASH_FUNC(v)   (v ) //for integer test.
+#endif
+
+#ifdef  GET_KEY
+    #undef  GET_KEY
+    #undef  GET_VAL
+    #undef  NEXT_POS
 #endif
 
 #define GET_KEY(p,n) p[n].second.first
@@ -724,20 +731,20 @@ private:
         else if (bucket_key == key)
             return bucket;
 
-        //find current bucket_key move it to man bucket
-        const auto main_bucket = HASH_FUNC(bucket_key) & _mask;
-        if (main_bucket != bucket) {
-            reset_main_bucket(main_bucket, bucket);
-            max_probe_length = State::INACTIVE;
-            return bucket;
-        }
-
         //find exits
         for (auto offset = max_probe_length; offset > 0; offset--) {
             const auto nbucket = (bucket + offset) & _mask;
             if (GET_KEY(_pairs, nbucket) == key && MAX_LEN(_pairs,nbucket) != State::INACTIVE) {
                 return nbucket;
             }
+        }
+
+        //find current bucket_key move it to man bucket
+        const auto main_bucket = HASH_FUNC(bucket_key) & _mask;
+        if (main_bucket != bucket) {
+            reset_main_bucket(main_bucket, bucket);
+            max_probe_length = State::INACTIVE;
+            return bucket;
         }
 
         //find a new empty
@@ -777,9 +784,15 @@ private:
     // key is not in this map. Find a place to put it.
     inline size_t find_empty_bucket(size_t bucket_from)
     {
-        for (auto offset = 0; ; ++offset) {
+        auto offset = 0;
+        for (;  offset < 10000; ++offset) {
             const auto bucket = (bucket_from + offset) & _mask;
             if (MAX_LEN(_pairs,bucket) == State::INACTIVE)
+                return bucket;
+        }
+        for (; ; ++offset) {
+            const auto bucket = (bucket_from + offset*offset) & _mask;
+            if (MAX_LEN(_pairs, bucket) == State::INACTIVE)
                 return bucket;
         }
     }
