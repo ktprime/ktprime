@@ -5,8 +5,6 @@
 //   publish, and distribute this file as you see fit.
 //   http://www.ilikebigbits.com/2016_08_28_hash_table.html
 
-//some others
-//https://tessil.github.io/2016/08/29/benchmark-hopscotch-map.html
 
 #pragma once
 
@@ -409,12 +407,13 @@ public:
     {
         check_expand_need();
 
-        auto bucket = find_or_allocate(key);
+        int offset = State::FILLED;
+        auto bucket = find_or_allocate(key, offset);
 
         if (MAX_LEN(_pairs,bucket) != State::INACTIVE) {
             return { iterator(this, bucket), false };
         } else {
-            new(_pairs + bucket) PairT(State::FILLED, std::pair<KeyT, ValueT>(key, value));
+            new(_pairs + bucket) PairT(offset, std::pair<KeyT, ValueT>(key, value));
             _num_filled++;
             return { iterator(this, bucket), true };
         }
@@ -438,7 +437,7 @@ public:
     {
         //DCHECK_F(!contains(key));
         check_expand_need();
-        auto bucket = find_main_bucket(key);
+        auto bucket = find_or_allocate(key);
         new(_pairs + bucket) PairT(State::FILLED, std::pair<KeyT, ValueT>(std::move(key), std::move(value)));
         _num_filled++;
     }
@@ -452,13 +451,14 @@ public:
     {
         check_expand_need();
 
-        auto bucket = find_or_allocate(key);
+        int offset = State::FILLED;
+        auto bucket = find_or_allocate(key, offset);
 
         // Check if inserting a new value rather than overwriting an old entry
         if (MAX_LEN(_pairs,bucket) != State::INACTIVE) {
             GET_VAL(_pairs,bucket) = value;
         } else {
-            new(_pairs + bucket) PairT(State::FILLED, std::pair<KeyT, ValueT>(key, value));
+            new(_pairs + bucket) PairT(offset, std::pair<KeyT, ValueT>(key, value));
             _num_filled++;
         }
     }
@@ -468,7 +468,8 @@ public:
     {
         check_expand_need();
 
-        auto bucket = find_or_allocate(key);
+        int offset = State::FILLED;
+        auto bucket = find_or_allocate(key, offset);
 
         // Check if inserting a new value rather than overwriting an old entry
         if (MAX_LEN(_pairs,bucket) != State::INACTIVE) {
@@ -476,7 +477,7 @@ public:
             GET_VAL(_pairs,bucket) = new_value;
             return old_value;
         } else {
-            new(_pairs + bucket) PairT(State::FILLED, std::pair<KeyT, ValueT>(key, new_value));
+            new(_pairs + bucket) PairT(offset, std::pair<KeyT, ValueT>(key, new_value));
             _num_filled++;
             return ValueT();
         }
@@ -487,11 +488,12 @@ public:
     {
         check_expand_need();
 
-        auto bucket = find_or_allocate(key);
+        int offset = State::FILLED;
+        auto bucket = find_or_allocate(key, offset);
 
         /* Check if inserting a new value rather than overwriting an old entry */
         if (MAX_LEN(_pairs,bucket) == State::INACTIVE) {
-            new(_pairs + bucket) PairT(State::FILLED, std::pair<KeyT, ValueT>(key, ValueT()));
+            new(_pairs + bucket) PairT(offset, std::pair<KeyT, ValueT>(key, ValueT()));
             _num_filled++;
         }
 
@@ -504,15 +506,15 @@ public:
     /// return false if element was not found
     bool erase(const KeyT& key)
     {
-        auto bucket = erase_from_bucket (key);
-        if (bucket != (size_t)-1) {
-            MAX_LEN(_pairs,bucket) = State::INACTIVE;
-            _pairs[bucket].~PairT();
-            _num_filled -= 1;
-            return true;
-        } else {
+        const auto bucket = erase_from_bucket (key);
+        if (bucket == (size_t)-1) {
             return false;
         }
+
+        MAX_LEN(_pairs,bucket) = State::INACTIVE;
+        _pairs[bucket].~PairT();
+        _num_filled -= 1;
+        return true;
     }
 
     /// Erase an element typedef an iterator.
@@ -549,14 +551,14 @@ public:
     /// Make room for this many elements
     void reserve(size_t num_elems)
     {
-        size_t required_buckets = num_elems + 1;
+        size_t required_buckets = num_elems + 2;
         if (required_buckets <= _num_buckets) {
             return;
         }
         size_t num_buckets = 4;
         while (num_buckets < required_buckets) { num_buckets *= 2; }
 
-        auto new_pairs  = (PairT*)malloc(num_buckets * sizeof(PairT));
+        auto new_pairs  = (PairT*)malloc((1 + num_buckets) * sizeof(PairT));
 
         if (!new_pairs) {
 //                free(new_pairs);
@@ -574,10 +576,11 @@ public:
 
         for (size_t bucket = 0; bucket < num_buckets; bucket++)
             MAX_LEN(_pairs, bucket) = State::INACTIVE;
+        MAX_LEN(_pairs, num_buckets) = State::INACTIVE;
 
         int collision = 0;
         //set all main bucket first
-        for (size_t src_bucket=0; src_bucket < old_num_buckets && _num_filled < old_num_filled ; src_bucket++) {
+        for (size_t src_bucket=0; src_bucket < old_num_buckets && _num_filled < old_num_filled; src_bucket++) {
             if (MAX_LEN(old_pairs, src_bucket) == State::INACTIVE) {
                 continue;
             }
@@ -604,7 +607,7 @@ public:
             auto& src_pair = old_pairs[src_bucket];
             const auto main_bucket = HASH_FUNC(src_pair.second.first) & _mask;
             auto& max_probe_length = MAX_LEN(_pairs, main_bucket);
-            const auto new_bucket = find_empty_bucket(main_bucket + 1);
+            const auto new_bucket = find_empty_bucket(main_bucket);
             //new(_pairs + dst_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
             memcpy(&_pairs[new_bucket], &src_pair, sizeof(src_pair));
             if (new_bucket > main_bucket + max_probe_length)
@@ -622,7 +625,7 @@ private:
     // Can we fit another element?
     void check_expand_need()
     {
-        reserve(_num_filled + 1);
+        reserve(_num_filled);
     }
 
     size_t erase_from_bucket(const KeyT& key) const
@@ -641,8 +644,8 @@ private:
             for (auto offset = max_probe_length; offset > 0; offset--) {
                 max_probe_length = offset - 1;
                 const auto nbucket = (bucket + offset) & _mask;
-                if (MAX_LEN(_pairs,nbucket) != State::INACTIVE && bucket == (HASH_FUNC(GET_KEY(_pairs,nbucket)) & _mask)) {
-                    std::swap(_pairs[nbucket].second, _pairs[bucket].second);
+                if (MAX_LEN(_pairs,nbucket) == offset && bucket == (HASH_FUNC(GET_KEY(_pairs, nbucket)) & _mask)) {
+                    _pairs[nbucket].second.swap(_pairs[bucket].second);
                     return nbucket;
                 }
             }
@@ -651,17 +654,16 @@ private:
         else if (max_probe_length == State::FILLED)
             return (size_t)-1;
 
-        //for (auto offset = 1; offset <= max_probe_length ; ++offset) {
-        for (auto offset = max_probe_length; offset > 0 ; offset--) {
+        for (auto offset = max_probe_length; offset > 0; offset--) {
             const auto nbucket = (bucket + offset) & _mask;
-            if (MAX_LEN(_pairs,nbucket) != State::INACTIVE && GET_KEY(_pairs,nbucket) == key) {
+            if (MAX_LEN(_pairs,nbucket) == offset && GET_KEY(_pairs,nbucket) == key) {
                 if (offset == max_probe_length) {
                     max_probe_length -= 1;
                     return nbucket;
                 }
-                const auto last = (bucket + max_probe_length --) & _mask;
+                const auto last = (bucket + max_probe_length--) & _mask;
                 if  ((HASH_FUNC(GET_KEY(_pairs, last)) & _mask) == bucket) {
-                    _pairs[last].swap(_pairs[nbucket]);
+                    _pairs[last].second.swap(_pairs[nbucket].second);
                     return last;
                 }
                 return nbucket;
@@ -676,7 +678,7 @@ private:
     {
         //if (empty()) { return (size_t)-1; } // Optimization
         const auto bucket = HASH_FUNC(key) & _mask;
-        const auto& max_probe_length = MAX_LEN(_pairs,bucket);
+        const auto max_probe_length = MAX_LEN(_pairs,bucket);
 #if 0
         if (max_probe_length == State::FILLED) {
             if (_eq(GET_KEY(_pairs,bucket), key))
@@ -695,9 +697,9 @@ private:
             return (size_t)-1;
 #endif
 
-        for (auto offset = 1; offset <= max_probe_length ; ++offset) {
+        for (auto offset = 1; offset <= max_probe_length; ++offset) {
             const auto nbucket = (bucket + offset) & _mask;
-            if (MAX_LEN(_pairs,nbucket) != State::INACTIVE && GET_KEY(_pairs,nbucket) == key) {
+            if (MAX_LEN(_pairs,nbucket) == offset && GET_KEY(_pairs,nbucket) == key) {
 #if 1
                 return nbucket;
 #else
@@ -710,21 +712,26 @@ private:
         return (size_t)-1;
     }
 
-    void reset_main_bucket(size_t main_bucket, size_t bucket)
+    int reset_main_bucket(size_t main_bucket, size_t bucket)
     {
+        const auto new_bucket = find_empty_bucket(main_bucket);
         auto& max_probe_length = MAX_LEN(_pairs, main_bucket);
-        const auto new_bucket = find_empty_bucket(main_bucket + 1);
-        new(_pairs + new_bucket) PairT(State::FILLED, std::pair<KeyT, ValueT>(std::move(GET_KEY(_pairs, bucket)), std::move(GET_VAL(_pairs, bucket))));
-        //adjust max_probe_length
-        if (new_bucket > main_bucket + max_probe_length)
-            max_probe_length = (int)(new_bucket - main_bucket);
-        else if (new_bucket < main_bucket)
-            max_probe_length = (int)(_num_buckets + new_bucket - main_bucket);
+
+        auto offset = (int)(new_bucket - main_bucket);
+        if (offset > max_probe_length)
+            max_probe_length = (int)(offset);
+        else if (offset < 0 && offset + _num_buckets > max_probe_length)
+            max_probe_length = offset = (int)(_num_buckets + offset);
+        else if (offset < 0)
+            offset = _num_buckets + offset;
+
+        new(_pairs + new_bucket) PairT(offset, std::pair<KeyT, ValueT>(std::move(GET_KEY(_pairs, bucket)), std::move(GET_VAL(_pairs, bucket))));
+        return new_bucket;
     }
 
     // Find the bucket with this key, or return a good empty bucket to place the key in.
     // In the latter case, the bucket is expected to be filled.
-    size_t find_or_allocate(const KeyT& key)
+    size_t find_or_allocate(const KeyT& key, int& offset)
     {
         const auto bucket = HASH_FUNC(key) & _mask;
         auto& max_probe_length = MAX_LEN(_pairs,bucket);
@@ -733,11 +740,10 @@ private:
             return bucket;
 
         //find exits
-        for (auto offset = 1; offset <= max_probe_length ; ++offset) {
+        for (offset = 1; offset <= max_probe_length; ++offset) {
             const auto nbucket = (bucket + offset) & _mask;
-            if (GET_KEY(_pairs, nbucket) == key && MAX_LEN(_pairs,nbucket) != State::INACTIVE) {
+            if (MAX_LEN(_pairs,nbucket) == offset && GET_KEY(_pairs, nbucket) == key)
                 return nbucket;
-            }
         }
 
         //find current bucket_key move it to man bucket
@@ -749,43 +755,11 @@ private:
         }
 
         //find a new empty
-        for (auto offset = max_probe_length + 1; ; ++offset) {
+        for (offset = max_probe_length; ; ++offset) {
             const auto nbucket = (bucket + offset) & _mask;
-            if (MAX_LEN(_pairs,nbucket) == State::INACTIVE) {
+            auto& probe_offset = MAX_LEN(_pairs,nbucket);
+            if (probe_offset == State::INACTIVE) {
                 max_probe_length = offset;
-                return nbucket;
-            }
-#if 0
-            else if (offset > 10) {
-                const auto bucket1 = (bucket + offset*offset) & _mask;
-                if (MAX_LEN(_pairs, bucket1) == State::INACTIVE) {
-                    max_probe_length = offset * offset;
-                    return bucket1;
-                }
-            }
-#endif
-        }
-    }
-
-    size_t find_main_bucket(const KeyT& key)
-    {
-        const auto bucket = HASH_FUNC(key) & _mask;
-        auto& max_probe_length = MAX_LEN(_pairs,bucket);
-        if (max_probe_length == State::INACTIVE)
-            return bucket;
-
-        //find main postion
-        const auto main_bucket = HASH_FUNC(GET_KEY(_pairs,bucket)) & _mask;
-        if (main_bucket != bucket) {
-            reset_main_bucket(main_bucket, bucket);
-            return bucket;
-        }
-
-        for (auto offset = 1; ; ++offset) {
-            const auto nbucket = (bucket + offset) & _mask;
-            if (MAX_LEN(_pairs,nbucket) == State::INACTIVE) {
-                if (offset > max_probe_length)
-                    max_probe_length = offset;
                 return nbucket;
             }
         }
@@ -794,17 +768,10 @@ private:
     // key is not in this map. Find a place to put it.
     inline size_t find_empty_bucket(size_t bucket_from)
     {
-        for (auto offset = 1;  ; ++offset) {
+        for (auto offset = 1; ; ++offset) {
             const auto bucket2 = (bucket_from + offset) & _mask;
             if (MAX_LEN(_pairs, bucket2) == State::INACTIVE)
                 return bucket2;
-#if 0
-            if (offset > 10 + 64 / sizeof (PairT)) {
-                const auto bucket1 = (bucket_from + offset*offset) & _mask;
-                if (MAX_LEN(_pairs, bucket1) == State::INACTIVE)
-                    return bucket1;
-            }
-#endif
         }
     }
 
