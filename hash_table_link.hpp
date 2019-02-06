@@ -14,29 +14,29 @@
 #include <iterator>
 #include <utility>
 #include <cstring>
+#include <cassert>
 
-//#include <loguru.hpp>
-#if 1
-    #define HASH_FUNC     _hasher
-#else
-    #define HASH_FUNC(v)   (v ) //for integer test.
+#ifdef  GET_KEY
+    #undef  GET_KEY
+    #undef  GET_VAL
+    #undef  BUCKET
 #endif
 
-#define HALF         1
+#define BUCKET(key)  _hasher(key) & _mask
+//#define BUCKET(key)  (_hasher(key) & (_mask / 2)) * 2
+
 #define ORDER_INDEX  0
 #if ORDER_INDEX == 0
-    #define GET_KEY(p,n) p[n].second.first
-    #define GET_VAL(p,n) p[n].second.second
-    #define NEXT_POS(s,n) s[n].first
-    #define GET_PVAL(s,n) s[n].second
+    #define GET_KEY(p,n)     p[n].second.first
+    #define GET_VAL(p,n)     p[n].second.second
+    #define NEXT_BUCKET(s,n) s[n].first
+    #define GET_PVAL(s,n)    s[n].second
 #else
-    #define GET_KEY(p,n)  p[n].first.first
-    #define GET_VAL(p,n)  p[n].first.second
-    #define NEXT_POS(s,n) s[n].second
-    #define GET_PVAL(s,n) s[n].first
+    #define GET_KEY(p,n)     p[n].first.first
+    #define GET_VAL(p,n)     p[n].first.second
+    #define NEXT_BUCKET(s,n) s[n].second
+    #define GET_PVAL(s,n)    s[n].first
 #endif
-
-static_assert((HALF == 1 || HALF == 2), "HALF set");
 
 namespace emilib4 {
 enum State
@@ -131,7 +131,7 @@ public:
             //DCHECK_LT_F(_bucket, _map->_num_buckets);
             do {
                 _bucket++;
-            } while (_bucket < _map->_num_buckets && _map->NEXT_POS(_pairs, _bucket) == State::INACTIVE);
+            } while (_bucket < _map->_num_buckets && _map->NEXT_BUCKET(_pairs, _bucket) == State::INACTIVE);
         }
 
         //private:
@@ -202,7 +202,7 @@ public:
             //DCHECK_LT_F(_bucket, _map->_num_buckets);
             do {
                 _bucket++;
-            } while (_bucket < _map->_num_buckets && _map->NEXT_POS(_pairs, _bucket) == State::INACTIVE);
+            } while (_bucket < _map->_num_buckets && _map->NEXT_BUCKET(_pairs, _bucket) == State::INACTIVE);
         }
 
         //private:
@@ -259,7 +259,7 @@ public:
     ~HashMap()
     {
         for (size_t bucket = 0; bucket < _num_buckets; ++bucket) {
-            if (NEXT_POS(_pairs, bucket) != State::INACTIVE) {
+            if (NEXT_BUCKET(_pairs, bucket) != State::INACTIVE) {
                 _pairs[bucket].~PairT();
             }
         }
@@ -275,7 +275,7 @@ public:
         std::swap(_num_buckets, other._num_buckets);
         std::swap(_num_filled, other._num_filled);
         std::swap(_mask, other._mask);
-        std::swap(_collision,        other._collision);
+        std::swap(_collision,other._collision);
     }
 
     // -------------------------------------------------------------
@@ -283,7 +283,7 @@ public:
     iterator begin()
     {
         size_t bucket = 0;
-        while (bucket < _num_buckets && NEXT_POS(_pairs, bucket) == State::INACTIVE) {
+        while (bucket < _num_buckets && NEXT_BUCKET(_pairs, bucket) == State::INACTIVE) {
             ++bucket;
         }
         return iterator(this, bucket);
@@ -292,7 +292,7 @@ public:
     const_iterator cbegin() const
     {
         size_t bucket = 0;
-        while (bucket < _num_buckets && NEXT_POS(_pairs, bucket) == State::INACTIVE) {
+        while (bucket < _num_buckets && NEXT_BUCKET(_pairs, bucket) == State::INACTIVE) {
             ++bucket;
         }
         return const_iterator(this, bucket);
@@ -425,7 +425,7 @@ public:
 
         auto bucket = find_or_allocate(key);
 
-        if (NEXT_POS(_pairs, bucket) != State::INACTIVE) {
+        if (NEXT_BUCKET(_pairs, bucket) != State::INACTIVE) {
             return { iterator(this, bucket), false };
         }
         else {
@@ -478,7 +478,7 @@ public:
         auto bucket = find_or_allocate(key);
 
         // Check if inserting a new value rather than overwriting an old entry
-        if (NEXT_POS(_pairs, bucket) != State::INACTIVE) {
+        if (NEXT_BUCKET(_pairs, bucket) != State::INACTIVE) {
             GET_VAL(_pairs, bucket) = value;
         }
         else {
@@ -495,7 +495,7 @@ public:
         auto bucket = find_or_allocate(key);
 
         // Check if inserting a new value rather than overwriting an old entry
-        if (NEXT_POS(_pairs, bucket) != State::INACTIVE) {
+        if (NEXT_BUCKET(_pairs, bucket) != State::INACTIVE) {
             ValueT old_value = GET_VAL(_pairs, bucket);
             GET_VAL(_pairs, bucket) = new_value;
             return old_value;
@@ -515,7 +515,7 @@ public:
         auto bucket = find_or_allocate(key);
 
         /* Check if inserting a new value rather than overwriting an old entry */
-        if (NEXT_POS(_pairs, bucket) == State::INACTIVE) {
+        if (NEXT_BUCKET(_pairs, bucket) == State::INACTIVE) {
 #if ORDER_INDEX == 0
             new(_pairs + bucket) PairT(bucket, std::pair<KeyT, ValueT>(key, ValueT()));
 #else
@@ -536,7 +536,7 @@ public:
         auto bucket = erase_from_bucket(key);
         if (bucket != (size_t)-1) {
             _pairs[bucket].~PairT();
-            NEXT_POS(_pairs, bucket) = State::INACTIVE;
+            NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
             _num_filled -= 1;
             return true;
         }
@@ -555,7 +555,7 @@ public:
         bucket = erase_from_bucket(it->first);
 
         _pairs[bucket].~PairT();
-        NEXT_POS(_pairs, bucket) = State::INACTIVE;
+        NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
         _num_filled -= 1;
         if (bucket == it._bucket)
             it++;
@@ -566,8 +566,8 @@ public:
     void clear()
     {
         for (size_t bucket = 0; bucket < _num_buckets; ++bucket) {
-            if (NEXT_POS(_pairs, bucket) != State::INACTIVE) {
-                NEXT_POS(_pairs, bucket) = State::INACTIVE;
+            if (NEXT_BUCKET(_pairs, bucket) != State::INACTIVE) {
+                NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
                 _pairs[bucket].~PairT();
             }
         }
@@ -598,22 +598,22 @@ public:
         _num_filled = 0;
         _collision = 0;
         _num_buckets = num_buckets;
-        _mask        = (num_buckets / HALF) - 1;
+        _mask        = num_buckets - 1;
         _pairs = new_pairs;
 
         for (size_t bucket = 0; bucket < num_buckets; bucket++)
-            NEXT_POS(_pairs, bucket) = State::INACTIVE;
+            NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
 
         int collision = 0;
         //set all main bucket first
         for (size_t src_bucket = 0; src_bucket < old_num_buckets && _num_filled < old_num_filled; src_bucket++) {
-            if (NEXT_POS(old_pairs, src_bucket) == State::INACTIVE) {
+            if (NEXT_BUCKET(old_pairs, src_bucket) == State::INACTIVE) {
                 continue;
             }
 
             auto& src_pair = old_pairs[src_bucket];
-            const auto main_bucket = HASH_FUNC(GET_KEY(old_pairs, src_bucket)) & _mask;
-            auto& next_bucket = NEXT_POS(_pairs, main_bucket);
+            const auto main_bucket = BUCKET(GET_KEY(old_pairs, src_bucket));
+            auto& next_bucket = NEXT_BUCKET(_pairs, main_bucket);
             if (next_bucket == State::INACTIVE) {
                 //new(_pairs + main_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
                 memcpy(&_pairs[main_bucket], &src_pair, sizeof(src_pair));
@@ -632,13 +632,13 @@ public:
         //reset all collisions bucket
         for (size_t src_bucket = 0; src_bucket < collision; src_bucket++) {
             auto& src_pair = old_pairs[src_bucket];
-            const auto main_bucket = HASH_FUNC(GET_KEY(old_pairs, src_bucket)) & _mask;
+            const auto main_bucket = BUCKET(GET_KEY(old_pairs, src_bucket));
             const auto last_bucket = find_last_bucket(main_bucket);
-            const auto new_bucket = find_empty_bucket(last_bucket + 1);
+            const auto new_bucket = find_empty_bucket(last_bucket);
             //new(_pairs + new_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
             memcpy(&_pairs[new_bucket], &src_pair, sizeof(src_pair));
-            NEXT_POS(_pairs, last_bucket) = new_bucket;
-            NEXT_POS(_pairs, new_bucket) = new_bucket;
+            NEXT_BUCKET(_pairs, last_bucket) = new_bucket;
+            NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
             _num_filled += 1;
         }
 
@@ -656,8 +656,8 @@ private:
     size_t erase_from_bucket(const KeyT& key) const
     {
         //if (empty()) { return (size_t)-1; } // Optimization
-        const auto bucket = HASH_FUNC(key) & _mask;
-        auto next_bucket = NEXT_POS(_pairs, bucket);
+        const auto bucket = BUCKET(key);
+        auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket == State::INACTIVE)
             return (size_t)-1;
         else if (GET_KEY(_pairs, bucket) == key) {
@@ -665,11 +665,11 @@ private:
                 return bucket;
 
             std::swap(GET_PVAL(_pairs, next_bucket), GET_PVAL(_pairs, bucket));
-            const auto nbucket = NEXT_POS(_pairs, next_bucket);
+            const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
             if (nbucket == next_bucket)
-                NEXT_POS(_pairs, bucket) = bucket;
+                NEXT_BUCKET(_pairs, bucket) = bucket;
             else
-                NEXT_POS(_pairs, bucket) = nbucket;
+                NEXT_BUCKET(_pairs, bucket) = nbucket;
             return next_bucket;
         }
         else if (next_bucket == bucket)
@@ -677,19 +677,17 @@ private:
 
         auto prev_bucket = bucket;
         while (true) {
-            const auto nbucket = NEXT_POS(_pairs, next_bucket);
+            const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
             if (GET_KEY(_pairs, next_bucket) == key) {
-                //assert(nbucket > State::INACTIVE);
                 if (nbucket == next_bucket)
-                    NEXT_POS(_pairs, prev_bucket) = prev_bucket;
+                    NEXT_BUCKET(_pairs, prev_bucket) = prev_bucket;
                 else
-                    NEXT_POS(_pairs, prev_bucket) = nbucket;
+                    NEXT_BUCKET(_pairs, prev_bucket) = nbucket;
                 return next_bucket;
             }
             if (nbucket == next_bucket)
                 break;
             prev_bucket = next_bucket;
-            //assert(nbucket != State::INACTIVE);
             next_bucket = nbucket;
         }
 
@@ -700,8 +698,8 @@ private:
     size_t find_filled_bucket(const KeyT& key) const
     {
         //if (empty()) { return (size_t)-1; } // Optimization
-        const auto bucket = HASH_FUNC(key) & _mask;
-        auto next_bucket = NEXT_POS(_pairs, bucket);
+        const auto bucket = BUCKET(key);
+        auto next_bucket = NEXT_BUCKET(_pairs, bucket);
 #if 0
         if (next_bucket != State::INACTIVE) {
              if (GET_KEY(_pairs, bucket) == key)
@@ -726,10 +724,9 @@ private:
 //                    return bucket;
                   return next_bucket;
             }
-            const auto nbucket = NEXT_POS(_pairs, next_bucket);
+            const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
             if (nbucket == next_bucket)
                 break;
-            //assert(nbucket != State::INACTIVE);
             next_bucket = nbucket;
         }
 
@@ -739,89 +736,78 @@ private:
     size_t reset_main_bucket(const size_t main_bucket, const size_t bucket)
     {
         //TODO:find parent/prev bucket
-        const auto next_bucket = NEXT_POS(_pairs, bucket);
-        const auto new_bucket = find_empty_bucket(bucket + 1);
+        const auto next_bucket = NEXT_BUCKET(_pairs, bucket);
+        const auto new_bucket = find_empty_bucket(bucket);
         const auto prev_bucket = find_prev_bucket(main_bucket, bucket);
-        NEXT_POS(_pairs, prev_bucket) = new_bucket;
+        NEXT_BUCKET(_pairs, prev_bucket) = new_bucket;
 #if ORDER_INDEX == 0
         new(_pairs + new_bucket) PairT(next_bucket, std::pair<KeyT, ValueT>(GET_KEY(_pairs, bucket), GET_VAL(_pairs, bucket)));
 #else
         new(_pairs + new_bucket) PairT(std::pair<KeyT, ValueT>(GET_KEY(_pairs, bucket), GET_VAL(_pairs, bucket)), next_bucket);
 #endif
         if (next_bucket == bucket)
-            NEXT_POS(_pairs, new_bucket) = new_bucket;
+            NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
 
-        return new_bucket;
+         return new_bucket;
     }
 
     // Find the bucket with this key, or return a good empty bucket to place the key in.
     // In the latter case, the bucket is expected to be filled.
     size_t find_or_allocate(const KeyT& key)
     {
-        const auto bucket = HASH_FUNC(key) & _mask;
-        auto next_bucket = NEXT_POS(_pairs, bucket);
+        const auto bucket = BUCKET(key);
+        auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         const auto& bucket_key = GET_KEY(_pairs, bucket);
         if (next_bucket == State::INACTIVE || bucket_key == key)
-            return bucket;
-        else if (next_bucket == bucket && ((HASH_FUNC(bucket_key) & _mask) == bucket)) {
-//                auto new_bucket = find_empty_bucket(next_bucket + 1);
-//                NEXT_POS(_pairs, next_bucket) = new_bucket;
-//                return new_bucket;
-        }
+             return bucket;
+        else if (next_bucket == bucket && ((BUCKET(bucket_key)) == bucket))
+             return NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
 
         //find next linked bucket and check key
         while (true) {
-            const auto nbucket = NEXT_POS(_pairs, next_bucket);
             if (GET_KEY(_pairs, next_bucket) == key)
                 return next_bucket;
-            else if (nbucket == next_bucket)
+            const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
+            if (nbucket == next_bucket)
                 break;
             next_bucket = nbucket;
         }
 
         //check current bucket_key is linked in main bucket
-        const auto main_bucket = HASH_FUNC(bucket_key) & _mask;
+        const auto main_bucket = BUCKET(bucket_key);
         if (main_bucket != bucket) {
             reset_main_bucket(main_bucket, bucket);
-            NEXT_POS(_pairs, bucket) = State::INACTIVE;
+            NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
             return bucket;
         }
 
         //find a new empty and linked it to tail
-        auto new_bucket = find_empty_bucket(next_bucket + 1);
-        //assert(NEXT_POS(_pairs, next_bucket) == next_bucket);
-        NEXT_POS(_pairs, next_bucket) = new_bucket;
-        return new_bucket;
+        const auto new_bucket = find_empty_bucket(next_bucket);
+        return NEXT_BUCKET(_pairs, next_bucket) = new_bucket;
     }
 
     // key is not in this map. Find a place to put it.
-    size_t find_empty_bucket(size_t bucket_from)
+    inline int find_empty_bucket(size_t bucket_from)
     {
-        auto offset = 0;
-        for (;  offset < 16; ++offset) {
+        for (auto offset = 1; ; ++offset) {
             const auto bucket = (bucket_from + offset) & _mask;
-            if (NEXT_POS(_pairs,bucket) == State::INACTIVE)
+            if (NEXT_BUCKET(_pairs, bucket) == State::INACTIVE)
                 return bucket;
+            else if (offset > 128 / sizeof (PairT) + 2) {
+                const auto bucket1 = (bucket + (1 + rand() % 256) * offset) & _mask;
+                if (NEXT_BUCKET(_pairs, bucket1) == State::INACTIVE) {
+//                    printf("%zd %zd\n", bucket_from, offset);
+                    return bucket1;
+                }
+            }
         }
-
-#if    HALF > 1
-        return (_num_buckets / HALF) + _collision ++;
-#else
-        for (; ; ++offset) {
-            const auto bucket = (bucket_from + offset*offset) & _mask;
-            if (NEXT_POS(_pairs, bucket) == State::INACTIVE)
-                return bucket;
-        }
-#endif
     }
 
     inline size_t find_prev_bucket(size_t main_bucket, const size_t bucket)
     {
         while (true) {
-            const auto next_bucket = NEXT_POS(_pairs, main_bucket);
-            if (next_bucket == bucket)
-                return main_bucket;
-            else if (next_bucket == main_bucket)
+            const auto next_bucket = NEXT_BUCKET(_pairs, main_bucket);
+            if (next_bucket == bucket || next_bucket == main_bucket)
                 return main_bucket;
             main_bucket = next_bucket;
         }
@@ -830,26 +816,12 @@ private:
     inline size_t find_last_bucket(size_t main_bucket)
     {
         while (true) {
-            const auto next_bucket = NEXT_POS(_pairs, main_bucket);
+            const auto next_bucket = NEXT_BUCKET(_pairs, main_bucket);
             if (next_bucket == main_bucket)
                 return next_bucket;
             main_bucket = next_bucket;
         }
     }
-#if 0
-    inline size_t find_key_bucket(size_t next_bucket, const KeyT& key)
-    {
-        while (true) {
-            const auto nbucket = NEXT_POS(_pairs, next_bucket);
-            if (GET_KEY(_pairs, next_bucket) == key)
-                return next_bucket;
-            else if (nbucket == next_bucket)
-                break;
-            next_bucket = nbucket;
-        }
-        return size_t(-1);
-    }
-#endif
 
 private:
 
