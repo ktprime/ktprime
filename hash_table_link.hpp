@@ -22,7 +22,7 @@
     #undef  BUCKET
 #endif
 
-#define BUCKET(key)  _hasher(key) & _mask
+#define BUCKET(key)  int(_hasher(key) & _mask)
 //#define BUCKET(key)  (_hasher(key) & (_mask / 2)) * 2
 
 #define ORDER_INDEX  0
@@ -346,7 +346,7 @@ public:
     iterator find(const KeyLike& key)
     {
         auto bucket = this->find_filled_bucket(key);
-        if (bucket == (size_t)-1) {
+        if (bucket == State::INACTIVE) {
             return this->end();
         }
         return iterator(this, bucket);
@@ -356,7 +356,7 @@ public:
     const_iterator find(const KeyLike& key) const
     {
         auto bucket = this->find_filled_bucket(key);
-        if (bucket == (size_t)-1)
+        if (bucket == State::INACTIVE)
         {
             return this->end();
         }
@@ -366,13 +366,13 @@ public:
     template<typename KeyLike>
     bool contains(const KeyLike& k) const
     {
-        return find_filled_bucket(k) != (size_t)-1;
+        return find_filled_bucket(k) != State::INACTIVE;
     }
 
     template<typename KeyLike>
     size_t count(const KeyLike& k) const
     {
-        return find_filled_bucket(k) != (size_t)-1 ? 1 : 0;
+        return find_filled_bucket(k) != State::INACTIVE ? 1 : 0;
     }
 
     /// Returns the matching ValueT or nullptr if k isn't found.
@@ -380,7 +380,7 @@ public:
     ValueT* try_get(const KeyLike& k)
     {
         auto bucket = find_filled_bucket(k);
-        if (bucket != (size_t)-1) {
+        if (bucket != State::INACTIVE) {
             return &GET_VAL(_pairs, bucket);
         }
         else {
@@ -393,7 +393,7 @@ public:
     const ValueT* try_get(const KeyLike& k) const
     {
         auto bucket = find_filled_bucket(k);
-        if (bucket != (size_t)-1) {
+        if (bucket != State::INACTIVE) {
             return &GET_VAL(_pairs, bucket);
         }
         else {
@@ -510,12 +510,12 @@ public:
     /// Like std::map<KeyT,ValueT>::operator[].
     ValueT& operator[](const KeyT& key)
     {
-        check_expand_need();
-
         auto bucket = find_or_allocate(key);
-
         /* Check if inserting a new value rather than overwriting an old entry */
         if (NEXT_BUCKET(_pairs, bucket) == State::INACTIVE) {
+            if (check_expand_need())
+                bucket = find_or_allocate(key);
+
 #if ORDER_INDEX == 0
             new(_pairs + bucket) PairT(bucket, std::pair<KeyT, ValueT>(key, ValueT()));
 #else
@@ -534,15 +534,14 @@ public:
     bool erase(const KeyT& key)
     {
         auto bucket = erase_from_bucket(key);
-        if (bucket != (size_t)-1) {
-            _pairs[bucket].~PairT();
-            NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
-            _num_filled -= 1;
-            return true;
-        }
-        else {
+        if (bucket == State::INACTIVE) {
             return false;
         }
+
+        _pairs[bucket].~PairT();
+        NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
+        _num_filled -= 1;
+        return true;
     }
 
     /// Erase an element typedef an iterator.
@@ -575,19 +574,19 @@ public:
     }
 
     /// Make room for this many elements
-    void reserve(size_t num_elems)
+    bool reserve(size_t num_elems)
     {
-        size_t required_buckets = num_elems + 2;
-        if (required_buckets < _mask  && _collision < _mask) {
-            return;
+        size_t required_buckets = num_elems + 2 + num_elems / 8;
+        if (required_buckets <= _num_buckets && _collision < _mask) {
+            return false;
         }
+
         size_t num_buckets = 4;
         while (num_buckets < required_buckets) { num_buckets *= 2; }
 
         auto new_pairs = (PairT*)malloc(num_buckets * sizeof(PairT));
 
         if (!new_pairs) {
-//                free(new_pairs);
             throw std::bad_alloc();
         }
 
@@ -623,18 +622,20 @@ public:
             else {
                 //move collision bucket to head
                 //new(old_pairs + collision ++) PairT(std::move(src_pair)); src_pair.~PairT();
-                memcpy(&old_pairs[collision++], &src_pair, sizeof(src_pair));
+                //memcpy(&old_pairs[collision++], &src_pair, sizeof(src_pair));
+                NEXT_BUCKET(old_pairs, collision++) = src_bucket;
             }
         }
 
-        if (_num_filled > 0)
-            printf("    _num_filled/num_buckets/packed = %zd/%zd/%zd, collision = %d, ration = %.2lf%%\n", _num_filled, old_num_buckets, sizeof(PairT), collision, (collision * 100.0 / (num_buckets + 1)));
+//        if (_num_filled > 0)
+//            printf("    _num_filled/num_buckets/packed = %zd/%zd/%zd, collision = %d, ration = %.2lf%%\n", _num_filled, old_num_buckets, sizeof(PairT), collision, (collision * 100.0 / (num_buckets + 1)));
         //reset all collisions bucket
         for (size_t src_bucket = 0; src_bucket < collision; src_bucket++) {
-            auto& src_pair = old_pairs[src_bucket];
-            const auto main_bucket = BUCKET(GET_KEY(old_pairs, src_bucket));
+            const auto bucket = NEXT_BUCKET(old_pairs, src_bucket);
+            auto& src_pair = old_pairs[bucket];
+            const auto main_bucket = BUCKET(GET_KEY(old_pairs, bucket));
             const auto last_bucket = find_last_bucket(main_bucket);
-            const auto new_bucket = find_empty_bucket(last_bucket);
+            const auto new_bucket  = find_empty_bucket(last_bucket);
             //new(_pairs + new_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
             memcpy(&_pairs[new_bucket], &src_pair, sizeof(src_pair));
             NEXT_BUCKET(_pairs, last_bucket) = new_bucket;
@@ -644,22 +645,24 @@ public:
 
         assert(old_num_filled == _num_filled);
         free(old_pairs);
+
+        return true;
     }
 
 private:
     // Can we fit another element?
-    inline void check_expand_need()
+    inline bool check_expand_need()
     {
-        reserve(_num_filled);
+        return reserve(_num_filled);
     }
 
-    size_t erase_from_bucket(const KeyT& key) const
+    int erase_from_bucket(const KeyT& key) const
     {
-        //if (empty()) { return (size_t)-1; } // Optimization
+        //if (empty()) { return State::INACTIVE; } // Optimization
         const auto bucket = BUCKET(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket == State::INACTIVE)
-            return (size_t)-1;
+            return State::INACTIVE;
         else if (GET_KEY(_pairs, bucket) == key) {
             if (next_bucket == bucket)
                 return bucket;
@@ -673,7 +676,7 @@ private:
             return next_bucket;
         }
         else if (next_bucket == bucket)
-            return (size_t)-1;
+            return State::INACTIVE;
 
         auto prev_bucket = bucket;
         while (true) {
@@ -691,13 +694,13 @@ private:
             next_bucket = nbucket;
         }
 
-        return (size_t)-1;
+        return State::INACTIVE;
     }
 
-    // Find the bucket with this key, or return (size_t)-1
-    size_t find_filled_bucket(const KeyT& key) const
+    // Find the bucket with this key, or return State::INACTIVE
+    int find_filled_bucket(const KeyT& key) const
     {
-        //if (empty()) { return (size_t)-1; } // Optimization
+        //if (empty()) { return State::INACTIVE; } // Optimization
         const auto bucket = BUCKET(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
 #if 0
@@ -705,17 +708,17 @@ private:
              if (GET_KEY(_pairs, bucket) == key)
                 return bucket;
              else if (next_bucket == bucket)
-                 return (size_t)-1;
+                 return State::INACTIVE;
         }
         else
-            return (size_t)-1;
+            return State::INACTIVE;
 #elif 1
         if (next_bucket == State::INACTIVE)
-            return (size_t)-1;
+            return State::INACTIVE;
         else if (GET_KEY(_pairs, bucket) == key)
             return bucket;
         else if (next_bucket == bucket)
-            return (size_t)-1;
+            return State::INACTIVE;
 #endif
         //find next linked bucket
         while (true) {
@@ -730,14 +733,14 @@ private:
             next_bucket = nbucket;
         }
 
-        return (size_t)-1;
+        return State::INACTIVE;
     }
 
-    size_t reset_main_bucket(const size_t main_bucket, const size_t bucket)
+    int reset_main_bucket(const int main_bucket, const int bucket)
     {
         //TODO:find parent/prev bucket
         const auto next_bucket = NEXT_BUCKET(_pairs, bucket);
-        const auto new_bucket = find_empty_bucket(bucket);
+        const auto new_bucket  = find_empty_bucket(bucket);
         const auto prev_bucket = find_prev_bucket(main_bucket, bucket);
         NEXT_BUCKET(_pairs, prev_bucket) = new_bucket;
 #if ORDER_INDEX == 0
@@ -753,7 +756,7 @@ private:
 
     // Find the bucket with this key, or return a good empty bucket to place the key in.
     // In the latter case, the bucket is expected to be filled.
-    size_t find_or_allocate(const KeyT& key)
+    int find_or_allocate(const KeyT& key)
     {
         const auto bucket = BUCKET(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
@@ -787,7 +790,7 @@ private:
     }
 
     // key is not in this map. Find a place to put it.
-    inline int find_empty_bucket(size_t bucket_from)
+    inline int find_empty_bucket(int bucket_from)
     {
         for (auto offset = 1; ; ++offset) {
             const auto bucket = (bucket_from + offset) & _mask;
@@ -803,7 +806,7 @@ private:
         }
     }
 
-    inline size_t find_prev_bucket(size_t main_bucket, const size_t bucket)
+    inline int find_prev_bucket(int main_bucket, const int bucket)
     {
         while (true) {
             const auto next_bucket = NEXT_BUCKET(_pairs, main_bucket);
@@ -813,7 +816,7 @@ private:
         }
     }
 
-    inline size_t find_last_bucket(size_t main_bucket)
+    inline int find_last_bucket(int main_bucket)
     {
         while (true) {
             const auto next_bucket = NEXT_BUCKET(_pairs, main_bucket);
