@@ -627,19 +627,18 @@ public:
             }
         }
 
-//        if (_num_filled > 0)
-//            printf("    _num_filled/num_buckets/packed = %zd/%zd/%zd, collision = %d, ration = %.2lf%%\n", _num_filled, old_num_buckets, sizeof(PairT), collision, (collision * 100.0 / (num_buckets + 1)));
+        if (_num_filled > 0)
+            printf("    _num_filled/ration/packed = %zd/%d%%/%zd, collision = %d, cration = %.2lf%%\n", _num_filled, 100*_num_filled / num_buckets, sizeof(PairT), collision, (collision * 100.0 / (num_buckets + 1)));
         //reset all collisions bucket
         for (size_t src_bucket = 0; src_bucket < collision; src_bucket++) {
             const auto bucket = NEXT_BUCKET(old_pairs, src_bucket);
             auto& src_pair = old_pairs[bucket];
             const auto main_bucket = BUCKET(GET_KEY(old_pairs, bucket));
             const auto last_bucket = find_last_bucket(main_bucket);
-            const auto new_bucket  = find_empty_bucket(last_bucket);
+            const auto new_bucket = find_empty_bucket(last_bucket);
             //new(_pairs + new_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
             memcpy(&_pairs[new_bucket], &src_pair, sizeof(src_pair));
-            NEXT_BUCKET(_pairs, last_bucket) = new_bucket;
-            NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
+            NEXT_BUCKET(_pairs, last_bucket) = NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
             _num_filled += 1;
         }
 
@@ -740,7 +739,7 @@ private:
     {
         //TODO:find parent/prev bucket
         const auto next_bucket = NEXT_BUCKET(_pairs, bucket);
-        const auto new_bucket  = find_empty_bucket(bucket);
+        const auto new_bucket = find_empty_bucket(bucket);
         const auto prev_bucket = find_prev_bucket(main_bucket, bucket);
         NEXT_BUCKET(_pairs, prev_bucket) = new_bucket;
 #if ORDER_INDEX == 0
