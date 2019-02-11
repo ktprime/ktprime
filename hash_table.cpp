@@ -21,7 +21,7 @@
     #undef  HOPS
 #endif
 
-#define HOPS         2
+#define HOPS         1
 #define GET_KEY(p,n) p[n].second.first
 #define GET_VAL(p,n) p[n].second.second
 #define MAX_LEN(s,n) s[n].first
@@ -578,8 +578,8 @@ public:
             const auto main_bucket = BUCKET(src_pair.second.first);
             auto& max_probe_length = MAX_LEN(_pairs, main_bucket);
             if (max_probe_length == State::INACTIVE) {
-                //new(_pairs + main_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
-                memcpy(&_pairs[main_bucket], &src_pair, sizeof(src_pair));
+                new(_pairs + main_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
+                //memcpy(&_pairs[main_bucket], &src_pair, sizeof(src_pair));
                 max_probe_length = State::FILLED;
                 _num_filled += 1;
             } else {
@@ -590,9 +590,9 @@ public:
             }
         }
 
-//        if (_num_filled > 0)
-//            printf("    num_buckets/bucket_ration = %zd/%.2lf%%, collision = %d, collor_ration = %.2lf%%\n",
-//                    _num_filled, _num_filled * 100.0 / (num_buckets),  collision, (collision * 100.0 / (num_buckets + 1)));
+        if (_num_filled > 0)
+            printf("    num_buckets/bucket_ration = %zd/%.2lf%%, collision = %d, collor_ration = %.2lf%%\n",
+                    _num_filled, _num_filled * 100.0 / (num_buckets),  collision, (collision * 100.0 / (num_buckets + 1)));
 
         //reset all collisions bucket
         for (size_t src_bucket=0; src_bucket < collision; src_bucket++) {
@@ -601,8 +601,8 @@ public:
             const auto main_bucket = BUCKET(src_pair.second.first);
             auto& max_probe_length = MAX_LEN(_pairs, main_bucket);
             const auto new_bucket = find_empty_bucket(main_bucket);
-            //new(_pairs + dst_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
-            memcpy(&_pairs[new_bucket], &src_pair, sizeof(src_pair));
+            new(_pairs + new_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
+            //memcpy(&_pairs[new_bucket], &src_pair, sizeof(src_pair));
 
             const int offset = (int)(new_bucket - main_bucket);
             if (offset > max_probe_length)
@@ -717,7 +717,9 @@ private:
             max_probe_length = offset;
         else if (offset < 0 && offset + _num_buckets > max_probe_length)
             max_probe_length = (int)(_num_buckets + offset);
-        new(_pairs + new_bucket) PairT(State::FILLED, std::pair<KeyT, ValueT>(std::move(GET_KEY(_pairs, bucket)), std::move(GET_VAL(_pairs, bucket))));
+//        new(_pairs + new_bucket) PairT(State::FILLED, std::pair<KeyT, ValueT>(std::move(GET_KEY(_pairs, bucket)), std::move(GET_VAL(_pairs, bucket))));
+        new(_pairs + new_bucket) PairT(std::move(_pairs[bucket])); _pairs[bucket].~PairT();
+        MAX_LEN(_pairs, new_bucket) = State::FILLED;
         return new_bucket;
     }
 
