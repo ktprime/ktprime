@@ -428,12 +428,13 @@ public:
     }
 
     /// Same as above, but contains(key) MUST be false
-    void insert_unique(KeyT&& key, ValueT&& value)
+    void insert_unique(const KeyT& key, const ValueT& value)
     {
         //DCHECK_F(!contains(key));
         check_expand_need();
-        auto bucket = find_or_allocate(key);
-        new(_pairs + bucket) PairT(State::FILLED, std::pair<KeyT, ValueT>(std::move(key), std::move(value)));
+//		assert(find_filled_bucket(key) == State::INACTIVE);
+        auto bucket = find_main_bucket(key);
+        new(_pairs + bucket) PairT(State::FILLED, std::pair<KeyT, ValueT>(key, value));
         _num_filled++;
     }
 
@@ -481,7 +482,7 @@ public:
         /* Check if inserting a new value rather than overwriting an old entry */
         if (MAX_LEN(_pairs,bucket) == State::INACTIVE) {
             if (check_expand_need())
-                bucket = find_or_allocate(key);
+                bucket = find_main_bucket(key);
 
             new(_pairs + bucket) PairT(State::FILLED, std::pair<KeyT, ValueT>(key, ValueT()));
             _num_filled++;
@@ -765,6 +766,31 @@ private:
                 }
             }
 #endif
+        }
+    }
+
+    int find_main_bucket(const KeyT& key)
+    {
+        const auto bucket = BUCKET(key);
+        auto& max_probe_length = MAX_LEN(_pairs,bucket);
+        if (max_probe_length == State::INACTIVE)
+            return bucket;
+
+        //find main postion
+        const auto& bucket_key = GET_KEY(_pairs,bucket);
+        const auto main_bucket = BUCKET(bucket_key);
+        if (main_bucket != bucket) {
+            reset_main_bucket(main_bucket, bucket);
+            max_probe_length = State::INACTIVE;
+            return bucket;
+        }
+
+        for (int offset = max_probe_length + 1; ; offset += HOPS) {
+            const auto nbucket = (bucket + offset) & _mask;
+            if (MAX_LEN(_pairs,nbucket) == State::INACTIVE) {
+                max_probe_length = offset;
+                return nbucket;
+            }
         }
     }
 
