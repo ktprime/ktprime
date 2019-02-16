@@ -1,4 +1,5 @@
 /*Fast Single-thread segmented sieve of Eratosthenes prime number n < 2^64 ***/
+////http://ntheory.org/sieves/benchmarks.html
 static const char* Benchmark =
 "g++ -DSIEVE_SIZE=2048 -DFSL1 -DFDIV -march=native -funroll-loops -O3 -s -pipe PrimeNumber.cpp -o prime\n"
 "Windows 10 x64               i3-350M,i5-3470,i7-7500u,i7-6700,r7-1700\n"
