@@ -218,7 +218,6 @@ public:
     {
         _num_buckets = 0;
         _num_filled = 0;
-        _collision = 0;
         _mask = 0;  // _num_buckets minus one
         _pairs = nullptr;
         reserve(8);
@@ -275,7 +274,6 @@ public:
         std::swap(_num_buckets, other._num_buckets);
         std::swap(_num_filled, other._num_filled);
         std::swap(_mask, other._mask);
-        std::swap(_collision,other._collision);
     }
 
     // -------------------------------------------------------------
@@ -448,11 +446,7 @@ public:
     {
         // TODO: reserve space exactly once.
         for (; begin != end; ++begin) {
-#if ORDER_INDEX == 0
             insert(begin->first, begin->second);
-#else
-            insert(begin->second, begin->first);
-#endif
         }
     }
 
@@ -465,7 +459,7 @@ public:
 #if ORDER_INDEX == 0
         new(_pairs + bucket) PairT(bucket, std::pair<KeyT, ValueT>(key, value));
 #else
-		new(_pairs + bucket) PairT(std::pair<KeyT, ValueT>(key, value), bucket);
+        new(_pairs + bucket) PairT(std::pair<KeyT, ValueT>(key, value), bucket);
 #endif
         _num_filled++;
     }
@@ -581,15 +575,14 @@ public:
     bool reserve(size_t num_elems)
     {
         size_t required_buckets = num_elems + 2 + num_elems / 8;
-        if (required_buckets <= _num_buckets && _collision < _mask) {
+        if (required_buckets <= _num_buckets) {
             return false;
         }
 
         size_t num_buckets = 4;
         while (num_buckets < required_buckets) { num_buckets *= 2; }
 
-        auto new_pairs = (PairT*)malloc(num_buckets * sizeof(PairT));
-
+        auto new_pairs = (PairT*)malloc((num_buckets + 21) * sizeof(PairT));
         if (!new_pairs) {
             throw std::bad_alloc();
         }
@@ -599,13 +592,14 @@ public:
         auto old_pairs = _pairs;
 
         _num_filled = 0;
-        _collision = 0;
         _num_buckets = num_buckets;
         _mask        = num_buckets - 1;
         _pairs = new_pairs;
 
         for (size_t bucket = 0; bucket < num_buckets; bucket++)
             NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
+        for (size_t bucket = num_buckets; bucket < num_buckets + 20; bucket++)
+            NEXT_BUCKET(_pairs, bucket) = 0;
 
         size_t collision = 0;
         //set all main bucket first
@@ -646,8 +640,8 @@ public:
             _num_filled += 1;
         }
 
-        assert(old_num_filled == _num_filled);
         free(old_pairs);
+//        assert(old_num_filled == _num_filled);
 
         return true;
     }
@@ -796,17 +790,27 @@ private:
     // key is not in this map. Find a place to put it.
     inline int find_empty_bucket(int bucket_from)
     {
-        for (auto offset = 1; ; ++offset) {
-            const auto bucket = (bucket_from + offset) & _mask;
+        for (auto offset = 1; offset < 10; ++offset) {
+            const auto bucket = bucket_from + offset;
             if (NEXT_BUCKET(_pairs, bucket) == State::INACTIVE)
                 return bucket;
-            else if (offset > 128 / int(sizeof (PairT) + 2)) {
-                const auto bucket2 = (bucket + (1 + rand() % 256) * offset) & _mask;
-                if (NEXT_BUCKET(_pairs, bucket2) == State::INACTIVE) {
-//                    printf("%zd %zd\n", bucket_from, offset);
-                    return bucket2;
-                }
+        }
+
+        for (auto offset = 20; ; ++offset) {
+            const auto bucket2 = (bucket_from + offset * offset) & _mask;
+            if (NEXT_BUCKET(_pairs, bucket2) == State::INACTIVE) {
+                return bucket2;
             }
+            const auto bucket3 = bucket2 + 1;
+            if (NEXT_BUCKET(_pairs, bucket3) == State::INACTIVE) {
+                return bucket3;
+            }
+#if 0
+            const auto bucket4 = (bucket_from + rand() * offset) & _mask;
+            if (NEXT_BUCKET(_pairs, bucket4) == State::INACTIVE) {
+                return bucket4;
+            }
+#endif
         }
     }
 
@@ -833,10 +837,10 @@ private:
     int find_main_bucket(const KeyT& key)
     {
         const auto bucket = BUCKET(key);
-        auto next_bucket = NEXT_BUCKET(_pairs, bucket);
+        const auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket == State::INACTIVE)
             return bucket;
-    
+
         const auto& bucket_key = GET_KEY(_pairs, bucket);
         const auto main_bucket = BUCKET(bucket_key);
         //check current bucket_key is linked in main bucket
@@ -859,7 +863,6 @@ private:
     size_t  _num_buckets;
     size_t  _num_filled;
     size_t  _mask;  // _num_buckets minus one
-    size_t  _collision;
 };
 
 } // namespace emilib
