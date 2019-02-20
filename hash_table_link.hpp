@@ -582,7 +582,7 @@ public:
         size_t num_buckets = 4;
         while (num_buckets < required_buckets) { num_buckets *= 2; }
 
-        auto new_pairs = (PairT*)malloc((num_buckets + 21) * sizeof(PairT));
+        auto new_pairs = (PairT*)malloc(num_buckets * sizeof(PairT));
         if (!new_pairs) {
             throw std::bad_alloc();
         }
@@ -598,8 +598,6 @@ public:
 
         for (size_t bucket = 0; bucket < num_buckets; bucket++)
             NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
-        for (size_t bucket = num_buckets; bucket < num_buckets + 20; bucket++)
-            NEXT_BUCKET(_pairs, bucket) = 0;
 
         size_t collision = 0;
         //set all main bucket first
@@ -621,12 +619,12 @@ public:
                 //move collision bucket to head
                 //new(old_pairs + collision ++) PairT(std::move(src_pair)); src_pair.~PairT();
                 //memcpy(&old_pairs[collision++], &src_pair, sizeof(src_pair));
-                NEXT_BUCKET(old_pairs, collision++) = src_bucket;
+                NEXT_BUCKET(old_pairs, collision++) = (int)src_bucket;
             }
         }
 
         if (_num_filled > 0)
-            printf("    _num_filled/ration/packed = %zd/%zd%%/%ld, collision = %zd, cration = %.2lf%%\n", _num_filled, 100*_num_filled / num_buckets, sizeof(PairT), collision, (collision * 100.0 / (num_buckets + 1)));
+            printf("    _num_filled/ration/packed = %zd/%zd%%/%zd, collision = %zd, cration = %.2lf%%\n", _num_filled, 100*_num_filled / num_buckets, sizeof(PairT), collision, (collision * 100.0 / (num_buckets + 1)));
         //reset all collisions bucket
         for (size_t src_bucket = 0; src_bucket < collision; src_bucket++) {
             const auto bucket = NEXT_BUCKET(old_pairs, src_bucket);
@@ -720,7 +718,7 @@ private:
         //find next linked bucket
         while (true) {
             if (GET_KEY(_pairs, next_bucket) == key) {
-#if HASH_EMLIB_LCU
+#if EMLIB_LRU_GET
                   GET_PVAL(_pairs, next_bucket).swap(GET_PVAL(_pairs, bucket));
                   return bucket;
 #else
@@ -766,8 +764,15 @@ private:
 
         //find next linked bucket and check key
         while (true) {
-            if (GET_KEY(_pairs, next_bucket) == key)
+            if (GET_KEY(_pairs, next_bucket) == key) {
+#if EMLIB_LRU_SET
+                GET_PVAL(_pairs, next_bucket).swap(GET_PVAL(_pairs, bucket));
+                return bucket;
+#else
                 return next_bucket;
+#endif
+            }
+
             const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
             if (nbucket == next_bucket)
                 break;
@@ -790,27 +795,23 @@ private:
     // key is not in this map. Find a place to put it.
     inline int find_empty_bucket(int bucket_from)
     {
-        for (auto offset = 1; offset < 10; ++offset) {
-            const auto bucket = bucket_from + offset;
+        for (auto offset = 1; ; ++offset) {
+            const auto bucket = (bucket_from + offset) & _mask;
             if (NEXT_BUCKET(_pairs, bucket) == State::INACTIVE)
                 return bucket;
-        }
+            else if (offset > (int)(64 / sizeof(PairT))) {
+                const int bucket1 = (bucket + offset * offset) & _mask;
+                if (NEXT_BUCKET(_pairs, bucket1) == State::INACTIVE)
+                    return bucket1;
 
-        for (auto offset = 20; ; ++offset) {
-            const auto bucket2 = (bucket_from + offset * offset) & _mask;
-            if (NEXT_BUCKET(_pairs, bucket2) == State::INACTIVE) {
-                return bucket2;
+                const auto bucket2 = (bucket1 + 1) & _mask;
+                if (NEXT_BUCKET(_pairs, bucket2) == State::INACTIVE)
+                    return bucket2;
+
+                const auto bucket3 = (bucket1 - 1) & _mask;
+                if (NEXT_BUCKET(_pairs, bucket3) == State::INACTIVE)
+                    return bucket3;
             }
-            const auto bucket3 = bucket2 + 1;
-            if (NEXT_BUCKET(_pairs, bucket3) == State::INACTIVE) {
-                return bucket3;
-            }
-#if 0
-            const auto bucket4 = (bucket_from + rand() * offset) & _mask;
-            if (NEXT_BUCKET(_pairs, bucket4) == State::INACTIVE) {
-                return bucket4;
-            }
-#endif
         }
     }
 
