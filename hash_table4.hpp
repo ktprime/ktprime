@@ -20,6 +20,7 @@
     #undef  GET_KEY
     #undef  GET_VAL
     #undef  BUCKET
+    #undef  NEXT_BUCKET
 #endif
 
 #define BUCKET(key)  int(_hasher(key) & _mask)
@@ -340,8 +341,7 @@ public:
 
     // ------------------------------------------------------------
 
-    template<typename KeyLike>
-    iterator find(const KeyLike& key)
+    iterator find(const KeyT& key)
     {
         auto bucket = this->find_filled_bucket(key);
         if (bucket == State::INACTIVE) {
@@ -350,8 +350,7 @@ public:
         return iterator(this, bucket);
     }
 
-    template<typename KeyLike>
-    const_iterator find(const KeyLike& key) const
+    const_iterator find(const KeyT& key) const
     {
         auto bucket = this->find_filled_bucket(key);
         if (bucket == State::INACTIVE)
@@ -361,21 +360,18 @@ public:
         return const_iterator(this, bucket);
     }
 
-    template<typename KeyLike>
-    bool contains(const KeyLike& k) const
+    bool contains(const KeyT& k) const
     {
         return find_filled_bucket(k) != State::INACTIVE;
     }
 
-    template<typename KeyLike>
-    size_t count(const KeyLike& k) const
+    size_t count(const KeyT& k) const
     {
         return find_filled_bucket(k) != State::INACTIVE ? 1 : 0;
     }
 
     /// Returns the matching ValueT or nullptr if k isn't found.
-    template<typename KeyLike>
-    ValueT* try_get(const KeyLike& k)
+    ValueT* try_get(const KeyT& k)
     {
         auto bucket = find_filled_bucket(k);
         if (bucket != State::INACTIVE) {
@@ -387,8 +383,7 @@ public:
     }
 
     /// Const version of the above
-    template<typename KeyLike>
-    const ValueT* try_get(const KeyLike& k) const
+    const ValueT* try_get(const KeyT& k) const
     {
         auto bucket = find_filled_bucket(k);
         if (bucket != State::INACTIVE) {
@@ -400,8 +395,7 @@ public:
     }
 
     /// Convenience function.
-    template<typename KeyLike>
-    const ValueT get_or_return_default(const KeyLike& k) const
+    const ValueT get_or_return_default(const KeyT& k) const
     {
         const ValueT* ret = try_get(k);
         if (ret) {
@@ -539,6 +533,11 @@ public:
         NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
         _pairs[bucket].~PairT();
         _num_filled -= 1;
+
+#ifdef EIMLIB_AUTO_SHRINK
+        if (_num_buckets > 256 && _num_buckets > 4 * _num_filled)
+            rehash(_num_filled);
+#endif
         return true;
     }
 
@@ -556,6 +555,11 @@ public:
         _num_filled -= 1;
         if (bucket == it._bucket)
             it++;
+
+#ifdef EIMLIB_AUTO_SHRINK
+        if (_num_buckets > 256 && _num_buckets > 4 * _num_filled)
+            rehash(_num_filled);
+#endif
         return it;
     }
 
@@ -572,13 +576,19 @@ public:
     }
 
     /// Make room for this many elements
-    bool reserve(size_t num_elems)
+    inline bool reserve(size_t num_elems)
     {
         size_t required_buckets = num_elems + 2 + num_elems / 8;
         if (required_buckets <= _num_buckets) {
             return false;
         }
+        rehash(required_buckets);
+        return true;
+    }
 
+    /// Make room for this many elements
+    void rehash(size_t required_buckets)
+    {
         size_t num_buckets = 4;
         while (num_buckets < required_buckets) { num_buckets *= 2; }
 
@@ -587,14 +597,15 @@ public:
             throw std::bad_alloc();
         }
 
+        assert(num_buckets > _num_filled);
         auto old_num_filled = _num_filled;
         auto old_num_buckets = _num_buckets;
         auto old_pairs = _pairs;
 
-        _num_filled = 0;
+        _num_filled  = 0;
         _num_buckets = num_buckets;
         _mask        = num_buckets - 1;
-        _pairs = new_pairs;
+        _pairs       = new_pairs;
 
         for (size_t bucket = 0; bucket < num_buckets; bucket++)
             NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
@@ -623,7 +634,7 @@ public:
             }
         }
 
-        if (_num_filled > 0)
+        if (_num_filled > 100)
             printf("    _num_filled/ration/packed = %zd/%zd%%/%zd, collision = %zd, cration = %.2lf%%\n", _num_filled, 100*_num_filled / num_buckets, sizeof(PairT), collision, (collision * 100.0 / (num_buckets + 1)));
         //reset all collisions bucket
         for (size_t src_bucket = 0; src_bucket < collision; src_bucket++) {
@@ -640,8 +651,6 @@ public:
 
         free(old_pairs);
 //        assert(old_num_filled == _num_filled);
-
-        return true;
     }
 
 private:
@@ -795,11 +804,12 @@ private:
     // key is not in this map. Find a place to put it.
     inline int find_empty_bucket(int bucket_from)
     {
+        constexpr int prob_count = (int)(128 / sizeof(PairT)) + 2;
         for (auto offset = 1; ; ++offset) {
             const auto bucket = (bucket_from + offset) & _mask;
             if (NEXT_BUCKET(_pairs, bucket) == State::INACTIVE)
                 return bucket;
-            else if (offset > (int)(64 / sizeof(PairT))) {
+            else if (offset > prob_count) {
                 const int bucket1 = (bucket + offset * offset) & _mask;
                 if (NEXT_BUCKET(_pairs, bucket1) == State::INACTIVE)
                     return bucket1;
