@@ -560,7 +560,6 @@ public:
         if (_num_buckets > 256 && _num_buckets > 4 * _num_filled) {
             rehash(_num_filled * 9 / 8 + 2);
             it = begin();
-            //
         }
 #endif
         return it;
@@ -625,12 +624,10 @@ public:
             auto& next_bucket = NEXT_BUCKET(_pairs, main_bucket);
             if (next_bucket == State::INACTIVE) {
                 new(_pairs + main_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
-                //memcpy(&_pairs[main_bucket], &src_pair, sizeof(src_pair));
                 next_bucket = main_bucket;
             }
             else {
                 //move collision bucket to head
-                //memcpy(&old_pairs[collision++], &src_pair, sizeof(src_pair));
                 NEXT_BUCKET(old_pairs, collision++) = (int)src_bucket;
             }
             _num_filled += 1;
@@ -812,17 +809,18 @@ private:
             if (NEXT_BUCKET(_pairs, bucket) == State::INACTIVE)
                 return bucket;
             else if (offset > max_probe_length) {
-                const int bucket1 = (bucket + offset * offset) & _mask;
+                const auto bucket1 = (bucket + offset * offset) & _mask;
                 if (NEXT_BUCKET(_pairs, bucket1) == State::INACTIVE)
                     return bucket1;
 
                 const auto bucket2 = (bucket1 + 1) & _mask;
                 if (NEXT_BUCKET(_pairs, bucket2) == State::INACTIVE)
                     return bucket2;
-
+#if 0
                 const auto bucket3 = (bucket1 - 1) & _mask;
                 if (NEXT_BUCKET(_pairs, bucket3) == State::INACTIVE)
                     return bucket3;
+#endif
             }
         }
     }
