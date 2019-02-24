@@ -19,21 +19,12 @@
 #ifdef  GET_KEY
     #undef  GET_KEY
     #undef  BUCKET
-    #undef  ORDER_INDEX
     #undef  NEXT_BUCKET
 #endif
 
 #define BUCKET(key)  int(_hasher(key) & _mask)
-//#define BUCKET(key)  (_hasher(key) & (_mask / 2)) * 2
-
-#define ORDER_INDEX  1
-#if ORDER_INDEX == 0
-    #define GET_KEY(p,n)     p[n].second
-    #define NEXT_BUCKET(s,n) s[n].first
-#else
-    #define GET_KEY(p,n)     p[n].first
-    #define NEXT_BUCKET(s,n) s[n].second
-#endif
+#define GET_KEY(p,n)     p[n].first
+#define NEXT_BUCKET(s,n) s[n].second
 
 namespace emilib2 {
 enum State
@@ -57,12 +48,7 @@ class HashSet
 {
 private:
     typedef  HashSet<KeyT, HashT, EqT> MyType;
-
-#if ORDER_INDEX == 0
-    typedef  std::pair<int, KeyT> PairT;
-#else
     typedef  std::pair<KeyT, int> PairT;
-#endif
 
 public:
     typedef size_t  size_type;
@@ -380,11 +366,7 @@ public:
             if (check_expand_need())
                 bucket = find_main_bucket(key, true);
 
-#if ORDER_INDEX == 0
-            new(_pairs + bucket) PairT(bucket, key);
-#else
             new(_pairs + bucket) PairT(key, bucket);
-#endif
             _num_filled++;
             return { iterator(this, bucket), true };
         }
@@ -403,11 +385,7 @@ public:
         if (NEXT_BUCKET(_pairs, bucket) != State::INACTIVE) {
             return { iterator(this, bucket), false };
         } else {
-#if ORDER_INDEX == 0
-            new(_pairs + bucket) PairT(bucket, std::move(key));
-#else
             new(_pairs + bucket) PairT(std::move(key), bucket);
-#endif
             _num_filled++;
             return { iterator(this, bucket), true };
         }
@@ -433,11 +411,7 @@ public:
         //DCHECK_F(!contains(key));
         check_expand_need();
         auto bucket = find_main_bucket(key, true);
-#if ORDER_INDEX == 0
-        new(_pairs + bucket) PairT(bucket, key);
-#else
         new(_pairs + bucket) PairT(key, bucket);
-#endif
         _num_filled++;
     }
 
@@ -546,17 +520,15 @@ public:
             auto& next_bucket = NEXT_BUCKET(_pairs, main_bucket);
             if (next_bucket == State::INACTIVE) {
                 new(_pairs + main_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
-                //memcpy(&_pairs[main_bucket], &src_pair, sizeof(src_pair));
                 next_bucket = main_bucket;
             }
             else {
                 //move collision bucket to head
-                //memcpy(&old_pairs[collision++], &src_pair, sizeof(src_pair));
                 NEXT_BUCKET(old_pairs, collision++) = (int)src_bucket;
             }
             _num_filled += 1;
             if (_num_filled >= old_num_filled)
-                break ;
+                break;
         }
 
         //reset all collisions bucket
@@ -565,7 +537,6 @@ public:
             auto new_bucket = find_main_bucket(GET_KEY(old_pairs, bucket), false);
             auto& src_pair = old_pairs[bucket];
             new(_pairs + new_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
-            //memcpy(&_pairs[new_bucket], &src_pair, sizeof(src_pair));
             NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
         }
 
@@ -651,7 +622,7 @@ private:
         while (true) {
             if (GET_KEY(_pairs, next_bucket) == key) {
 #if EMLIB_LRU_GET
-                  GET_KEY(_pairs, next_bucket).swap(GET_KEY(_pairs, bucket));
+                  std::swap(GET_KEY(_pairs, next_bucket), GET_KEY(_pairs, bucket));
                   return bucket;
 #else
                   return next_bucket;
@@ -668,7 +639,6 @@ private:
 
     int reset_main_bucket(const int main_bucket, const int bucket)
     {
-        //TODO:find parent/prev bucket
         const auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         const auto new_bucket  = find_empty_bucket(bucket);
         const auto prev_bucket = find_prev_bucket(main_bucket, bucket);
@@ -698,7 +668,7 @@ private:
         while (true) {
             if (GET_KEY(_pairs, next_bucket) == key) {
 #if EMLIB_LRU_SET
-                GET_KEY(_pairs, next_bucket).swap(GET_KEY(_pairs, bucket));
+                std::swap(GET_KEY(_pairs, next_bucket), GET_KEY(_pairs, bucket));
                 return bucket;
 #else
                 return next_bucket;
@@ -740,10 +710,11 @@ private:
                 const auto bucket2 = (bucket1 + 1) & _mask;
                 if (NEXT_BUCKET(_pairs, bucket2) == State::INACTIVE)
                     return bucket2;
-
+#if 0
                 const auto bucket3 = (bucket1 - 1) & _mask;
                 if (NEXT_BUCKET(_pairs, bucket3) == State::INACTIVE)
                     return bucket3;
+#endif
             }
         }
     }
