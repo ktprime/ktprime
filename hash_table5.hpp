@@ -20,7 +20,6 @@
     #undef  GET_KEY
     #undef  GET_VAL
     #undef  BUCKET
-    #undef  ORDER_INDEX
     #undef  NEXT_BUCKET
     #undef  GET_PVAL
 #endif
@@ -28,13 +27,12 @@
 #define BUCKET(key)  int(_hasher(key) & _mask)
 //#define BUCKET(key)  (_hasher(key) & (_mask / 2)) * 2
 
-#define ORDER_INDEX 2
 #if ORDER_INDEX == 0
     #define GET_KEY(p,n)     p[n].second.first
     #define GET_VAL(p,n)     p[n].second.second
     #define NEXT_BUCKET(s,n) s[n].first
     #define GET_PVAL(s,n)    s[n].second
-    #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(bucket, std::pair<KeyT, ValueT>(key, value))
+    #define NEW_KVALUE(key, value, bucket)  new(_pairs + bucket) PairT(bucket, std::pair<KeyT, ValueT>(key, value))
 #elif ORDER_INDEX == 1
     #define GET_KEY(p,n)     p[n].first.first
     #define GET_VAL(p,n)     p[n].first.second
@@ -50,11 +48,6 @@
 #endif
 
 namespace emilib4 {
-enum State
-{
-    INACTIVE = -1, // Never been touched
-};
-
 /// like std::equal_to but no need to #include <functional>
 template<typename T>
 struct HashMapEqualTo
@@ -90,9 +83,9 @@ struct pair {
         std::swap(_ibucket, o._ibucket);
     }
 
-    First first;
-    Second second;
+    First first; //long
     int    _ibucket;
+    Second second;//int
 
 };// __attribute__ ((packed));
 
@@ -100,6 +93,11 @@ struct pair {
 template <typename KeyT, typename ValueT, typename HashT = std::hash<KeyT>, typename EqT = HashMapEqualTo<KeyT>>
 class HashMap
 {
+    enum State
+    {
+        INACTIVE = -1, // Never been touched
+    };
+
 private:
     typedef  HashMap<KeyT, ValueT, HashT, EqT> MyType;
 
@@ -124,7 +122,7 @@ private:
         }
 
         explicit PairT(PairT&& pairT)
-            :_mypair(std::move(pairT._mypair.first), std::move(pairT._mypair.second))
+            :_mypair(pairT._mypair.first, pairT._mypair.second)
         {
             _mypair._ibucket = pairT._mypair._ibucket;
         }
@@ -884,10 +882,10 @@ private:
                 if (NEXT_BUCKET(_pairs, bucket1) == State::INACTIVE)
                     return bucket1;
 
-#if Q3S
                 const auto bucket2 = (bucket + offset * offset + 1) & _mask;
                 if (NEXT_BUCKET(_pairs, bucket2) == State::INACTIVE)
                     return bucket2;
+#if Q3S
                 const auto bucket3 = (bucket1 - 1) & _mask;
                 if (NEXT_BUCKET(_pairs, bucket3) == State::INACTIVE)
                     return bucket3;
