@@ -1,12 +1,12 @@
-// By Emil Ernerfeldt 2014-2017
+// By Huang Yuanbing 2019
+// bailuzhou@163.com
+// https://github.com/ktprime/ktprime/blob/master/hash_table5.hpp
+
 // LICENSE:
 //   This software is dual-licensed to the public domain and under the following
 //   license: you are granted a perpetual, irrevocable license to copy, modify,
 //   publish, and distribute this file as you see fit.
-//   http://www.ilikebigbits.com/2016_08_28_hash_table.html
 
-//some others
-//https://tessil.github.io/2016/08/29/benchmark-hopscotch-map.html
 
 #pragma once
 
@@ -15,6 +15,7 @@
 #include <utility>
 #include <cstring>
 #include <cassert>
+#include <initializer_list>
 
 #ifdef  GET_KEY
     #undef  GET_KEY
@@ -25,7 +26,10 @@
 #endif
 
 #define BUCKET(key)  int(_hasher(key) & _mask)
-//#define BUCKET(key)  (_hasher(key) & (_mask / 2)) * 2
+
+#ifndef ORDER_INDEX
+    #define ORDER_INDEX 2
+#endif
 
 #if ORDER_INDEX == 0
     #define GET_KEY(p,n)     p[n].second.first
@@ -100,6 +104,7 @@ class HashMap
 
 private:
     typedef  HashMap<KeyT, ValueT, HashT, EqT> MyType;
+    typedef  std::pair<KeyT, ValueT>           ValPariT;
 
 #if ORDER_INDEX == 0
     typedef std::pair<int, std::pair<KeyT, ValueT>> PairT;
@@ -303,7 +308,7 @@ public:
     HashMap()
     {
         init();
-        reserve(8);
+        reserve(4);
     }
 
     HashMap(const HashMap& other)
@@ -316,8 +321,16 @@ public:
     HashMap(HashMap&& other)
     {
         init();
-        reserve(8);
+        reserve(4);
         *this = std::move(other);
+    }
+
+    HashMap(std::initializer_list<ValPariT> il)
+    {
+        init();
+        reserve(il.size());
+        for (auto begin = il.begin(); begin != il.end(); ++begin)
+            insert(*begin);
     }
 
     HashMap& operator=(const HashMap& other)
@@ -395,7 +408,7 @@ public:
         return cend();
     }
 
-    size_t size() const
+    size_type size() const
     {
         return _num_filled;
     }
@@ -406,7 +419,7 @@ public:
     }
 
     // Returns the number of buckets.
-    size_t bucket_count() const
+    size_type bucket_count() const
     {
         return _num_buckets;
     }
@@ -416,6 +429,75 @@ public:
     {
         return static_cast<float>(_num_filled) / static_cast<float>(_num_buckets);
     }
+
+    HashT hash_function() const
+    {
+        return _hasher;
+    }
+
+    constexpr float max_load_factor() const
+    {
+        return 8.0 / 9;
+    }
+
+    size_type max_size() const
+    {
+        return (1 << 30) / sizeof(PairT);
+    }
+
+    size_type max_bucket_count() const
+    {
+        return (1 << 30) / sizeof(PairT);
+    }
+
+    //Returns the bucket number where the element with key k is located.
+    size_type bucket(const KeyT& key) const
+    {
+        const auto ibucket = BUCKET(key);
+        const auto next_bucket = NEXT_BUCKET(_pairs, ibucket);
+        if (next_bucket == State::INACTIVE)
+            return -1;
+        if (ibucket == next_bucket)
+            return ibucket;
+
+        const auto& bucket_key = GET_KEY(_pairs, ibucket);
+        return BUCKET(bucket_key);
+    }
+
+    //Returns the number of elements in bucket n.
+    size_type bucket_size(const size_type bucket) const
+    {
+        auto next_bucket = NEXT_BUCKET(_pairs, bucket);
+        if (next_bucket == State::INACTIVE)
+             return 0;
+        if (bucket == next_bucket)
+            return 1;
+
+        const auto& bucket_key = GET_KEY(_pairs, bucket);
+        next_bucket = BUCKET(bucket_key);
+        int ibucket_size = 1;
+
+        //find a new empty and linked it to tail
+        while (true) {
+            const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
+            if (nbucket == next_bucket) {
+                break;
+            }
+            ibucket_size ++;
+            next_bucket = nbucket;
+        }
+        return ibucket_size;
+    }
+
+    /****
+    std::pair<iterator, iterator> equal_range(const keyT & key)
+    {
+        iterator found = find(key);
+        if (found == end())
+            return {found, found};
+        else
+            return {found, std::next(found)};
+    }*/
 
     // ------------------------------------------------------------
 
@@ -504,9 +586,30 @@ public:
         }
     }
 
-    std::pair<iterator, bool> insert(const std::pair<KeyT, ValueT>& p)
+    std::pair<iterator, bool> insert(KeyT&& key, ValueT&& value)
+    {
+        auto bucket = find_or_allocate(key);
+        if (NEXT_BUCKET(_pairs, bucket) != State::INACTIVE) {
+            return { iterator(this, bucket), false };
+        }
+        else {
+            if (check_expand_need())
+                bucket = find_main_bucket(key, true);
+
+            NEW_KVALUE(std::move(key), std::move(value), bucket);
+            _num_filled++;
+            return { iterator(this, bucket), true };
+        }
+    }
+
+    inline std::pair<iterator, bool> insert(const std::pair<KeyT, ValueT>& p)
     {
         return insert(p.first, p.second);
+    }
+
+    inline std::pair<iterator, bool> insert(std::pair<KeyT, ValueT>&& p)
+    {
+        return insert(std::move(p.first), std::move(p.second));
     }
 
     void insert(const_iterator begin, const_iterator end)
@@ -518,18 +621,36 @@ public:
     }
 
     /// Same as above, but contains(key) MUST be false
-    void insert_unique(const KeyT& key, const ValueT& value)
+    unsigned int insert_unique(const KeyT& key, const ValueT& value)
     {
         //DCHECK_F(!contains(key));
         check_expand_need();
         auto bucket = find_main_bucket(key, true);
         NEW_KVALUE(key, value, bucket);
         _num_filled++;
+        return bucket;
     }
 
-    void insert_unique(std::pair<KeyT, ValueT>&& p)
+    unsigned int insert_unique(KeyT&& key, ValueT&& value)
     {
-        insert_unique(std::move(p.first), std::move(p.second));
+        //DCHECK_F(!contains(key));
+        check_expand_need();
+        auto bucket = find_main_bucket(key, true);
+        NEW_KVALUE(std::move(key), std::move(value), bucket);
+        _num_filled++;
+        return bucket;
+    }
+
+    inline unsigned int insert_unique(std::pair<KeyT, ValueT>&& p)
+    {
+        return insert_unique(std::move(p.first), std::move(p.second));
+    }
+
+    //not
+    template <class... Args>
+    inline std::pair<iterator, bool> emplace(Args&&... args)
+    {
+        return insert(std::forward<Args>(args)...);
     }
 
     void insert_or_assign(const KeyT& key, ValueT&& value)
@@ -643,7 +764,7 @@ public:
     }
 
     /// Make room for this many elements
-    inline bool reserve(unsigned int num_elems)
+    bool reserve(unsigned int num_elems)
     {
         auto required_buckets = num_elems * 9 / 8 + 2;
         if (required_buckets <= _num_buckets) {
@@ -870,7 +991,7 @@ private:
     }
 
     // key is not in this map. Find a place to put it.
-    inline int find_empty_bucket(int bucket_from)
+    int find_empty_bucket(int bucket_from)
     {
         constexpr int max_probe_length = (int)(128 / sizeof(PairT)) + 2;//cpu cache line 64 byte,2-3 cache line miss
         for (auto offset = 1; ; ++offset) {
@@ -894,7 +1015,7 @@ private:
         }
     }
 
-    inline int find_prev_bucket(int main_bucket, const int bucket)
+    int find_prev_bucket(int main_bucket, const int bucket)
     {
         while (true) {
             const auto next_bucket = NEXT_BUCKET(_pairs, main_bucket);
@@ -948,3 +1069,4 @@ private:
 
 } // namespace emilib
 
+#undef  ORDER_INDEX
