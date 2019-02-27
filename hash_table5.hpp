@@ -831,8 +831,8 @@ public:
             NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
         }
 
-        if (_num_filled > 1024 * 16)
-            printf("    _num_filled/ration/packed = %u/%.2lf%%/%zd, collision = %u, cration = %.2lf%%\n", _num_filled, (100.0 * _num_filled / num_buckets), sizeof(PairT), collision, (collision * 100.0 / num_buckets));
+//        if (_num_filled > 1024 * 16)
+//            printf("    _num_filled/ration/packed = %u/%.2lf%%/%zd, collision = %u, cration = %.2lf%%\n", _num_filled, (100.0 * _num_filled / num_buckets), sizeof(PairT), collision, (collision * 100.0 / num_buckets));
 
         free(old_pairs);
         assert(old_num_filled == _num_filled);
