@@ -440,12 +440,12 @@ public:
         return 8.0 / 9;
     }
 
-    size_type max_size() const
+    constexpr size_type max_size() const
     {
         return (1 << 30) / sizeof(PairT);
     }
 
-    size_type max_bucket_count() const
+    constexpr size_type max_bucket_count() const
     {
         return (1 << 30) / sizeof(PairT);
     }
@@ -527,6 +527,19 @@ public:
     size_t count(const KeyT& k) const
     {
         return find_filled_bucket(k) != State::INACTIVE ? 1 : 0;
+    }
+
+    /// Returns the matching ValueT or nullptr if k isn't found.
+    bool try_get(const KeyT& k, ValueT& val)
+    {
+        auto bucket = find_filled_bucket(k);
+        if (bucket != State::INACTIVE) {
+            val = GET_VAL(_pairs, bucket);
+            return true;
+        }
+        else {
+            return false;
+        }
     }
 
     /// Returns the matching ValueT or nullptr if k isn't found.
@@ -831,8 +844,15 @@ public:
             NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
         }
 
-//        if (_num_filled > 1024 * 16)
-//            printf("    _num_filled/ration/packed = %u/%.2lf%%/%zd, collision = %u, cration = %.2lf%%\n", _num_filled, (100.0 * _num_filled / num_buckets), sizeof(PairT), collision, (collision * 100.0 / num_buckets));
+#ifndef LOG_HASH
+        if (_num_filled > 0) {
+            static int ihashs = 0;
+            char buff[256] = {0};
+            sprintf(buff, "    _num_filled/ration/packed = %u/%.2lf%%/%zd, collision = %u, cration = %.2lf%%\n", _num_filled, (100.0 * _num_filled / num_buckets), sizeof(PairT), collision, (collision * 100.0 / num_buckets));
+            printf("%s", buff);
+            //FDLOG() << "ORDER_INDEX = " << ORDER_INDEX << "|hash_nums = " << ihashs ++ << "|" <<__FUNCTION__ << "|" << buff << endl;
+        }
+#endif
 
         free(old_pairs);
         assert(old_num_filled == _num_filled);
@@ -856,10 +876,11 @@ private:
             if (next_bucket == bucket)
                 return bucket;
 
-            //GET_PVAL(_pairs, next_bucket).swap(GET_PVAL(_pairs, bucket));
-            //GET_PVAL(_pairs, next_bucket).swapkv(GET_PVAL(_pairs, bucket));
-            std::swap(GET_KEY(_pairs, next_bucket), GET_KEY(_pairs, bucket));
-            std::swap(GET_VAL(_pairs, next_bucket), GET_VAL(_pairs, bucket));
+#if ORDER_INDEX < 2
+            GET_PVAL(_pairs, next_bucket).swap(GET_PVAL(_pairs, bucket));
+#else
+            GET_PVAL(_pairs, next_bucket).swapkv(GET_PVAL(_pairs, bucket));
+#endif
 
             const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
             if (nbucket == next_bucket)
@@ -917,7 +938,11 @@ private:
         while (true) {
             if (GET_KEY(_pairs, next_bucket) == key) {
 #if EMLIB_LRU_GET
+#if ORDER_INDEX < 2
                   GET_PVAL(_pairs, next_bucket).swap(GET_PVAL(_pairs, bucket));
+#else
+                  GET_PVAL(_pairs, next_bucket).swapkv(GET_PVAL(_pairs, bucket));
+#endif
                   return bucket;
 #else
                   return next_bucket;
@@ -957,14 +982,18 @@ private:
         const auto& bucket_key = GET_KEY(_pairs, bucket);
         if (next_bucket == State::INACTIVE || bucket_key == key)
              return bucket;
-        else if (next_bucket == bucket && ((BUCKET(bucket_key)) == bucket))
+        else if (next_bucket == bucket && (BUCKET(bucket_key)) == bucket)
              return NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
 
         //find next linked bucket and check key
         while (true) {
             if (GET_KEY(_pairs, next_bucket) == key) {
 #if EMLIB_LRU_SET
+#if ORDER_INDEX < 2
                 GET_PVAL(_pairs, next_bucket).swap(GET_PVAL(_pairs, bucket));
+#else
+                GET_PVAL(_pairs, next_bucket).swapkv(GET_PVAL(_pairs, bucket));
+#endif
                 return bucket;
 #else
                 return next_bucket;
@@ -1029,11 +1058,13 @@ private:
     {
         const auto bucket = BUCKET(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
+        const auto& bucket_key = GET_KEY(_pairs, bucket);
         if (next_bucket == State::INACTIVE)
             return bucket;
+        else if (next_bucket == bucket && (BUCKET(bucket_key)) == bucket)
+             return NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
 
         if (check_main) {
-            const auto& bucket_key = GET_KEY(_pairs, bucket);
             const auto main_bucket = BUCKET(bucket_key);
             //check current bucket_key is linked in main bucket
             if (main_bucket != bucket) {
