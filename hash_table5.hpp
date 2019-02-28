@@ -52,7 +52,7 @@
     #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket);
 #endif
 
-namespace emilib4 {
+namespace emilib5 {
 /// like std::equal_to but no need to #include <functional>
 template<typename T>
 struct HashMapEqualTo
@@ -734,7 +734,7 @@ public:
 
 #ifdef EIMLIB_AUTO_SHRINK
         if (_num_buckets > 256 && _num_buckets > 4 * _num_filled)
-            rehash(_num_filled * 9 / 8 + 2);
+            rehash(_num_filled / max_load_factor()  + 2);
 #endif
         return true;
     }
@@ -756,7 +756,7 @@ public:
 
 #ifdef EIMLIB_AUTO_SHRINK
         if (_num_buckets > 256 && _num_buckets > 4 * _num_filled) {
-            rehash(_num_filled * 9 / 8 + 2);
+            rehash(_num_filled * max_load_factor() + 2);
             it = begin();
         }
 #endif
@@ -1027,7 +1027,8 @@ private:
             if (NEXT_BUCKET(_pairs, bucket) == State::INACTIVE)
                 return bucket;
             else if (offset > max_probe_length) {
-                const auto bucket1 = (bucket + offset * offset + 0) & _mask;
+//                const auto bucket1 = (bucket + offset * offset + 0) & _mask;
+                const auto bucket1 = (bucket + (offset + 1) * offset / 2) & _mask;
                 if (NEXT_BUCKET(_pairs, bucket1) == State::INACTIVE)
                     return bucket1;
 
