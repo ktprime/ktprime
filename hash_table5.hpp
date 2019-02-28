@@ -52,7 +52,7 @@
     #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket);
 #endif
 
-namespace emilib5 {
+namespace emilib4 {
 /// like std::equal_to but no need to #include <functional>
 template<typename T>
 struct HashMapEqualTo
