@@ -25,6 +25,7 @@
     #undef  GET_PVAL
 #endif
 
+//_mm_crc32_u64(0,key) &(some power of 2 - 1)
 #define BUCKET(key)  int(_hasher(key) & _mask)
 
 #ifndef ORDER_INDEX
@@ -470,8 +471,6 @@ public:
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket == State::INACTIVE)
              return 0;
-        if (bucket == next_bucket)
-            return 1;
 
         const auto& bucket_key = GET_KEY(_pairs, bucket);
         next_bucket = BUCKET(bucket_key);
@@ -848,7 +847,7 @@ public:
         if (_num_filled > 0) {
             static int ihashs = 0;
             char buff[256] = {0};
-            sprintf(buff, "    _num_filled/ration/packed = %u/%.2lf%%/%zd, collision = %u, cration = %.2lf%%\n", _num_filled, (100.0 * _num_filled / num_buckets), sizeof(PairT), collision, (collision * 100.0 / num_buckets));
+            sprintf(buff, "    _num_filled/ration/packed = %u/%.2lf%%/%zd, collision = %u, cration = %.2lf%%\n", _num_filled, (100.0 * _num_filled / num_buckets), sizeof(PairT), collision, (collision * 100.0 / _num_filled));
             printf("%s", buff);
             //FDLOG() << "ORDER_INDEX = " << ORDER_INDEX << "|hash_nums = " << ihashs ++ << "|" <<__FUNCTION__ << "|" << buff << endl;
         }
@@ -1032,7 +1031,7 @@ private:
                 if (NEXT_BUCKET(_pairs, bucket1) == State::INACTIVE)
                     return bucket1;
 
-                const auto bucket2 = (bucket + offset * offset + 1) & _mask;
+                const auto bucket2 = (bucket1 + 1) & _mask;
                 if (NEXT_BUCKET(_pairs, bucket2) == State::INACTIVE)
                     return bucket2;
 #if Q3S
