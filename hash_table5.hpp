@@ -194,20 +194,17 @@ public:
 
         bool operator==(const iterator& rhs) const
         {
-            //DCHECK_EQ_F(_map, rhs._map);
             return this->_bucket == rhs._bucket;
         }
 
         bool operator!=(const iterator& rhs) const
         {
-            //DCHECK_EQ_F(_map, rhs._map);
             return this->_bucket != rhs._bucket;
         }
 
     private:
         void goto_next_element()
         {
-            //DCHECK_LT_F(_bucket, _map->_num_buckets);
             do {
                 _bucket++;
             } while (_bucket < _map->_num_buckets && _map->NEXT_BUCKET(_pairs, _bucket) == State::INACTIVE);
@@ -270,20 +267,17 @@ public:
 
         bool operator==(const const_iterator& rhs) const
         {
-            //DCHECK_EQ_F(_map, rhs._map);
             return this->_bucket == rhs._bucket;
         }
 
         bool operator!=(const const_iterator& rhs) const
         {
-            //DCHECK_EQ_F(_map, rhs._map);
             return this->_bucket != rhs._bucket;
         }
 
     private:
         void goto_next_element()
         {
-            //DCHECK_LT_F(_bucket, _map->_num_buckets);
             do {
                 _bucket++;
             } while (_bucket < _map->_num_buckets && _map->NEXT_BUCKET(_pairs, _bucket) == State::INACTIVE);
@@ -635,7 +629,6 @@ public:
     /// Same as above, but contains(key) MUST be false
     unsigned int insert_unique(const KeyT& key, const ValueT& value)
     {
-        //DCHECK_F(!contains(key));
         check_expand_need();
         auto bucket = find_main_bucket(key, true);
         NEW_KVALUE(key, value, bucket);
@@ -645,7 +638,6 @@ public:
 
     unsigned int insert_unique(KeyT&& key, ValueT&& value)
     {
-        //DCHECK_F(!contains(key));
         check_expand_need();
         auto bucket = find_main_bucket(key, true);
         NEW_KVALUE(std::move(key), std::move(value), bucket);
@@ -743,8 +735,6 @@ public:
     /// Returns an iterator to the next element (or end()).
     iterator erase(iterator it)
     {
-        //DCHECK_EQ_F(it._map, this);
-        //DCHECK_LT_F(it._bucket, _num_buckets);
         auto bucket = it._bucket;
         bucket = erase_from_bucket(it->first);
 
@@ -817,10 +807,10 @@ public:
                 continue;
             }
 
-            auto& src_pair = old_pairs[src_bucket];
             const auto main_bucket = BUCKET(GET_KEY(old_pairs, src_bucket));
             auto& next_bucket = NEXT_BUCKET(_pairs, main_bucket);
             if (next_bucket == State::INACTIVE) {
+                auto& src_pair = old_pairs[src_bucket];
                 new(_pairs + main_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
                 next_bucket = main_bucket;
             }
@@ -847,7 +837,7 @@ public:
         if (_num_filled > 0) {
             static int ihashs = 0;
             char buff[256] = {0};
-            sprintf(buff, "    _num_filled/ration/packed = %u/%.2lf%%/%zd, collision = %u, cration = %.2lf%%\n", _num_filled, (100.0 * _num_filled / num_buckets), sizeof(PairT), collision, (collision * 100.0 / _num_filled));
+            sprintf(buff, "    _num_filled/packed/collision = %u/%zd/%.2lf%%\n", _num_filled, sizeof(PairT), (collision * 100.0 / _num_filled));
             printf("%s", buff);
             //FDLOG() << "ORDER_INDEX = " << ORDER_INDEX << "|hash_nums = " << ihashs ++ << "|" <<__FUNCTION__ << "|" << buff << endl;
         }
@@ -1007,15 +997,15 @@ private:
 
         //check current bucket_key is linked in main bucket
         const auto main_bucket = BUCKET(bucket_key);
-        if (main_bucket != bucket) {
-            reset_main_bucket(main_bucket, bucket);
-            NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
-            return bucket;
+        if (main_bucket == bucket) {
+            //find a new empty and linked it to tail
+            const auto new_bucket = find_empty_bucket(next_bucket);
+            return NEXT_BUCKET(_pairs, next_bucket) = new_bucket;
         }
 
-        //find a new empty and linked it to tail
-        const auto new_bucket = find_empty_bucket(next_bucket);
-        return NEXT_BUCKET(_pairs, next_bucket) = new_bucket;
+        reset_main_bucket(main_bucket, bucket);
+        NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
+        return bucket;
     }
 
     // key is not in this map. Find a place to put it.
@@ -1026,9 +1016,10 @@ private:
             const auto bucket = (bucket_from + offset) & _mask;
             if (NEXT_BUCKET(_pairs, bucket) == State::INACTIVE)
                 return bucket;
+
             else if (offset > max_probe_length) {
-//                const auto bucket1 = (bucket + offset * offset + 0) & _mask;
-                const auto bucket1 = (bucket + (offset + 1) * offset / 2) & _mask;
+                const auto bucket1 = (bucket + offset * offset + 0) & _mask;
+//                const auto bucket1 = (bucket + (offset + 1) * offset / 2) & _mask;
                 if (NEXT_BUCKET(_pairs, bucket1) == State::INACTIVE)
                     return bucket1;
 
@@ -1100,4 +1091,6 @@ private:
 
 } // namespace emilib
 
+
+//template <class Key, class Val> using Map = emilib4::HashMap<Key, Val, Hash<Key>>;
 #undef  ORDER_INDEX
