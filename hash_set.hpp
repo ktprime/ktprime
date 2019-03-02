@@ -1,12 +1,12 @@
-// By Emil Ernerfeldt 2014-2017
+// By Huang Yuanbing 2019
+// bailuzhou@163.com
+// https://github.com/ktprime/ktprime/blob/master/hash_table5.hpp
+
 // LICENSE:
 //   This software is dual-licensed to the public domain and under the following
 //   license: you are granted a perpetual, irrevocable license to copy, modify,
 //   publish, and distribute this file as you see fit.
-//   http://www.ilikebigbits.com/2016_08_28_hash_table.html
 
-//some others
-//https://tessil.github.io/2016/08/29/benchmark-hopscotch-map.html
 
 #pragma once
 
@@ -15,6 +15,7 @@
 #include <utility>
 #include <cstring>
 #include <cassert>
+#include <initializer_list>
 
 #ifdef  GET_KEY
     #undef  GET_KEY
@@ -26,11 +27,7 @@
 #define GET_KEY(p,n)     p[n].first
 #define NEXT_BUCKET(s,n) s[n].second
 
-namespace emilib2 {
-enum State
-{
-    INACTIVE = -1, // Never been touched
-};
+namespace emilib5 {
 
 /// like std::equal_to but no need to #include <functional>
 template<typename T>
@@ -46,6 +43,10 @@ struct HashSetEqualTo
 template <typename KeyT, typename HashT = std::hash<KeyT>, typename EqT = HashSetEqualTo<KeyT>>
 class HashSet
 {
+    enum State
+    {
+        INACTIVE = -1, // Never been touched
+    };
 private:
     typedef  HashSet<KeyT, HashT, EqT> MyType;
     typedef  std::pair<KeyT, int> PairT;
@@ -556,25 +557,24 @@ private:
 
     int erase_from_bucket(const KeyT& key) const
     {
-        //if (empty()) { return State::INACTIVE; } // Optimization
         const auto bucket = BUCKET(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket == State::INACTIVE)
             return State::INACTIVE;
+        else if (next_bucket == bucket) {
+           if (GET_KEY(_pairs, bucket) == key)
+               return bucket;
+           return State::INACTIVE;
+        }
         else if (GET_KEY(_pairs, bucket) == key) {
-            if (next_bucket == bucket)
-                return bucket;
-
-            std::swap(GET_KEY(_pairs, next_bucket), GET_KEY(_pairs, bucket));
             const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
+            std::swap(GET_KEY(_pairs, next_bucket), GET_KEY(_pairs, bucket));
             if (nbucket == next_bucket)
                 NEXT_BUCKET(_pairs, bucket) = bucket;
             else
                 NEXT_BUCKET(_pairs, bucket) = nbucket;
             return next_bucket;
         }
-        else if (next_bucket == bucket)
-            return State::INACTIVE;
 
         auto prev_bucket = bucket;
         while (true) {
@@ -598,26 +598,15 @@ private:
     // Find the bucket with this key, or return State::INACTIVE
     int find_filled_bucket(const KeyT& key) const
     {
-        //if (empty()) { return State::INACTIVE; } // Optimization
         const auto bucket = BUCKET(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
-#if 0
-        if (next_bucket != State::INACTIVE) {
-             if (GET_KEY(_pairs, bucket) == key)
-                return bucket;
-             else if (next_bucket == bucket)
-                 return State::INACTIVE;
-        }
-        else
-            return State::INACTIVE;
-#elif 1
         if (next_bucket == State::INACTIVE)
             return State::INACTIVE;
         else if (GET_KEY(_pairs, bucket) == key)
-            return bucket;
-        else if (next_bucket == bucket)
-            return State::INACTIVE;
-#endif
+                return bucket;
+             else if (next_bucket == bucket)
+                 return State::INACTIVE;
+
         //find next linked bucket
         while (true) {
             if (GET_KEY(_pairs, next_bucket) == key) {
@@ -639,6 +628,7 @@ private:
 
     int reset_main_bucket(const int main_bucket, const int bucket)
     {
+        //TODO:find parent/prev bucket
         const auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         const auto new_bucket  = find_empty_bucket(bucket);
         const auto prev_bucket = find_prev_bucket(main_bucket, bucket);
@@ -661,7 +651,7 @@ private:
         const auto& bucket_key = GET_KEY(_pairs, bucket);
         if (next_bucket == State::INACTIVE || bucket_key == key)
              return bucket;
-        else if (next_bucket == bucket && ((BUCKET(bucket_key)) == bucket))
+        else if (next_bucket == bucket && bucket == BUCKET(bucket_key))
              return NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
 
         //find next linked bucket and check key
@@ -710,11 +700,10 @@ private:
                 const auto bucket2 = (bucket1 + 1) & _mask;
                 if (NEXT_BUCKET(_pairs, bucket2) == State::INACTIVE)
                     return bucket2;
-#if 0
+
                 const auto bucket3 = (bucket1 - 1) & _mask;
                 if (NEXT_BUCKET(_pairs, bucket3) == State::INACTIVE)
                     return bucket3;
-#endif
             }
         }
     }
@@ -733,11 +722,13 @@ private:
     {
         const auto bucket = BUCKET(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
+        const auto& bucket_key = GET_KEY(_pairs, bucket);
         if (next_bucket == State::INACTIVE)
             return bucket;
+        else if (next_bucket == bucket && (BUCKET(bucket_key)) == bucket)
+             return NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
 
         if (check_main) {
-            const auto& bucket_key = GET_KEY(_pairs, bucket);
             const auto main_bucket = BUCKET(bucket_key);
             //check current bucket_key is linked in main bucket
             if (main_bucket != bucket) {
