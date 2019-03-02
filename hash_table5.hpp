@@ -27,11 +27,9 @@
 
 //_mm_crc32_u64(0,key) &(some power of 2 - 1)
 #define BUCKET(key)  int(_hasher(key) & _mask)
-//#define BUCKET(key)  int((key + (key >> 32)) & _mask)
-//#define BUCKET(key)  fibonacci_hash(key)
 
 #ifndef ORDER_INDEX
-    #define ORDER_INDEX 1
+    #define ORDER_INDEX 2
 #endif
 
 #if ORDER_INDEX == 0
@@ -54,7 +52,7 @@
     #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket);
 #endif
 
-namespace emilib4 {
+namespace emilib1 {
 /// like std::equal_to but no need to #include <functional>
 template<typename T>
 struct HashMapEqualTo
@@ -292,6 +290,8 @@ public:
         _num_filled = 0;
         _mask = 0;  // _num_buckets minus one
         _pairs = nullptr;
+        _max_load_factor = 8.0 / 9;
+        _load_buckets = 4 * _max_load_factor;
     }
 
     HashMap()
@@ -350,7 +350,8 @@ public:
     void swap(HashMap& other)
     {
         std::swap(_hasher, other._hasher);
-//        std::swap(_eq, other._eq);
+        std::swap(_max_load_factor, other._max_load_factor);
+        std::swap(_load_buckets, other._load_buckets);
         std::swap(_pairs, other._pairs);
         std::swap(_num_buckets, other._num_buckets);
         std::swap(_num_filled, other._num_filled);
@@ -426,7 +427,13 @@ public:
 
     constexpr float max_load_factor() const
     {
-        return 8.0 / 9;
+        return _max_load_factor;
+    }
+
+    void max_load_factor(float value)
+    {
+        if (value < 0.95 && value > 0.1)
+           _max_load_factor = value;
     }
 
     constexpr size_type max_size() const
@@ -474,6 +481,17 @@ public:
             next_bucket = nbucket;
         }
         return ibucket_size;
+    }
+
+    size_type get_main_bucket(const unsigned int bucket) const
+    {
+        auto next_bucket = NEXT_BUCKET(_pairs, bucket);
+        if (next_bucket == State::INACTIVE)
+            return -1;
+
+        const auto& bucket_key = GET_KEY(_pairs, bucket);
+        const auto main_bucket = BUCKET(bucket_key);
+        return main_bucket;
     }
 
     /****
@@ -754,18 +772,21 @@ public:
             if (NEXT_BUCKET(_pairs, bucket) != State::INACTIVE) {
                 NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
                 _pairs[bucket].~PairT();
+                if ( _num_filled -- == 1)
+                    break;
             }
         }
         _num_filled = 0;
     }
 
     /// Make room for this many elements
-    bool reserve(unsigned int num_elems)
+    bool reserve(unsigned int required_buckets)
     {
-        auto required_buckets = num_elems * 9 / 8 + 2;
-        if (required_buckets <= _num_buckets) {
+        if (required_buckets < _load_buckets)
             return false;
-        }
+        else if (required_buckets < _num_filled)
+            return false;
+
         rehash(required_buckets);
         return true;
     }
@@ -775,13 +796,15 @@ public:
     {
         unsigned int num_buckets = 4;
         while (num_buckets < required_buckets) { num_buckets *= 2; }
+        if (num_buckets <= _num_buckets)
+            num_buckets = 2 * _num_buckets;
 
+        assert(num_buckets * _max_load_factor + 2 >= _num_filled);
         auto new_pairs = (PairT*)malloc(num_buckets * sizeof(PairT));
         if (!new_pairs) {
             throw std::bad_alloc();
         }
 
-        assert(num_buckets > _num_filled);
         auto old_num_filled  = _num_filled;
         auto old_num_buckets = _num_buckets;
         auto old_pairs = _pairs;
@@ -837,6 +860,7 @@ public:
         }
 #endif
 
+        _load_buckets = _num_buckets * max_load_factor();
         free(old_pairs);
         assert(old_num_filled == _num_filled);
     }
@@ -850,25 +874,24 @@ private:
 
     int erase_from_bucket(const KeyT& key) const
     {
-        //if (empty()) { return State::INACTIVE; } // Optimization
         const auto bucket = BUCKET(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket == State::INACTIVE)
             return State::INACTIVE;
+        else if (next_bucket == bucket) {
+           if (GET_KEY(_pairs, bucket) == key)
+               return bucket;
+           return State::INACTIVE;
+        }
         else if (GET_KEY(_pairs, bucket) == key) {
-            if (next_bucket == bucket)
-                return bucket;
-
             const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
-            GET_PVAL(_pairs, next_bucket).swap(GET_PVAL(_pairs, bucket));
+            GET_PVAL(_pairs, bucket).swap(GET_PVAL(_pairs, next_bucket));
             if (nbucket == next_bucket)
                 NEXT_BUCKET(_pairs, bucket) = bucket;
             else
                 NEXT_BUCKET(_pairs, bucket) = nbucket;
             return next_bucket;
         }
-        else if (next_bucket == bucket)
-            return State::INACTIVE;
 
         auto prev_bucket = bucket;
         while (true) {
@@ -893,26 +916,15 @@ private:
     // Find the bucket with this key, or return State::INACTIVE
     int find_filled_bucket(const KeyT& key) const
     {
-        //if (empty()) { return State::INACTIVE; } // Optimization
         const auto bucket = BUCKET(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
-#if 0
-        if (next_bucket != State::INACTIVE) {
-             if (GET_KEY(_pairs, bucket) == key)
-                return bucket;
-             else if (next_bucket == bucket)
-                 return State::INACTIVE;
-        }
-        else
-            return State::INACTIVE;
-#elif 1
         if (next_bucket == State::INACTIVE)
             return State::INACTIVE;
         else if (GET_KEY(_pairs, bucket) == key)
             return bucket;
         else if (next_bucket == bucket)
             return State::INACTIVE;
-#endif
+
         //find next linked bucket
         while (true) {
             if (GET_KEY(_pairs, next_bucket) == key) {
@@ -957,7 +969,7 @@ private:
         const auto& bucket_key = GET_KEY(_pairs, bucket);
         if (next_bucket == State::INACTIVE || bucket_key == key)
              return bucket;
-        else if (next_bucket == bucket && (BUCKET(bucket_key)) == bucket)
+        else if (next_bucket == bucket && bucket == BUCKET(bucket_key))
              return NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
 
         //find next linked bucket and check key
@@ -979,15 +991,14 @@ private:
 
         //check current bucket_key is linked in main bucket
         const auto main_bucket = BUCKET(bucket_key);
-        if (main_bucket != bucket) {
-            reset_main_bucket(main_bucket, bucket);
-            NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
-            return bucket;
+        if (main_bucket == bucket) {
+            //find a new empty and linked it to tail
+            return NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
         }
 
-        //find a new empty and linked it to tail
-        const auto new_bucket = find_empty_bucket(next_bucket);
-        return NEXT_BUCKET(_pairs, next_bucket) = new_bucket;
+        reset_main_bucket(main_bucket, bucket);
+        NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
+        return bucket;
     }
 
     // key is not in this map. Find a place to put it.
@@ -1060,21 +1071,20 @@ private:
         return NEXT_BUCKET(_pairs, last_bucket) = find_empty_bucket(last_bucket);
     }
 
-    inline int fibonacci_hash(int key) {
-        return (key * 11400714819323198485llu) & _mask;
-    }
-
 private:
-
     HashT   _hasher;
-//    EqT     _eq;
     PairT*  _pairs;
+//    EqT     _eq;
+
     unsigned int  _num_buckets;
     unsigned int  _num_filled;
     unsigned int  _mask;  // _num_buckets minus one
+    float         _max_load_factor;
+    unsigned int  _load_buckets;
 };
 
 } // namespace emilib
 
-#undef ORDER_INDEX
-#undef BUCKET
+
+//template <class Key, class Val> using Map = emilib4::HashMap<Key, Val, Hash<Key>>;
+#undef  ORDER_INDEX
