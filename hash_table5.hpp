@@ -77,15 +77,10 @@ struct pair {
         : first{ std::move(firstArg) }
         , second{ std::move(secondArg) } { _ibucket = -1; }
 
-    void swapkv(pair<First, Second>& o) {
-        std::swap(first, o.first);
-        std::swap(second, o.second);
-    }
-
     void swap(pair<First, Second>& o) {
         std::swap(first, o.first);
         std::swap(second, o.second);
-        std::swap(_ibucket, o._ibucket);
+//      std::swap(_ibucket, o._ibucket);
     }
 
     First first; //long
@@ -105,7 +100,6 @@ class HashMap
 
 private:
     typedef  HashMap<KeyT, ValueT, HashT, EqT> MyType;
-    typedef  std::pair<KeyT, ValueT>           ValPariT;
 
 #if ORDER_INDEX == 0
     typedef std::pair<int, std::pair<KeyT, ValueT>> PairT;
@@ -283,8 +277,6 @@ public:
             } while (_bucket < _map->_num_buckets && _map->NEXT_BUCKET(_pairs, _bucket) == State::INACTIVE);
         }
 
-        //private:
-        //    friend class MyType;
     public:
         const MyType* _map;
         unsigned int  _bucket;
@@ -298,6 +290,8 @@ public:
         _num_filled = 0;
         _mask = 0;  // _num_buckets minus one
         _pairs = nullptr;
+        _max_load_factor = 8.0 / 9;
+        _load_buckets = 4 * _max_load_factor;
     }
 
     HashMap()
@@ -320,7 +314,7 @@ public:
         *this = std::move(other);
     }
 
-    HashMap(std::initializer_list<ValPariT> il)
+    HashMap(std::initializer_list< std::pair<KeyT, ValueT>> il)
     {
         init();
         reserve(il.size());
@@ -356,7 +350,8 @@ public:
     void swap(HashMap& other)
     {
         std::swap(_hasher, other._hasher);
-//        std::swap(_eq, other._eq);
+        std::swap(_max_load_factor, other._max_load_factor);
+        std::swap(_load_buckets, other._load_buckets);
         std::swap(_pairs, other._pairs);
         std::swap(_num_buckets, other._num_buckets);
         std::swap(_num_filled, other._num_filled);
@@ -432,7 +427,13 @@ public:
 
     constexpr float max_load_factor() const
     {
-        return 8.0 / 9;
+        return _max_load_factor;
+    }
+
+    void max_load_factor(float value)
+    {
+        if (value < 0.95 && value > 0.1)
+           _max_load_factor = value;
     }
 
     constexpr size_type max_size() const
@@ -451,12 +452,12 @@ public:
         const auto ibucket = BUCKET(key);
         const auto next_bucket = NEXT_BUCKET(_pairs, ibucket);
         if (next_bucket == State::INACTIVE)
-            return -1;
+            return 0;
         if (ibucket == next_bucket)
-            return ibucket;
+            return ibucket + 1;
 
         const auto& bucket_key = GET_KEY(_pairs, ibucket);
-        return BUCKET(bucket_key);
+        return BUCKET(bucket_key) + 1;
     }
 
     //Returns the number of elements in bucket n.
@@ -480,6 +481,17 @@ public:
             next_bucket = nbucket;
         }
         return ibucket_size;
+    }
+
+    size_type get_main_bucket(const unsigned int bucket) const
+    {
+        auto next_bucket = NEXT_BUCKET(_pairs, bucket);
+        if (next_bucket == State::INACTIVE)
+            return -1;
+
+        const auto& bucket_key = GET_KEY(_pairs, bucket);
+        const auto main_bucket = BUCKET(bucket_key);
+        return main_bucket;
     }
 
     /****
@@ -725,7 +737,7 @@ public:
         _num_filled -= 1;
 
 #ifdef EIMLIB_AUTO_SHRINK
-        if (_num_buckets > 256 && _num_buckets > 4 * _num_filled)
+        if (_num_buckets > 254 && _num_buckets > 4 * _num_filled)
             rehash(_num_filled / max_load_factor()  + 2);
 #endif
         return true;
@@ -745,7 +757,7 @@ public:
             it++;
 
 #ifdef EIMLIB_AUTO_SHRINK
-        if (_num_buckets > 256 && _num_buckets > 4 * _num_filled) {
+        if (_num_buckets > 254 && _num_buckets > 4 * _num_filled) {
             rehash(_num_filled * max_load_factor() + 2);
             it = begin();
         }
@@ -766,12 +778,13 @@ public:
     }
 
     /// Make room for this many elements
-    bool reserve(unsigned int num_elems)
+    bool reserve(unsigned int required_buckets)
     {
-        auto required_buckets = num_elems * 9 / 8 + 2;
-        if (required_buckets <= _num_buckets) {
+        if (required_buckets < _load_buckets)
             return false;
-        }
+        else if (required_buckets < _num_filled)
+            return false;
+
         rehash(required_buckets);
         return true;
     }
@@ -781,13 +794,15 @@ public:
     {
         unsigned int num_buckets = 4;
         while (num_buckets < required_buckets) { num_buckets *= 2; }
+        if (num_buckets <= _num_buckets)
+            num_buckets = 2 * _num_buckets;
 
+        assert(num_buckets * _max_load_factor + 2 >= _num_filled);
         auto new_pairs = (PairT*)malloc(num_buckets * sizeof(PairT));
         if (!new_pairs) {
             throw std::bad_alloc();
         }
 
-        assert(num_buckets > _num_filled);
         auto old_num_filled  = _num_filled;
         auto old_num_buckets = _num_buckets;
         auto old_pairs = _pairs;
@@ -836,13 +851,14 @@ public:
 #ifndef LOG_HASH
         if (_num_filled > 0) {
             static int ihashs = 0;
-            char buff[256] = {0};
+            char buff[255] = {0};
             sprintf(buff, "    _num_filled/packed/collision = %u/%zd/%.2lf%%\n", _num_filled, sizeof(PairT), (collision * 100.0 / _num_filled));
             printf("%s", buff);
             //FDLOG() << "ORDER_INDEX = " << ORDER_INDEX << "|hash_nums = " << ihashs ++ << "|" <<__FUNCTION__ << "|" << buff << endl;
         }
 #endif
 
+        _load_buckets = _num_buckets * max_load_factor();
         free(old_pairs);
         assert(old_num_filled == _num_filled);
     }
@@ -856,30 +872,24 @@ private:
 
     int erase_from_bucket(const KeyT& key) const
     {
-        //if (empty()) { return State::INACTIVE; } // Optimization
         const auto bucket = BUCKET(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket == State::INACTIVE)
             return State::INACTIVE;
+        else if (next_bucket == bucket) {
+           if (GET_KEY(_pairs, bucket) == key)
+               return bucket;
+           return State::INACTIVE;
+        }
         else if (GET_KEY(_pairs, bucket) == key) {
-            if (next_bucket == bucket)
-                return bucket;
-
-#if ORDER_INDEX < 2
-            GET_PVAL(_pairs, next_bucket).swap(GET_PVAL(_pairs, bucket));
-#else
-            GET_PVAL(_pairs, next_bucket).swapkv(GET_PVAL(_pairs, bucket));
-#endif
-
-            const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
+			const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
+            GET_PVAL(_pairs, bucket).swap(GET_PVAL(_pairs, next_bucket));
             if (nbucket == next_bucket)
                 NEXT_BUCKET(_pairs, bucket) = bucket;
             else
                 NEXT_BUCKET(_pairs, bucket) = nbucket;
             return next_bucket;
         }
-        else if (next_bucket == bucket)
-            return State::INACTIVE;
 
         auto prev_bucket = bucket;
         while (true) {
@@ -891,6 +901,7 @@ private:
                     NEXT_BUCKET(_pairs, prev_bucket) = nbucket;
                 return next_bucket;
             }
+
             if (nbucket == next_bucket)
                 break;
             prev_bucket = next_bucket;
@@ -927,11 +938,7 @@ private:
         while (true) {
             if (GET_KEY(_pairs, next_bucket) == key) {
 #if EMLIB_LRU_GET
-#if ORDER_INDEX < 2
                   GET_PVAL(_pairs, next_bucket).swap(GET_PVAL(_pairs, bucket));
-#else
-                  GET_PVAL(_pairs, next_bucket).swapkv(GET_PVAL(_pairs, bucket));
-#endif
                   return bucket;
 #else
                   return next_bucket;
@@ -978,11 +985,7 @@ private:
         while (true) {
             if (GET_KEY(_pairs, next_bucket) == key) {
 #if EMLIB_LRU_SET
-#if ORDER_INDEX < 2
                 GET_PVAL(_pairs, next_bucket).swap(GET_PVAL(_pairs, bucket));
-#else
-                GET_PVAL(_pairs, next_bucket).swapkv(GET_PVAL(_pairs, bucket));
-#endif
                 return bucket;
 #else
                 return next_bucket;
@@ -1080,10 +1083,11 @@ private:
     }
 
 private:
-
+    PairT*  _pairs;
     HashT   _hasher;
 //    EqT     _eq;
-    PairT*  _pairs;
+    float         _max_load_factor;
+    unsigned int  _load_buckets;
     unsigned int  _num_buckets;
     unsigned int  _num_filled;
     unsigned int  _mask;  // _num_buckets minus one
