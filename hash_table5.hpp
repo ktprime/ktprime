@@ -16,6 +16,7 @@
 #include <cstring>
 #include <cassert>
 #include <initializer_list>
+//#include "LogHelper.h"
 
 #ifdef  GET_KEY
     #undef  GET_KEY
@@ -850,7 +851,7 @@ public:
             NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
         }
 
-#ifndef LOG_HASH
+#ifdef LOG_RHASH
         if (_num_filled > 0) {
             static int ihashs = 0;
             char buff[255] = {0};
@@ -1085,6 +1086,4 @@ private:
 
 } // namespace emilib
 
-
-//template <class Key, class Val> using Map = emilib4::HashMap<Key, Val, Hash<Key>>;
-#undef  ORDER_INDEX
+template <class Key, class Val> using emihash = emilib1::HashMap<Key, Val, std::hash<Key>>;
