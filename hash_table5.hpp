@@ -16,7 +16,10 @@
 #include <cstring>
 #include <cassert>
 #include <initializer_list>
-//#include "LogHelper.h"
+
+#if TAF_V3
+    #include "LogHelper.h"
+#endif
 
 #ifdef  GET_KEY
     #undef  GET_KEY
@@ -27,7 +30,11 @@
 #endif
 
 //_mm_crc32_u64(0,key) &(some power of 2 - 1)
-#define BUCKET(key)  int(_hasher(key) & _mask)
+#if 0
+    #define BUCKET(key)  int(_hasher(key) & _mask)
+#else
+    #define BUCKET(key)  hash_key(key)
+#endif
 
 #ifndef ORDER_INDEX
     #define ORDER_INDEX 2
@@ -290,15 +297,16 @@ public:
         _num_buckets = 0;
         _num_filled = 0;
         _mask = 0;  // _num_buckets minus one
+        _shift = 64;
         _pairs = nullptr;
-        _max_load_factor = 8.0 / 9;
+        _max_load_factor = 0.9;
         _load_buckets = 4 * _max_load_factor;
     }
 
     HashMap()
     {
         init();
-        reserve(4);
+        reserve(8);
     }
 
     HashMap(const HashMap& other)
@@ -311,7 +319,7 @@ public:
     HashMap(HashMap&& other)
     {
         init();
-        reserve(4);
+        reserve(8);
         *this = std::move(other);
     }
 
@@ -357,6 +365,7 @@ public:
         std::swap(_num_buckets, other._num_buckets);
         std::swap(_num_filled, other._num_filled);
         std::swap(_mask, other._mask);
+        std::swap(_shift, other._shift);
     }
 
     // -------------------------------------------------------------
@@ -737,7 +746,7 @@ public:
         _pairs[bucket].~PairT();
         _num_filled -= 1;
 
-#ifdef EIMLIB_AUTO_SHRINK
+#ifdef EMILIB_AUTO_SHRINK
         if (_num_buckets > 254 && _num_buckets > 4 * _num_filled)
             rehash(_num_filled / max_load_factor()  + 2);
 #endif
@@ -757,7 +766,7 @@ public:
         if (bucket == it._bucket)
             it++;
 
-#ifdef EIMLIB_AUTO_SHRINK
+#ifdef EMILIB_AUTO_SHRINK
         if (_num_buckets > 254 && _num_buckets > 4 * _num_filled) {
             rehash(_num_filled * max_load_factor() + 2);
             it = begin();
@@ -795,10 +804,12 @@ public:
     /// Make room for this many elements
     void rehash(unsigned int required_buckets)
     {
-        unsigned int num_buckets = 4;
-        while (num_buckets < required_buckets) { num_buckets *= 2; }
-        if (num_buckets <= _num_buckets)
-            num_buckets = 2 * _num_buckets;
+        unsigned int num_buckets = 8;
+        unsigned int shift = 3;
+        while (num_buckets < required_buckets) { num_buckets *= 2;  shift ++;}
+        if (num_buckets <= _num_buckets) {
+            num_buckets = 2 * _num_buckets; shift ++ ;
+        }
 
         assert(num_buckets * _max_load_factor + 2 >= _num_filled);
         auto new_pairs = (PairT*)malloc(num_buckets * sizeof(PairT));
@@ -814,6 +825,7 @@ public:
         _num_buckets = num_buckets;
         _mask        = num_buckets - 1;
         _pairs       = new_pairs;
+        _shift       = 64 - shift;
 
         for (unsigned int bucket = 0; bucket < num_buckets; bucket++)
             NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
@@ -851,13 +863,16 @@ public:
             NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
         }
 
-#ifdef LOG_RHASH
+#ifdef LOG_REHASH
         if (_num_filled > 0) {
             static int ihashs = 0;
             char buff[255] = {0};
-            sprintf(buff, "    _num_filled/packed/collision = %u/%zd/%.2lf%%\n", _num_filled, sizeof(PairT), (collision * 100.0 / _num_filled));
-            printf("%s", buff);
-            //FDLOG() << "ORDER_INDEX = " << ORDER_INDEX << "|hash_nums = " << ihashs ++ << "|" <<__FUNCTION__ << "|" << buff << endl;
+            sprintf(buff, "    _num_filled/packed/collision = %u/%zd/%.2lf%%", _num_filled, sizeof(PairT), (collision * 100.0 / _num_filled));
+#if TAF_V3
+            FDLOG() << "ORDER_INDEX = " << ORDER_INDEX << "|hash_nums = " << ihashs ++ << "|" <<__FUNCTION__ << "|" << buff << endl;
+#else
+            puts(buff);
+#endif
         }
 #endif
 
@@ -927,11 +942,14 @@ private:
             return State::INACTIVE;
 
         //find next linked bucket
+#if EMILIB_LRU_FIND
+        auto prev_bucket = bucket;
+#endif
         while (true) {
             if (GET_KEY(_pairs, next_bucket) == key) {
-#if EMLIB_LRU_GET
-                  GET_PVAL(_pairs, next_bucket).swap(GET_PVAL(_pairs, bucket));
-                  return bucket;
+#if EMILIB_LRU_FIND
+                  GET_PVAL(_pairs, next_bucket).swap(GET_PVAL(_pairs, prev_bucket));
+                  return prev_bucket;
 #else
                   return next_bucket;
 #endif
@@ -939,6 +957,9 @@ private:
             const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
             if (nbucket == next_bucket)
                 break;
+#if EMILIB_LRU_FIND
+            prev_bucket = next_bucket;
+#endif
             next_bucket = nbucket;
         }
 
@@ -947,7 +968,6 @@ private:
 
     int reset_main_bucket(const int main_bucket, const int bucket)
     {
-        //TODO:find parent/prev bucket
         const auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         const auto new_bucket  = find_empty_bucket(bucket);
         const auto prev_bucket = find_prev_bucket(main_bucket, bucket);
@@ -976,7 +996,7 @@ private:
         //find next linked bucket and check key
         while (true) {
             if (GET_KEY(_pairs, next_bucket) == key) {
-#if EMLIB_LRU_SET
+#if EMILIB_LRU_SET
                 GET_PVAL(_pairs, next_bucket).swap(GET_PVAL(_pairs, bucket));
                 return bucket;
 #else
@@ -1072,6 +1092,10 @@ private:
         return NEXT_BUCKET(_pairs, last_bucket) = find_empty_bucket(last_bucket);
     }
 
+    inline int hash_key(const KeyT& key) const
+    {
+        return (_hasher(key) * 11400714819323198485ull) >> _shift;
+    }
 private:
     HashT   _hasher;
     PairT*  _pairs;
@@ -1080,10 +1104,15 @@ private:
     unsigned int  _num_buckets;
     unsigned int  _num_filled;
     unsigned int  _mask;  // _num_buckets minus one
+    unsigned char _shift;  // _num_buckets minus one
+
     float         _max_load_factor;
     unsigned int  _load_buckets;
 };
 
 } // namespace emilib
 
+#if __cplusplus > 199711
 template <class Key, class Val> using emihash = emilib1::HashMap<Key, Val, std::hash<Key>>;
+#endif
+
