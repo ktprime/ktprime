@@ -29,8 +29,7 @@
     #undef  GET_PVAL
 #endif
 
-//_mm_crc32_u64(0,key) &(some power of 2 - 1)
-#if 0
+#if 1
     #define BUCKET(key)  int(_hasher(key) & _mask)
 #else
     #define BUCKET(key)  hash_key(key)
