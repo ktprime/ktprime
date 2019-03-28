@@ -1,12 +1,23 @@
 // By Huang Yuanbing 2019
 // bailuzhou@163.com
-// https://github.com/ktprime/ktprime/blob/master/hash_table5.hpp
+// https://github.com/ktprime/ktprime/blob/master/hash_table6.hpp
 
 // LICENSE:
 //   This software is dual-licensed to the public domain and under the following
 //   license: you are granted a perpetual, irrevocable license to copy, modify,
 //   publish, and distribute this file as you see fit.
 
+/*****
+    This a very fast and efficent c++ hash map implemention and foucus optimization with small k/v.
+some Features as fllow:
+1. combine Linear Probing and Quadratic Probing
+2. open Addressing with Linked collsion slot
+3. specially optimization with cpu cache line size
+4. very fast/good rehash algorithm
+5. high load factor(0.9) and can save memory than unordered_map.
+6. can set lru get/set by set marco
+7. 
+*/
 
 #pragma once
 
@@ -17,7 +28,7 @@
 #include <cassert>
 #include <initializer_list>
 
-#if TAF_V3
+#if TAF_LOG
     #include "LogHelper.h"
 #endif
 
@@ -31,7 +42,7 @@
 #ifndef EMILIB_ORDER_INDEX
     #define EMILIB_ORDER_INDEX 2
 #endif
-#ifndef CACHE_LINE_SIZE
+#if CACHE_LINE_SIZE < 32
     #define CACHE_LINE_SIZE 64
 #endif
 
@@ -39,7 +50,7 @@
     #define GET_KEY(p,n)     p[n].second.first
     #define GET_VAL(p,n)     p[n].second.second
     #define NEXT_BUCKET(s,n) s[n].first
-    #define GET_PVAL(s,n)    s[n].second
+   #define GET_PVAL(s,n)    s[n].second
     #define NEW_KVALUE(key, value, bucket)  new(_pairs + bucket) PairT(bucket, std::pair<KeyT, ValueT>(key, value))
 #elif EMILIB_ORDER_INDEX == 1
     #define GET_KEY(p,n)     p[n].first.first
@@ -96,7 +107,7 @@ struct myPair {
         std::swap(second, o.second);
     }
 
-    First   first;
+    First  first;
     int    _ibucket;
     Second second;
 };
@@ -315,7 +326,6 @@ public:
         reserve(other.size());
         for (auto begin = other.cbegin(); begin != other.cend(); ++begin)
             insert(begin->first, begin->second);
-//      insert(other.cbegin(), other.cend());
         return *this;
     }
 
@@ -937,7 +947,7 @@ public:
         if (_num_filled > 0) {
             char buff[255] = {0};
             sprintf(buff, "    _num_filled/K.V/collision = %u/%s.%s/%.2lf%%", _num_filled, typeid(KeyT).name(), typeid(ValueT).name(), (collision * 100.0 / _num_filled));
-#if TAF_V3
+#if TAF_LOG
             static int ihashs = 0;
             FDLOG() << "EMILIB_ORDER_INDEX = " << EMILIB_ORDER_INDEX << "|hash_nums = " << ihashs ++ << "|" <<__FUNCTION__ << "|" << buff << endl;
 #else
@@ -1092,32 +1102,42 @@ private:
         return NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
     }
 
-    // key is not in this map. Find a place to put it.
+    // key is not in this map. Find a empty place to put it.
+	// combine linear probing and quadratic probing
     int find_empty_bucket(int bucket_from)
     {
-        constexpr auto max_probe_length = (int)(CACHE_LINE_SIZE * 2 / sizeof(PairT)) + 4;//cpu cache line 64 byte,2-3 cache line miss
-        auto offset = 1;
-        for (; offset < max_probe_length ; ++offset) {
-            const auto bucket = (bucket_from + offset) & _mask;
+        constexpr auto line_probe_length = (int)(CACHE_LINE_SIZE * 2 / sizeof(PairT)) + 2;//cpu cache line 64 byte,2-3 cache line miss
+        auto slot = 1;
+        for (; slot < line_probe_length; ++slot) {
+            const auto bucket = (bucket_from + slot) & _mask;
             if (NEXT_BUCKET(_pairs, bucket) == State::INACTIVE)
                 return bucket;
         }
 
-        bucket_from += (offset * offset - offset) / 2;
-        for ( ; ; ++offset) {
+		//use quadratic probing to accerate find speed for high load factor and clustering
+        bucket_from += (slot * slot - slot) / 2;
+        for ( ; ; ++slot) {
             //const auto bucket1 = (bucket_from + (offset + offset * offset) / 2) & _mask;
             const auto bucket1 = (bucket_from + 0) & _mask;
             if (NEXT_BUCKET(_pairs, bucket1) == State::INACTIVE)
                 return bucket1;
 
-            const auto bucket2 = (bucket_from + 1) & _mask;
-            if (NEXT_BUCKET(_pairs, bucket2) == State::INACTIVE)
+            //check adjacent slot is empty and the slot is in the same cache line
+			//which can reduce cpu cache miss.
+            const unsigned char cache_offset = reinterpret_cast<size_t>(&_pairs[bucket_from + 0]) % CACHE_LINE_SIZE;
+            if (cache_offset + sizeof(PairT) < CACHE_LINE_SIZE) {
+                const auto bucket2 = (bucket_from + 1) & _mask;
+                if (NEXT_BUCKET(_pairs, bucket2) == State::INACTIVE)
                 return bucket2;
-            bucket_from += offset;
 
-            const auto bucket3 = (bucket1 - 1) & _mask;
-            if (NEXT_BUCKET(_pairs, bucket3) == State::INACTIVE)
-                return bucket3;
+                if (sizeof(PairT) < CACHE_LINE_SIZE / 2) {
+                    const auto bucket3 = (bucket_from + 2) & _mask;
+                    if (NEXT_BUCKET(_pairs, bucket3) == State::INACTIVE)
+                    return bucket3;
+                }
+            }
+
+            bucket_from += slot;
         }
     }
 
@@ -1190,7 +1210,7 @@ private:
         return (int) key;
     }
 
-    template<typename UType, typename std::enable_if<std::is_integral<UType>::value, int>::type = 0>
+    template<typename UType, typename std::enable_if<std::is_integral<UType>::value, long>::type = 0>
 //    template<class UType, class = typename std::enable_if<std::is_integral<UType>::value, int>::type>
     inline int hash_key(const UType key) const
     {
@@ -1208,7 +1228,7 @@ private:
 #endif
     }
 
-    template<typename UType, typename std::enable_if<!std::is_integral<UType>::value, int>::type = 0>
+    template<typename UType, typename std::enable_if<!std::is_integral<UType>::value, long>::type = 0>
     inline int hash_key(const UType& key) const
     {
 #ifdef EMILIB_FIBONACCI_HASH
