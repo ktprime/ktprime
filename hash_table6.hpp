@@ -16,7 +16,7 @@ some Features as fllow:
 4. very fast/good rehash algorithm
 5. high load factor(0.9) and can save memory than unordered_map.
 6. can set lru get/set by set marco
-7. 
+7.
 */
 
 #pragma once
@@ -198,7 +198,7 @@ public:
         {
             do {
                 _bucket++;
-            } while (_bucket < _map->_num_buckets && _map->NEXT_BUCKET(_pairs, _bucket) == State::INACTIVE);
+            } while (_bucket < _map->_num_buckets && _map->NEXT_BUCKET(_pairs, _bucket) == INACTIVE);
         }
 
         //private:
@@ -271,7 +271,7 @@ public:
         {
             do {
                 _bucket++;
-            } while (_bucket < _map->_num_buckets && _map->NEXT_BUCKET(_pairs, _bucket) == State::INACTIVE);
+            } while (_bucket < _map->_num_buckets && _map->NEXT_BUCKET(_pairs, _bucket) == INACTIVE);
         }
 
     public:
@@ -338,7 +338,7 @@ public:
     ~HashMap()
     {
         for (unsigned int bucket = 0; bucket < _num_buckets; ++bucket) {
-            if (NEXT_BUCKET(_pairs, bucket) != State::INACTIVE) {
+            if (NEXT_BUCKET(_pairs, bucket) != INACTIVE) {
                 _pairs[bucket].~PairT();
             }
         }
@@ -363,7 +363,7 @@ public:
     iterator begin()
     {
         unsigned int bucket = 0;
-        while (bucket < _num_buckets && NEXT_BUCKET(_pairs, bucket) == State::INACTIVE) {
+        while (bucket < _num_buckets && NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
             ++bucket;
         }
         return iterator(this, bucket);
@@ -372,7 +372,7 @@ public:
     const_iterator cbegin() const
     {
         unsigned int bucket = 0;
-        while (bucket < _num_buckets && NEXT_BUCKET(_pairs, bucket) == State::INACTIVE) {
+        while (bucket < _num_buckets && NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
             ++bucket;
         }
         return const_iterator(this, bucket);
@@ -451,7 +451,7 @@ public:
     {
         const auto ibucket = hash_key(key);
         const auto next_bucket = NEXT_BUCKET(_pairs, ibucket);
-        if (next_bucket == State::INACTIVE)
+        if (next_bucket == INACTIVE)
             return 0;
         if (ibucket == next_bucket)
             return ibucket + 1;
@@ -464,7 +464,7 @@ public:
     size_type bucket_size(const size_type bucket) const
     {
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
-        if (next_bucket == State::INACTIVE)
+        if (next_bucket == INACTIVE)
              return 0;
 
         const auto& bucket_key = GET_KEY(_pairs, bucket);
@@ -487,7 +487,7 @@ public:
     size_type get_main_bucket(const unsigned int bucket) const
     {
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
-        if (next_bucket == State::INACTIVE)
+        if (next_bucket == INACTIVE)
             return -1;
 
         const auto& bucket_key = GET_KEY(_pairs, bucket);
@@ -516,7 +516,7 @@ public:
     int get_bucket_info(const unsigned int bucket, int steps[], const int slots) const
     {
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
-        if (next_bucket == State::INACTIVE)
+        if (next_bucket == INACTIVE)
             return -1;
 
         const auto& bucket_key = GET_KEY(_pairs, bucket);
@@ -595,7 +595,7 @@ public:
     iterator find(const KeyT& key)
     {
         auto bucket = find_filled_bucket(key);
-        if (bucket == State::INACTIVE) {
+        if (bucket == INACTIVE) {
             return end();
         }
         return iterator(this, bucket);
@@ -604,7 +604,7 @@ public:
     const_iterator find(const KeyT& key) const
     {
         auto bucket = find_filled_bucket(key);
-        if (bucket == State::INACTIVE) {
+        if (bucket == INACTIVE) {
             return end();
         }
         return const_iterator(this, bucket);
@@ -612,19 +612,19 @@ public:
 
     bool contains(const KeyT& key) const
     {
-        return find_filled_bucket(key) != State::INACTIVE;
+        return find_filled_bucket(key) != INACTIVE;
     }
 
     size_t count(const KeyT& key) const
     {
-        return find_filled_bucket(key) != State::INACTIVE ? 1 : 0;
+        return find_filled_bucket(key) != INACTIVE ? 1 : 0;
     }
 
     /// Returns the matching ValueT or nullptr if k isn't found.
     bool try_get(const KeyT& key, ValueT& val)
     {
         auto bucket = find_filled_bucket(key);
-        if (bucket != State::INACTIVE) {
+        if (bucket != INACTIVE) {
             val = GET_VAL(_pairs, bucket);
             return true;
         }
@@ -637,7 +637,7 @@ public:
     ValueT* try_get(const KeyT& key)
     {
         auto bucket = find_filled_bucket(key);
-        if (bucket != State::INACTIVE) {
+        if (bucket != INACTIVE) {
             return &GET_VAL(_pairs, bucket);
         }
         else {
@@ -649,7 +649,7 @@ public:
     const ValueT* try_get(const KeyT& key) const
     {
         auto bucket = find_filled_bucket(key);
-        if (bucket != State::INACTIVE) {
+        if (bucket != INACTIVE) {
             return &GET_VAL(_pairs, bucket);
         }
         else {
@@ -677,7 +677,7 @@ public:
     std::pair<iterator, bool> insert(const KeyT& key, const ValueT& value)
     {
         auto bucket = find_or_allocate(key);
-        if (NEXT_BUCKET(_pairs, bucket) != State::INACTIVE) {
+        if (NEXT_BUCKET(_pairs, bucket) != INACTIVE) {
             return { iterator(this, bucket), false };
         }
         else {
@@ -693,7 +693,7 @@ public:
     std::pair<iterator, bool> insert(KeyT&& key, ValueT&& value)
     {
         auto bucket = find_or_allocate(key);
-        if (NEXT_BUCKET(_pairs, bucket) != State::INACTIVE) {
+        if (NEXT_BUCKET(_pairs, bucket) != INACTIVE) {
             return { iterator(this, bucket), false };
         }
         else {
@@ -762,7 +762,7 @@ public:
         auto bucket = find_or_allocate(key);
 
         // Check if inserting a new value rather than overwriting an old entry
-        if (NEXT_BUCKET(_pairs, bucket) != State::INACTIVE) {
+        if (NEXT_BUCKET(_pairs, bucket) != INACTIVE) {
             GET_VAL(_pairs, bucket) = value;
         }
         else {
@@ -779,7 +779,7 @@ public:
         auto bucket = find_or_allocate(key);
 
         // Check if inserting a new value rather than overwriting an old entry
-        if (NEXT_BUCKET(_pairs, bucket) != State::INACTIVE) {
+        if (NEXT_BUCKET(_pairs, bucket) != INACTIVE) {
             ValueT old_value = GET_VAL(_pairs, bucket);
             GET_VAL(_pairs, bucket) = new_value;
             return old_value;
@@ -796,7 +796,7 @@ public:
     {
         auto bucket = find_or_allocate(key);
         /* Check if inserting a new value rather than overwriting an old entry */
-        if (NEXT_BUCKET(_pairs, bucket) == State::INACTIVE) {
+        if (NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
             if (check_expand_need())
                 bucket = find_main_bucket(key, true);
 
@@ -814,11 +814,11 @@ public:
     bool erase(const KeyT& key)
     {
         auto bucket = erase_from_bucket(key);
-        if (bucket == State::INACTIVE) {
+        if (bucket == INACTIVE) {
             return false;
         }
 
-        NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
+        NEXT_BUCKET(_pairs, bucket) = INACTIVE;
         _pairs[bucket].~PairT();
         _num_filled -= 1;
 
@@ -836,7 +836,7 @@ public:
         auto bucket = it._bucket;
         bucket = erase_from_bucket(it->first);
 
-        NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
+        NEXT_BUCKET(_pairs, bucket) = INACTIVE;
         _pairs[bucket].~PairT();
         _num_filled -= 1;
         if (bucket == it._bucket)
@@ -855,8 +855,8 @@ public:
     void clear()
     {
         for (unsigned int bucket = 0; bucket < _num_buckets; ++bucket) {
-            if (NEXT_BUCKET(_pairs, bucket) != State::INACTIVE) {
-                NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
+            if (NEXT_BUCKET(_pairs, bucket) != INACTIVE) {
+                NEXT_BUCKET(_pairs, bucket) = INACTIVE;
                 _pairs[bucket].~PairT();
                 if ( _num_filled -- == 1)
                     break;
@@ -908,18 +908,18 @@ public:
 #endif
 
         for (unsigned int bucket = 0; bucket < num_buckets; bucket++)
-            NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
+            NEXT_BUCKET(_pairs, bucket) = INACTIVE;
 
         unsigned int collision = 0;
         //set all main bucket first
         for (unsigned int src_bucket = 0; src_bucket < old_num_buckets; src_bucket++) {
-            if (NEXT_BUCKET(old_pairs, src_bucket) == State::INACTIVE) {
+            if (NEXT_BUCKET(old_pairs, src_bucket) == INACTIVE) {
                 continue;
             }
 
             const auto main_bucket = hash_key(GET_KEY(old_pairs, src_bucket));
             auto& next_bucket = NEXT_BUCKET(_pairs, main_bucket);
-            if (next_bucket == State::INACTIVE) {
+            if (next_bucket == INACTIVE) {
                 auto& src_pair = old_pairs[src_bucket];
                 new(_pairs + main_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
                 next_bucket = main_bucket;
@@ -972,12 +972,12 @@ private:
     {
         const auto bucket = hash_key(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
-        if (next_bucket == State::INACTIVE)
-            return State::INACTIVE;
+        if (next_bucket == INACTIVE)
+            return INACTIVE;
         else if (next_bucket == bucket) {
            if (GET_KEY(_pairs, bucket) == key)
                return bucket;
-           return State::INACTIVE;
+           return INACTIVE;
         }
         else if (GET_KEY(_pairs, bucket) == key) {
             const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
@@ -1006,20 +1006,20 @@ private:
             next_bucket = nbucket;
         }
 
-        return State::INACTIVE;
+        return INACTIVE;
     }
 
-    // Find the bucket with this key, or return State::INACTIVE
+    // Find the bucket with this key, or return INACTIVE
     int find_filled_bucket(const KeyT& key) const
     {
         const auto bucket = hash_key(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
-        if (next_bucket == State::INACTIVE)
-            return State::INACTIVE;
+        if (next_bucket == INACTIVE)
+            return INACTIVE;
         else if (GET_KEY(_pairs, bucket) == key)
             return bucket;
         else if (next_bucket == bucket)
-            return State::INACTIVE;
+            return INACTIVE;
 
         //find next linked bucket
 #if EMILIB_LRU_FIND
@@ -1043,7 +1043,7 @@ private:
             next_bucket = nbucket;
         }
 
-        return State::INACTIVE;
+        return INACTIVE;
     }
 
     int reset_main_bucket(const int main_bucket, const int bucket)
@@ -1068,7 +1068,7 @@ private:
         const auto bucket = hash_key(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         const auto& bucket_key = GET_KEY(_pairs, bucket);
-        if (next_bucket == State::INACTIVE || bucket_key == key)
+        if (next_bucket == INACTIVE || bucket_key == key)
              return bucket;
         else if (next_bucket == bucket && bucket == hash_key(bucket_key))
              return NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
@@ -1094,7 +1094,7 @@ private:
         const auto main_bucket = hash_key(bucket_key);
         if (main_bucket != bucket) {
             reset_main_bucket(main_bucket, bucket);
-            NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
+            NEXT_BUCKET(_pairs, bucket) = INACTIVE;
             return bucket;
         }
 
@@ -1103,38 +1103,41 @@ private:
     }
 
     // key is not in this map. Find a empty place to put it.
-	// combine linear probing and quadratic probing
+    // combine linear probing and quadratic probing
     int find_empty_bucket(int bucket_from)
     {
-        constexpr auto line_probe_length = (int)(CACHE_LINE_SIZE * 2 / sizeof(PairT)) + 2;//cpu cache line 64 byte,2-3 cache line miss
+//        constexpr auto line_probe_length = (int)(CACHE_LINE_SIZE * 2 / sizeof(PairT)) + 2;//cpu cache line 64 byte,2-3 cache line miss
+        const auto cache_offset = reinterpret_cast<size_t>(&_pairs[bucket_from + 0]) % CACHE_LINE_SIZE;
+        const auto line_probe_length = (int)((CACHE_LINE_SIZE * 3 - cache_offset) / sizeof(PairT));//cpu cache line 64 byte,2 cache line miss
+
         auto slot = 1;
         for (; slot < line_probe_length; ++slot) {
             const auto bucket = (bucket_from + slot) & _mask;
-            if (NEXT_BUCKET(_pairs, bucket) == State::INACTIVE)
+            if (NEXT_BUCKET(_pairs, bucket) == INACTIVE)
                 return bucket;
         }
 
-		//use quadratic probing to accerate find speed for high load factor and clustering
-        bucket_from += (slot * slot - slot) / 2;
+        //use quadratic probing to accerate find speed for high load factor and clustering
+        bucket_from += (slot * slot - slot) / 2 + 2;
         for ( ; ; ++slot) {
             //const auto bucket1 = (bucket_from + (offset + offset * offset) / 2) & _mask;
             const auto bucket1 = (bucket_from + 0) & _mask;
-            if (NEXT_BUCKET(_pairs, bucket1) == State::INACTIVE)
+            if (NEXT_BUCKET(_pairs, bucket1) == INACTIVE)
                 return bucket1;
 
-            //check adjacent slot is empty and the slot is in the same cache line
-			//which can reduce cpu cache miss.
-            const unsigned char cache_offset = reinterpret_cast<size_t>(&_pairs[bucket_from + 0]) % CACHE_LINE_SIZE;
+            //check adjacent slot is empty and the slot is in the same cache line which can reduce cpu cache miss.
+            const auto cache_offset = reinterpret_cast<size_t>(&_pairs[bucket_from + 0]) % CACHE_LINE_SIZE;
             if (cache_offset + sizeof(PairT) < CACHE_LINE_SIZE) {
                 const auto bucket2 = (bucket_from + 1) & _mask;
-                if (NEXT_BUCKET(_pairs, bucket2) == State::INACTIVE)
-                return bucket2;
-
+                if (NEXT_BUCKET(_pairs, bucket2) == INACTIVE)
+                    return bucket2;
+#if 0
                 if (sizeof(PairT) < CACHE_LINE_SIZE / 2) {
                     const auto bucket3 = (bucket_from + 2) & _mask;
-                    if (NEXT_BUCKET(_pairs, bucket3) == State::INACTIVE)
-                    return bucket3;
+                    if (NEXT_BUCKET(_pairs, bucket3) == INACTIVE)
+                        return bucket3;
                 }
+#endif
             }
 
             bucket_from += slot;
@@ -1156,7 +1159,7 @@ private:
         const auto bucket = hash_key(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         const auto& bucket_key = GET_KEY(_pairs, bucket);
-        if (next_bucket == State::INACTIVE)
+        if (next_bucket == INACTIVE)
             return bucket;
         else if (next_bucket == bucket && (hash_key(bucket_key)) == bucket)
              return NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
@@ -1166,7 +1169,7 @@ private:
             //check current bucket_key is linked in main bucket
             if (main_bucket != bucket) {
                 reset_main_bucket(main_bucket, bucket);
-                NEXT_BUCKET(_pairs, bucket) = State::INACTIVE;
+                NEXT_BUCKET(_pairs, bucket) = INACTIVE;
                 return bucket;
             }
         }
