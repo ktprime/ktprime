@@ -50,8 +50,8 @@ some Features as fllow:
     #define GET_KEY(p,n)     p[n].second.first
     #define GET_VAL(p,n)     p[n].second.second
     #define NEXT_BUCKET(s,n) s[n].first
-   #define GET_PVAL(s,n)    s[n].second
-    #define NEW_KVALUE(key, value, bucket)  new(_pairs + bucket) PairT(bucket, std::pair<KeyT, ValueT>(key, value))
+    #define GET_PVAL(s,n)    s[n].second
+    #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(bucket, std::pair<KeyT, ValueT>(key, value))
 #elif EMILIB_ORDER_INDEX == 1
     #define GET_KEY(p,n)     p[n].first.first
     #define GET_VAL(p,n)     p[n].first.second
@@ -500,7 +500,7 @@ public:
 #if 1
         auto pbucket = reinterpret_cast<size_t>(&_pairs[bucket]);
         auto pnext   = reinterpret_cast<size_t>(&_pairs[next_bucket]);
-        if (pbucket - pbucket % CACHE_LINE_SIZE == pnext - pnext % CACHE_LINE_SIZE)
+        if (pbucket / CACHE_LINE_SIZE == pnext / CACHE_LINE_SIZE)
             return 0;
         auto diff = pbucket - pnext;
         if (diff < 0)
@@ -1049,7 +1049,7 @@ private:
     int reset_main_bucket(const int main_bucket, const int bucket)
     {
         const auto next_bucket = NEXT_BUCKET(_pairs, bucket);
-        const auto new_bucket  = find_empty_bucket(bucket);
+        const auto new_bucket  = find_empty_bucket(next_bucket);
         const auto prev_bucket = find_prev_bucket(main_bucket, bucket);
         NEXT_BUCKET(_pairs, prev_bucket) = new_bucket;
         new(_pairs + new_bucket) PairT(std::move(_pairs[bucket])); _pairs[bucket].~PairT();
@@ -1058,7 +1058,8 @@ private:
         else
             NEXT_BUCKET(_pairs, new_bucket) = next_bucket;
 
-         return new_bucket;
+        NEXT_BUCKET(_pairs, bucket) = INACTIVE;
+        return new_bucket;
     }
 
     // Find the bucket with this key, or return a good empty bucket to place the key in.
@@ -1094,7 +1095,6 @@ private:
         const auto main_bucket = hash_key(bucket_key);
         if (main_bucket != bucket) {
             reset_main_bucket(main_bucket, bucket);
-            NEXT_BUCKET(_pairs, bucket) = INACTIVE;
             return bucket;
         }
 
@@ -1106,9 +1106,15 @@ private:
     // combine linear probing and quadratic probing
     int find_empty_bucket(int bucket_from)
     {
-//        constexpr auto line_probe_length = (int)(CACHE_LINE_SIZE * 2 / sizeof(PairT)) + 2;//cpu cache line 64 byte,2-3 cache line miss
+        const auto bucket = (++bucket_from) & _mask;
+        if (NEXT_BUCKET(_pairs, bucket) == INACTIVE)
+            return bucket;
+#if 0
+        constexpr auto line_probe_length = (int)(CACHE_LINE_SIZE * 2 / sizeof(PairT)) + 2;//cpu cache line 64 byte,2-3 cache line miss
+#else
         const auto cache_offset = reinterpret_cast<size_t>(&_pairs[bucket_from + 0]) % CACHE_LINE_SIZE;
         const auto line_probe_length = (int)((CACHE_LINE_SIZE * 3 - cache_offset) / sizeof(PairT));//cpu cache line 64 byte,2 cache line miss
+#endif
 
         auto slot = 1;
         for (; slot < line_probe_length; ++slot) {
@@ -1158,20 +1164,19 @@ private:
     {
         const auto bucket = hash_key(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
-        const auto& bucket_key = GET_KEY(_pairs, bucket);
         if (next_bucket == INACTIVE)
             return bucket;
-        else if (next_bucket == bucket && (hash_key(bucket_key)) == bucket)
-             return NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
 
-        if (check_main) {
-            const auto main_bucket = hash_key(bucket_key);
+        const auto& bucket_key = GET_KEY(_pairs, bucket);
+        const auto main_bucket = hash_key(bucket_key);
+        if (main_bucket == bucket) {
+             if (next_bucket == bucket)
+                 return NEXT_BUCKET(_pairs, bucket) = find_empty_bucket(next_bucket);
+        }
+        else if (check_main) {
             //check current bucket_key is linked in main bucket
-            if (main_bucket != bucket) {
-                reset_main_bucket(main_bucket, bucket);
-                NEXT_BUCKET(_pairs, bucket) = INACTIVE;
-                return bucket;
-            }
+            reset_main_bucket(main_bucket, bucket);
+            return bucket;
         }
 
         //find a new empty and linked it to tail
@@ -1259,4 +1264,3 @@ private:
 #if __cplusplus > 199711
 template <class Key, class Val> using emihash = emilib1::HashMap<Key, Val, std::hash<Key>>;
 #endif
-
