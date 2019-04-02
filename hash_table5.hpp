@@ -289,7 +289,7 @@ public:
         _num_filled = 0;
         _mask = 0;
         _pairs = nullptr;
-        _max_load_factor = 0.9f;
+        _max_load_factor = 0.8f;
         _load_buckets = (int)(4 * _max_load_factor);
     }
 
