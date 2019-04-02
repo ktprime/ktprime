@@ -289,8 +289,8 @@ public:
         _num_filled = 0;
         _mask = 0;
         _pairs = nullptr;
-        _max_load_factor = 0.9;
-        _load_buckets = 4 * _max_load_factor;
+        _max_load_factor = 0.9f;
+        _load_buckets = (int)(4 * _max_load_factor);
     }
 
     HashMap()
@@ -338,13 +338,9 @@ public:
 
     ~HashMap()
     {
-        for (unsigned int bucket = 0; bucket < _num_buckets; ++bucket) {
-            if (NEXT_BUCKET(_pairs, bucket) != INACTIVE) {
-                _pairs[bucket].~PairT();
-            }
-        }
+        clear();
         if (_pairs)
-            free(_pairs);
+           free(_pairs);
     }
 
     void swap(HashMap& other)
@@ -449,14 +445,14 @@ public:
     //Returns the bucket number where the element with key k is located.
     size_type bucket(const KeyT& key) const
     {
-        const auto ibucket = BUCKET(key);
-        const auto next_bucket = NEXT_BUCKET(_pairs, ibucket);
+        const auto bucket = BUCKET(key);
+        const auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket == INACTIVE)
             return 0;
-        if (ibucket == next_bucket)
-            return ibucket + 1;
+        if (bucket == next_bucket)
+            return bucket + 1;
 
-        const auto& bucket_key = GET_KEY(_pairs, ibucket);
+        const auto& bucket_key = GET_KEY(_pairs, bucket);
         return BUCKET(bucket_key) + 1;
     }
 
@@ -855,7 +851,7 @@ public:
             if (NEXT_BUCKET(_pairs, bucket) != INACTIVE) {
                 NEXT_BUCKET(_pairs, bucket) = INACTIVE;
                 _pairs[bucket].~PairT();
-                _num_filled --;
+                _num_filled -= 1;
             }
         }
         _num_filled = 0;
@@ -946,7 +942,7 @@ public:
         }
 #endif
 
-        _load_buckets = _num_buckets * max_load_factor();
+        _load_buckets = int(_num_buckets * max_load_factor());
         free(old_pairs);
         assert(old_num_filled == _num_filled);
     }
@@ -1054,6 +1050,8 @@ private:
 
     // Find the bucket with this key, or return a good empty bucket to place the key in.
     // In the latter case, the bucket is expected to be filled.
+    // If the bucket opt by other Key who's main bucket is not in this postion, kick it out
+    // and move it to a new empty postion.
     int find_or_allocate(const KeyT& key)
     {
         const auto bucket = BUCKET(key);
@@ -1100,7 +1098,6 @@ private:
         if (NEXT_BUCKET(_pairs, bucket) == INACTIVE)
             return bucket;
 
-
         constexpr auto max_probe_length = (int)(128 / sizeof(PairT)) + 2;//cpu cache line 64 byte,2-3 cache line miss
         for (auto offset = 1; ; ++offset) {
             const auto bucket = (bucket_from + offset) & _mask;
@@ -1128,11 +1125,15 @@ private:
 
     int find_prev_bucket(int main_bucket, const int bucket)
     {
+        auto next_bucket = NEXT_BUCKET(_pairs, main_bucket);
+        if (next_bucket == bucket || next_bucket == main_bucket)
+            return main_bucket;
+
         while (true) {
-            const auto next_bucket = NEXT_BUCKET(_pairs, main_bucket);
-            if (next_bucket == bucket || next_bucket == main_bucket)
-                return main_bucket;
-            main_bucket = next_bucket;
+            auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
+            if (nbucket == bucket)
+                return next_bucket;
+            next_bucket = nbucket;
         }
     }
 
@@ -1140,19 +1141,19 @@ private:
     {
         const auto bucket = BUCKET(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
-        const auto& bucket_key = GET_KEY(_pairs, bucket);
         if (next_bucket == INACTIVE)
             return bucket;
-        else if (next_bucket == bucket && (BUCKET(bucket_key)) == bucket)
-             return NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
 
-        if (check_main) {
-            const auto main_bucket = BUCKET(bucket_key);
+        const auto& bucket_key = GET_KEY(_pairs, bucket);
+        const auto main_bucket = BUCKET(bucket_key);
+        if (main_bucket == bucket) {
+            if (next_bucket == bucket)
+                return NEXT_BUCKET(_pairs, bucket) = find_empty_bucket(next_bucket);
+        } else if (check_main) {
             //check current bucket_key is linked in main bucket
-            if (main_bucket != bucket) {
-                reset_main_bucket(main_bucket, bucket);
-                return bucket;
-            }
+
+            reset_main_bucket(main_bucket, bucket);
+            return bucket;
         }
 
         //find a new empty and linked it to tail
@@ -1171,9 +1172,8 @@ private:
 
 private:
     HashT   _hasher;
-    PairT*  _pairs;
 //    EqT     _eq;
-
+    PairT*  _pairs;
     unsigned int  _num_buckets;
     unsigned int  _num_filled;
     unsigned int  _mask;  // _num_buckets minus one
@@ -1185,7 +1185,7 @@ private:
 } // namespace emilib
 
 #if __cplusplus > 199711
-template <class Key, class Val> using emihash = emilib1::HashMap<Key, Val, std::hash<Key>>;
+//template <class Key, class Val> using emihash3 = emilib3::HashMap<Key, Val, std::hash<Key>>;
 #endif
 
 #undef EMILIB_ORDER_INDEX
