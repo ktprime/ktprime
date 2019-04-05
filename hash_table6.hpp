@@ -1144,6 +1144,8 @@ private:
                         return bucket3;
                 }
 #endif
+                if (slot > 6 || _num_filled * 10 > 7 * _mask)
+                    bucket_from += _num_buckets / 2;
             }
 
             bucket_from += slot;
