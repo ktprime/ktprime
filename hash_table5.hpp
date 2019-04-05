@@ -1108,17 +1108,14 @@ private:
                 if (NEXT_BUCKET(_pairs, bucket1) == INACTIVE)
                     return bucket1;
 
-            const auto cache_offset = reinterpret_cast<size_t>(&_pairs[bucket_from + 0]) % CACHE_LINE_SIZE;
-            if (cache_offset + sizeof(PairT) < CACHE_LINE_SIZE) {
-                const auto bucket2 = (bucket1 + 1) & _mask;
-                if (NEXT_BUCKET(_pairs, bucket2) == INACTIVE)
-                    return bucket2;
-            }
-#if Q3S
-            const auto bucket3 = (bucket1 - 1) & _mask;
-            if (NEXT_BUCKET(_pairs, bucket3) == INACTIVE)
-                return bucket3;
-#endif
+                const auto cache_offset = reinterpret_cast<size_t>(&_pairs[bucket_from + 0]) % CACHE_LINE_SIZE;
+                if (cache_offset + sizeof(PairT) < CACHE_LINE_SIZE) {
+                    const auto bucket2 = (bucket1 + 1) & _mask;
+                    if (NEXT_BUCKET(_pairs, bucket2) == INACTIVE)
+                        return bucket2;
+                }
+                if (offset > 8 || _num_filled * 10 > 7 * _mask)
+                    bucket_from += _num_buckets / 2;
             }
         }
     }
