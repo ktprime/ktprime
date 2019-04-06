@@ -1108,14 +1108,15 @@ private:
                 if (NEXT_BUCKET(_pairs, bucket1) == INACTIVE)
                     return bucket1;
 
-            const auto cache_slot = reinterpret_cast<size_t>(&NEXT_BUCKET(_pairs, bucket1)) % 64;
-            if (cache_slot + sizeof(PairT) < 64) {
-                const auto bucket2 = (bucket1 + 1) & _mask;
-                if (NEXT_BUCKET(_pairs, bucket2) == INACTIVE)
-                    return bucket2;
+                const auto cache_slot = reinterpret_cast<size_t>(&NEXT_BUCKET(_pairs, bucket1)) % 64;
+                if (cache_slot + sizeof(PairT) < 64) {
+                    const auto bucket2 = (bucket1 + 1) & _mask;
+                    if (NEXT_BUCKET(_pairs, bucket2) == INACTIVE)
+                        return bucket2;
                 }
+                else if (slot > 6 /* || _num_filled * 10 > 8 * _mask*/)
+                bucket_from += _num_buckets / 2;
             }
-            bucket_from += _num_buckets / 2;
         }
     }
 
