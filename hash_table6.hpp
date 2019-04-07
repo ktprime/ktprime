@@ -57,16 +57,16 @@ some Features as fllow:
     #define GET_VAL(p,n)     p[n].first.second
     #define NEXT_BUCKET(s,n) s[n].second
     #define GET_PVAL(s,n)    s[n].first
-    #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(std::pair<KeyT, ValueT>(key, value), bucket);
+    #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(std::pair<KeyT, ValueT>(key, value), bucket)
 #else
     #define GET_KEY(p,n)     p[n].first
     #define GET_VAL(p,n)     p[n].second
     #define NEXT_BUCKET(s,n) s[n].nextbucket
     #define GET_PVAL(s,n)    s[n]
-    #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket);
+    #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket)
 #endif
 
-namespace emilib1 {
+namespace emilib3 {
 /// like std::equal_to but no need to #include <functional>
 
 template <typename First, typename Second>
@@ -156,7 +156,7 @@ public:
 
         iterator() { }
 
-        iterator(MyType* hash_map, unsigned int bucket) : _map(hash_map), _bucket(bucket)
+        iterator(MyType* hash_map, uint32_t bucket) : _map(hash_map), _bucket(bucket)
         {
         }
 
@@ -205,7 +205,7 @@ public:
         //    friend class MyType;
     public:
         MyType* _map;
-        unsigned int  _bucket;
+        uint32_t  _bucket;
     };
 
     class const_iterator
@@ -229,7 +229,7 @@ public:
         {
         }
 
-        const_iterator(const MyType* hash_map, unsigned int bucket) : _map(hash_map), _bucket(bucket)
+        const_iterator(const MyType* hash_map, uint32_t bucket) : _map(hash_map), _bucket(bucket)
         {
         }
 
@@ -276,7 +276,7 @@ public:
 
     public:
         const MyType* _map;
-        unsigned int  _bucket;
+        uint32_t  _bucket;
     };
 
     // ------------------------------------------------------------------------
@@ -289,7 +289,7 @@ public:
         _shift = 0;
         _pairs = nullptr;
         _max_load_factor = 0.90f;
-        _load_buckets = (int)(4 * _max_load_factor);
+        _load_threshold = (int)(4 * _max_load_factor);
     }
 
     HashMap()
@@ -346,7 +346,7 @@ public:
     {
         std::swap(_hasher, other._hasher);
         std::swap(_max_load_factor, other._max_load_factor);
-        std::swap(_load_buckets, other._load_buckets);
+        std::swap(_load_threshold, other._load_threshold);
         std::swap(_pairs, other._pairs);
         std::swap(_num_buckets, other._num_buckets);
         std::swap(_num_filled, other._num_filled);
@@ -358,7 +358,7 @@ public:
 
     iterator begin()
     {
-        unsigned int bucket = 0;
+        uint32_t bucket = 0;
         while (bucket < _num_buckets && NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
             ++bucket;
         }
@@ -367,7 +367,7 @@ public:
 
     const_iterator cbegin() const
     {
-        unsigned int bucket = 0;
+        uint32_t bucket = 0;
         while (bucket < _num_buckets && NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
             ++bucket;
         }
@@ -480,7 +480,7 @@ public:
     }
 
 #ifdef EMILIB_STATIS
-    size_type get_main_bucket(const unsigned int bucket) const
+    size_type get_main_bucket(const uint32_t bucket) const
     {
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket == INACTIVE)
@@ -507,7 +507,7 @@ public:
 #endif
     }
 
-    int get_bucket_info(const unsigned int bucket, int steps[], const int slots) const
+    int get_bucket_info(const uint32_t bucket, int steps[], const int slots) const
     {
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket == INACTIVE)
@@ -540,10 +540,10 @@ public:
     {
         int buckets[129] = {0};
         int steps[129]   = {0};
-        for (unsigned int bucket = 0; bucket < _num_buckets; ++bucket) {
+        for (uint32_t bucket = 0; bucket < _num_buckets; ++bucket) {
             auto bsize = get_bucket_info(bucket, steps, 128);
             if (bsize > 0)
-                buckets[bsize] ++ ;
+                buckets[bsize] ++;
         }
 
         int sumb = 0, collision = 0, sumc = 0, finds = 0, sumn = 0;
@@ -551,7 +551,7 @@ public:
         for (int i = 0; i < sizeof(buckets) / sizeof(buckets[0]); i++) {
             const auto bucketsi = buckets[i];
             if (bucketsi == 0)
-                continue ;
+                continue;
             sumb += bucketsi;
             sumn += bucketsi * i;
             collision += bucketsi * (i - 1);
@@ -563,7 +563,7 @@ public:
         for (int i = 0; i < sizeof(steps) / sizeof(steps[0]); i++) {
             sumc += steps[i];
             if (steps[i] <= 2)
-                continue ;
+                continue;
             printf("  %2d  %8d  %.2lf  %.2lf\n", i, steps[i], steps[i] * 100.0 / collision, sumc * 100.0 / collision);
         }
 
@@ -718,7 +718,7 @@ public:
     }
 
     /// Same as above, but contains(key) MUST be false
-    unsigned int insert_unique(const KeyT& key, const ValueT& value)
+    uint32_t insert_unique(const KeyT& key, const ValueT& value)
     {
         check_expand_need();
         auto bucket = find_main_bucket(key, true);
@@ -727,7 +727,7 @@ public:
         return bucket;
     }
 
-    unsigned int insert_unique(KeyT&& key, ValueT&& value)
+    uint32_t insert_unique(KeyT&& key, ValueT&& value)
     {
         check_expand_need();
         auto bucket = find_main_bucket(key, true);
@@ -736,7 +736,7 @@ public:
         return bucket;
     }
 
-    inline unsigned int insert_unique(std::pair<KeyT, ValueT>&& p)
+    inline uint32_t insert_unique(std::pair<KeyT, ValueT>&& p)
     {
         return insert_unique(std::move(p.first), std::move(p.second));
     }
@@ -752,6 +752,19 @@ public:
     inline std::pair<iterator, bool> emplace_unique(Args&&... args)
     {
         return insert_unique(std::forward<Args>(args)...);
+    }
+
+    int try_insert_mainbucket(const KeyT& key, const ValueT& value)
+    {
+        const auto bucket = hash_key(key);
+        auto next_bucket = NEXT_BUCKET(_pairs, bucket);
+        if (next_bucket != INACTIVE)
+            return -1;
+
+        check_expand_need();
+        NEW_KVALUE(key, value, bucket);
+        _num_filled++;
+        return bucket;
     }
 
     void insert_or_assign(const KeyT& key, ValueT&& value)
@@ -852,7 +865,7 @@ public:
     /// Remove all elements, keeping full capacity.
     void clear()
     {
-        for (unsigned int bucket = 0; _num_filled > 0; ++bucket) {
+        for (uint32_t bucket = 0; _num_filled > 0; ++bucket) {
             if (NEXT_BUCKET(_pairs, bucket) != INACTIVE) {
                 NEXT_BUCKET(_pairs, bucket) = INACTIVE;
                 _pairs[bucket].~PairT();
@@ -863,9 +876,9 @@ public:
     }
 
     /// Make room for this many elements
-    bool reserve(unsigned int required_buckets)
+    bool reserve(uint32_t required_buckets)
     {
-        if (required_buckets < _load_buckets)
+        if (required_buckets < _load_threshold)
             return false;
         else if (required_buckets < _num_filled)
             return false;
@@ -875,13 +888,13 @@ public:
     }
 
     /// Make room for this many elements
-    void rehash(unsigned int required_buckets)
+    void rehash(uint32_t required_buckets)
     {
-        unsigned int num_buckets = 8;
-        unsigned int shift = 3;
+        uint32_t num_buckets = 8;
+        uint32_t shift = 3;
         while (num_buckets < required_buckets) { num_buckets *= 2;  shift ++;}
         if (num_buckets <= _num_buckets) {
-            num_buckets = 2 * _num_buckets; shift ++ ;
+            num_buckets = 2 * _num_buckets; shift ++;
         }
 
         assert(num_buckets * _max_load_factor + 2 >= _num_filled);
@@ -904,12 +917,12 @@ public:
         _shift       = shift;
 #endif
 
-        for (unsigned int bucket = 0; bucket < num_buckets; bucket++)
+        for (uint32_t bucket = 0; bucket < num_buckets; bucket++)
             NEXT_BUCKET(_pairs, bucket) = INACTIVE;
 
-        unsigned int collision = 0;
+        uint32_t collision = 0;
         //set all main bucket first
-        for (unsigned int src_bucket = 0; src_bucket < old_num_buckets; src_bucket++) {
+        for (uint32_t src_bucket = 0; src_bucket < old_num_buckets; src_bucket++) {
             if (NEXT_BUCKET(old_pairs, src_bucket) == INACTIVE) {
                 continue;
             }
@@ -927,11 +940,11 @@ public:
             }
             _num_filled += 1;
             if (_num_filled >= old_num_filled)
-                break ;
+                break;
         }
 
         //reset all collisions bucket
-        for (unsigned int src_bucket = 0; src_bucket < collision; src_bucket++) {
+        for (uint32_t src_bucket = 0; src_bucket < collision; src_bucket++) {
             const auto bucket = NEXT_BUCKET(old_pairs, src_bucket);
             auto new_bucket = find_main_bucket(GET_KEY(old_pairs, bucket), false);
             auto& src_pair = old_pairs[bucket];
@@ -943,7 +956,7 @@ public:
 #ifdef EMILIB_LOG_REHASH
         if (_num_filled > 0) {
             char buff[255] = {0};
-            sprintf(buff, "    _num_filled/K.V/collision = %u/%s.%s/%.2lf%%", _num_filled, typeid(KeyT).name(), typeid(ValueT).name(), (collision * 100.0 / _num_filled));
+            sprintf(buff, "    _num_filled/K.V/pack/collision = %u/%s.%s/%zd/%.2lf%%", _num_filled, typeid(KeyT).name(), typeid(ValueT).name(), sizeof(_pairs[0]), (collision * 100.0 / _num_filled));
 #if TAF_LOG
             static int ihashs = 0;
             FDLOG() << "EMILIB_ORDER_INDEX = " << EMILIB_ORDER_INDEX << "|hash_nums = " << ihashs ++ << "|" <<__FUNCTION__ << "|" << buff << endl;
@@ -953,7 +966,7 @@ public:
         }
 #endif
 
-        _load_buckets = int(_num_buckets * max_load_factor());
+        _load_threshold = int(_num_buckets * max_load_factor());
         free(old_pairs);
         assert(old_num_filled == _num_filled);
     }
@@ -1110,8 +1123,8 @@ private:
 #if 0
         constexpr auto line_probe_length = (int)(CACHE_LINE_SIZE * 2 / sizeof(PairT)) + 2;//cpu cache line 64 byte,2-3 cache line miss
 #else
-        const auto cache_offset = reinterpret_cast<size_t>(&_pairs[bucket_from + 0]) % CACHE_LINE_SIZE;
-        const auto line_probe_length = (int)((CACHE_LINE_SIZE * 3 - cache_offset) / sizeof(PairT));//cpu cache line 64 byte,2 cache line miss
+        const auto bucket_address = reinterpret_cast<size_t>(&NEXT_BUCKET(_pairs,bucket));
+        const auto line_probe_length = (int)((CACHE_LINE_SIZE * 2 - (bucket_address + sizeof(int)) % CACHE_LINE_SIZE) / sizeof(PairT));//cpu cache line 64 byte,2 cache line miss
 #endif
 
         auto slot = 1;
@@ -1122,31 +1135,25 @@ private:
         }
 
         //use quadratic probing to accerate find speed for high load factor and clustering
-        bucket_from += (slot * slot - slot) / 2 + 2;
+        bucket_from += (slot * slot) / 2 + 2;
         //bucket_from += rand();
-        //bucket_from += _num_buckets / 2;
+//        if (line_probe_length > 6 && _num_filled * 10 > 7 * _mask)
+//            bucket_from += _num_buckets / 2;
+
         for ( ; ; ++slot) {
-            //const auto bucket1 = (bucket_from + (offset + offset * offset) / 2) & _mask;
-            const auto bucket1 = (bucket_from + 0) & _mask;
+            const auto bucket1 = bucket_from & _mask;
             if (NEXT_BUCKET(_pairs, bucket1) == INACTIVE)
                 return bucket1;
 
             //check adjacent slot is empty and the slot is in the same cache line which can reduce cpu cache miss.
-            const auto cache_offset = reinterpret_cast<size_t>(&_pairs[bucket_from + 0]) % CACHE_LINE_SIZE;
-            if (cache_offset + sizeof(PairT) < CACHE_LINE_SIZE) {
+            const auto cache_offset = reinterpret_cast<size_t>(&NEXT_BUCKET(_pairs,bucket1)) % CACHE_LINE_SIZE;
+            if (cache_offset + sizeof(int) + sizeof(PairT) < CACHE_LINE_SIZE) {
                 const auto bucket2 = (bucket_from + 1) & _mask;
                 if (NEXT_BUCKET(_pairs, bucket2) == INACTIVE)
                     return bucket2;
-#if 0
-                if (sizeof(PairT) < CACHE_LINE_SIZE / 2) {
-                    const auto bucket3 = (bucket_from + 2) & _mask;
-                    if (NEXT_BUCKET(_pairs, bucket3) == INACTIVE)
-                        return bucket3;
-                }
-#endif
-                if (slot > 6 || _num_filled * 10 > 7 * _mask)
-                    bucket_from += _num_buckets / 2;
             }
+            if (slot > 6)
+                bucket_from += _num_filled / 2;
 
             bucket_from += slot;
         }
@@ -1202,6 +1209,9 @@ private:
     //https://gist.github.com/badboy/6267743
     static inline uint32_t hash32(uint32_t key)
     {
+#if 0
+        return (key ^ 2166136261U)  * 16777619UL;
+#else
         key += ~(key << 15);
         key ^= (key >> 10);
         key += (key << 3);
@@ -1209,11 +1219,15 @@ private:
         key += ~(key << 11);
         key ^= (key >> 16);
         return key;
+#endif
     }
 
     //64 bit to 32 bit Hash Functions
     static inline uint32_t hash64(uint64_t key)
     {
+#if 0
+        return (key ^ 14695981039346656037ULL) * 1099511628211ULL;
+#else
         key = (~key) + (key << 18); // key = (key << 18) - key - 1;
         key = key ^ (key >> 31);
         key = key * 21; // key = (key + (key << 2)) + (key << 4);
@@ -1221,6 +1235,7 @@ private:
         key = key + (key << 6);
         key = key ^ (key >> 22);
         return (int) key;
+#endif
     }
 
     template<typename UType, typename std::enable_if<std::is_integral<UType>::value, long>::type = 0>
@@ -1235,8 +1250,7 @@ private:
         else
             return hash64(key) & _mask;
 #elif EMILIB_FAST_HASH == 0
-        //return (unsigned int)(key + (key >> 32)) & _mask;
-        return (unsigned int)key & _mask;
+        return (uint32_t)key & _mask;
 #else
         return _hasher(key) & _mask;
 #endif
@@ -1256,17 +1270,17 @@ private:
     HashT   _hasher;
     PairT*  _pairs;
 
-    unsigned int  _num_buckets;
-    unsigned int  _num_filled;
-    unsigned int  _mask;  // _num_buckets minus one
+    uint32_t  _num_buckets;
+    uint32_t  _num_filled;
+    uint32_t  _mask;  // _num_buckets minus one
     unsigned char _shift;
 
     float         _max_load_factor;
-    unsigned int  _load_buckets;
+    uint32_t  _load_threshold;
 };
 
 } // namespace emilib
 
 #if __cplusplus > 199711
-template <class Key, class Val> using emihash = emilib1::HashMap<Key, Val, std::hash<Key>>;
+//template <class Key, class Val> using emihash = emilib1::HashMap<Key, Val, std::hash<Key>>;
 #endif
