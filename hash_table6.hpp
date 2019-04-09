@@ -101,6 +101,14 @@ struct myPair {
         nextbucket = pairT.nextbucket;
     }
 
+    myPair& operator = (myPair&& pairT)
+    {
+        first = std::move(pairT.first);
+        second = std::move(pairT.second);
+        nextbucket = pairT.nextbucket;
+        return *this;
+    }
+
     void swap(myPair<First, Second>& o)
     {
         std::swap(first, o.first);
@@ -286,7 +294,6 @@ public:
         _num_buckets = 0;
         _num_filled = 0;
         _mask = 0;
-        _shift = 0;
         _pairs = nullptr;
         _max_load_factor = 0.90f;
         _load_threshold = (int)(4 * _max_load_factor);
@@ -351,7 +358,6 @@ public:
         std::swap(_num_buckets, other._num_buckets);
         std::swap(_num_filled, other._num_filled);
         std::swap(_mask, other._mask);
-        std::swap(_shift, other._shift);
     }
 
     // -------------------------------------------------------------
@@ -432,6 +438,7 @@ public:
             _max_load_factor = value;
     }
 
+    //... depend on system
     constexpr size_type max_size() const
     {
         return (1 << 30) / sizeof(PairT);
@@ -443,6 +450,7 @@ public:
     }
 
     //Returns the bucket number where the element with key k is located.
+    //
     size_type bucket(const KeyT& key) const
     {
         const auto bucket = hash_key(key);
@@ -457,6 +465,8 @@ public:
     }
 
     //Returns the number of elements in bucket n.
+    //bucket < _num_buckets, count items in bucket,
+    //if bucket is not the main bucket, search from main bucket
     size_type bucket_size(const size_type bucket) const
     {
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
@@ -467,7 +477,7 @@ public:
         next_bucket = hash_key(bucket_key);
         int ibucket_size = 1;
 
-        //find a new empty and linked it to tail
+        //iterator each item in current main bucket
         while (true) {
             const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
             if (nbucket == next_bucket) {
@@ -480,11 +490,12 @@ public:
     }
 
 #ifdef EMILIB_STATIS
+    //bucket < _num_buckets
     size_type get_main_bucket(const uint32_t bucket) const
     {
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket == INACTIVE)
-            return -1;
+            return INACTIVE;
 
         const auto& bucket_key = GET_KEY(_pairs, bucket);
         const auto main_bucket = hash_key(bucket_key);
@@ -759,7 +770,7 @@ public:
         const auto bucket = hash_key(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket != INACTIVE)
-            return -1;
+            return INACTIVE;
 
         check_expand_need();
         NEW_KVALUE(key, value, bucket);
@@ -911,11 +922,6 @@ public:
         _num_buckets = num_buckets;
         _mask        = num_buckets - 1;
         _pairs       = new_pairs;
-#ifdef FIBONACCI_HASH
-        _shift       = 64 - shift;
-#else
-        _shift       = shift;
-#endif
 
         for (uint32_t bucket = 0; bucket < num_buckets; bucket++)
             NEXT_BUCKET(_pairs, bucket) = INACTIVE;
@@ -929,23 +935,23 @@ public:
 
             const auto main_bucket = hash_key(GET_KEY(old_pairs, src_bucket));
             auto& next_bucket = NEXT_BUCKET(_pairs, main_bucket);
+            auto& src_pair = old_pairs[src_bucket];
             if (next_bucket == INACTIVE) {
-                auto& src_pair = old_pairs[src_bucket];
-                new(_pairs + main_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
+                new(_pairs + main_bucket) PairT(std::move(src_pair));
                 next_bucket = main_bucket;
             }
             else {
-                //move collision bucket to head
-                NEXT_BUCKET(old_pairs, collision++) = (int)src_bucket;
+                //move collision bucket to head for better cache performance
+                 new(old_pairs + collision++) PairT(std::move(src_pair));
             }
+            src_pair.~PairT();
             _num_filled += 1;
             if (_num_filled >= old_num_filled)
                 break;
         }
 
         //reset all collisions bucket
-        for (uint32_t src_bucket = 0; src_bucket < collision; src_bucket++) {
-            const auto bucket = NEXT_BUCKET(old_pairs, src_bucket);
+        for (uint32_t bucket = 0; bucket < collision; bucket++) {
             auto new_bucket = find_main_bucket(GET_KEY(old_pairs, bucket), false);
             auto& src_pair = old_pairs[bucket];
             new(_pairs + new_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
@@ -1116,44 +1122,39 @@ private:
     // combine linear probing and quadratic probing
     int find_empty_bucket(int bucket_from)
     {
-        const auto bucket = (++bucket_from) & _mask;
+        const auto bucket = (bucket_from + 1) & _mask;
         if (NEXT_BUCKET(_pairs, bucket) == INACTIVE)
             return bucket;
 
-#if 0
-        constexpr auto line_probe_length = (int)(CACHE_LINE_SIZE * 2 / sizeof(PairT)) + 2;//cpu cache line 64 byte,2-3 cache line miss
-#else
-        const auto bucket_address = reinterpret_cast<size_t>(&NEXT_BUCKET(_pairs,bucket));
-        const auto line_probe_length = (int)((CACHE_LINE_SIZE * 2 - (bucket_address + sizeof(int)) % CACHE_LINE_SIZE) / sizeof(PairT));//cpu cache line 64 byte,2 cache line miss
-#endif
-
         auto slot = 1;
+        const auto bucket_address = (int)(reinterpret_cast<size_t>(&NEXT_BUCKET(_pairs, bucket_from ++)) % CACHE_LINE_SIZE);
+        const auto line_probe_length = (int)((CACHE_LINE_SIZE * 2 - bucket_address) / sizeof(PairT));
         for (; slot < line_probe_length; ++slot) {
-            const auto bucket = (bucket_from + slot) & _mask;
+            const auto bucket = ++bucket_from & _mask;
             if (NEXT_BUCKET(_pairs, bucket) == INACTIVE)
                 return bucket;
         }
 
         //use quadratic probing to accerate find speed for high load factor and clustering
-        bucket_from += (slot * slot) / 2 + 2;
+        bucket_from += (slot * slot) / 2 + 1;
         //bucket_from += rand();
-//        if (line_probe_length > 6 && _num_filled * 10 > 7 * _mask)
-//            bucket_from += _num_buckets / 2;
+        //if (line_probe_length > 6 && _num_filled * 16 > 11 * _mask) bucket_from += _num_buckets / 2;
 
         for ( ; ; ++slot) {
             const auto bucket1 = bucket_from & _mask;
             if (NEXT_BUCKET(_pairs, bucket1) == INACTIVE)
                 return bucket1;
-
+#if 1
             //check adjacent slot is empty and the slot is in the same cache line which can reduce cpu cache miss.
             const auto cache_offset = reinterpret_cast<size_t>(&NEXT_BUCKET(_pairs,bucket1)) % CACHE_LINE_SIZE;
-            if (cache_offset + sizeof(int) + sizeof(PairT) < CACHE_LINE_SIZE) {
+            if (cache_offset + sizeof(PairT) < CACHE_LINE_SIZE) {
                 const auto bucket2 = (bucket_from + 1) & _mask;
                 if (NEXT_BUCKET(_pairs, bucket2) == INACTIVE)
                     return bucket2;
             }
+#endif
             if (slot > 6)
-                bucket_from += _num_filled / 2;
+                bucket_from += _num_buckets / 4, slot = 1;
 
             bucket_from += slot;
         }
@@ -1273,7 +1274,6 @@ private:
     uint32_t  _num_buckets;
     uint32_t  _num_filled;
     uint32_t  _mask;  // _num_buckets minus one
-    unsigned char _shift;
 
     float         _max_load_factor;
     uint32_t  _load_threshold;
