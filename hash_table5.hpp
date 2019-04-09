@@ -61,7 +61,7 @@
     #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket)
 #endif
 
-namespace emilib3 {
+namespace emilib1 {
 template <typename First, typename Second>
 struct pair {
     typedef First  first_type;
