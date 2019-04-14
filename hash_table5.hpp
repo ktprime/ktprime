@@ -289,8 +289,6 @@ public:
         _num_filled = 0;
         _mask = 0;
         _pairs = nullptr;
-        _max_load_factor = 0.9f;
-        _load_threshold = (int)(4 * _max_load_factor);
     }
 
     HashMap()
@@ -303,7 +301,7 @@ public:
     {
         init();
         reserve(other.size());
-        insert(other.cbegin(), other.cend());
+        insert_unique(other.cbegin(), other.cend());
     }
 
     HashMap(HashMap&& other)
@@ -326,7 +324,7 @@ public:
         clear();
         reserve(other.size());
         for (auto begin = other.cbegin(); begin != other.cend(); ++begin)
-            insert(begin->first, begin->second);
+            insert_unique(begin->first, begin->second);
         return *this;
     }
 
@@ -350,8 +348,6 @@ public:
         std::swap(_num_buckets, other._num_buckets);
         std::swap(_num_filled, other._num_filled);
         std::swap(_mask, other._mask);
-        std::swap(_max_load_factor, other._max_load_factor);
-        std::swap(_load_threshold, other._load_threshold);
     }
 
     // -------------------------------------------------------------
@@ -423,13 +419,7 @@ public:
 
     constexpr float max_load_factor() const
     {
-        return _max_load_factor;
-    }
-
-    void max_load_factor(float value)
-    {
-        if (value < 0.95 && value > 0.2)
-           _max_load_factor = value;
+        return 9.0f / 10;
     }
 
     constexpr size_type max_size() const
@@ -467,7 +457,7 @@ public:
         next_bucket = BUCKET(bucket_key);
         int ibucket_size = 1;
 
-        //find a new empty and linked it to tail
+        //iterator each item in current main bucket
         while (true) {
             const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
             if (nbucket == next_bucket) {
@@ -484,7 +474,7 @@ public:
     {
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket == INACTIVE)
-            return -1;
+            return INACTIVE;
 
         const auto& bucket_key = GET_KEY(_pairs, bucket);
         const auto main_bucket = BUCKET(bucket_key);
@@ -525,9 +515,8 @@ public:
         //find a new empty and linked it to tail
         while (true) {
             const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
-            if (nbucket == next_bucket) {
+            if (nbucket == next_bucket)
                 break;
-            }
 
             steps[get_cache_info(nbucket, next_bucket) % slots] ++;
             ibucket_size ++;
@@ -538,8 +527,8 @@ public:
 
     void dump_statis() const
     {
-        int buckets[128] = {0};
-        int steps[128]   = {0};
+        int buckets[129] = {0};
+        int steps[129]   = {0};
         for (uint32_t bucket = 0; bucket < _num_buckets; ++bucket) {
             auto bsize = get_bucket_info(bucket, steps, 128);
             if (bsize > 0)
@@ -575,7 +564,7 @@ public:
 #endif
 
     /****
-    std::pair<iterator, iterator> equal_range(const keyT & key)
+    std::pair<iterator, iterator> equal_range(const KeyT & key)
     {
         iterator found = find(key);
         if (found == end())
@@ -676,7 +665,7 @@ public:
         }
         else {
             if (check_expand_need())
-                bucket = find_main_bucket(key, true);
+                bucket = insert_main_bucket(key, true);
 
             NEW_KVALUE(key, value, bucket);
             _num_filled++;
@@ -692,7 +681,7 @@ public:
         }
         else {
             if (check_expand_need())
-                bucket = find_main_bucket(key, true);
+                bucket = insert_main_bucket(key, true);
 
             NEW_KVALUE(std::move(key), std::move(value), bucket);
             _num_filled++;
@@ -710,10 +699,17 @@ public:
         return insert(std::move(p.first), std::move(p.second));
     }
 
-    void insert(const_iterator begin, const_iterator end)
+    inline void insert(const_iterator begin, const_iterator end)
     {
         for (; begin != end; ++begin) {
             insert(begin->first, begin->second);
+        }
+    }
+
+    inline void insert_unique(const_iterator begin, const_iterator end)
+    {
+        for (; begin != end; ++begin) {
+            insert_unique(begin->first, begin->second);
         }
     }
 
@@ -721,7 +717,7 @@ public:
     uint32_t insert_unique(const KeyT& key, const ValueT& value)
     {
         check_expand_need();
-        auto bucket = find_main_bucket(key, true);
+        auto bucket = insert_main_bucket(key, true);
         NEW_KVALUE(key, value, bucket);
         _num_filled++;
         return bucket;
@@ -730,7 +726,7 @@ public:
     uint32_t insert_unique(KeyT&& key, ValueT&& value)
     {
         check_expand_need();
-        auto bucket = find_main_bucket(key, true);
+        auto bucket = insert_main_bucket(key, true);
         NEW_KVALUE(std::move(key), std::move(value), bucket);
         _num_filled++;
         return bucket;
@@ -741,6 +737,11 @@ public:
         return insert_unique(std::move(p.first), std::move(p.second));
     }
 
+    inline uint32_t insert_unique(std::pair<KeyT, ValueT>& p)
+    {
+        return insert_unique(p.first, p.second);
+    }
+
     //not
     template <class... Args>
     inline std::pair<iterator, bool> emplace(Args&&... args)
@@ -748,12 +749,30 @@ public:
         return insert(std::forward<Args>(args)...);
     }
 
+    template <class... Args>
+    inline std::pair<iterator, bool> emplace_unique(Args&&... args)
+    {
+        return insert_unique(std::forward<Args>(args)...);
+    }
+
+    int try_insert_mainbucket(const KeyT& key, const ValueT& value)
+    {
+        const auto bucket = hash_key(key);
+        auto next_bucket = NEXT_BUCKET(_pairs, bucket);
+        if (next_bucket != INACTIVE)
+            return INACTIVE;
+
+        check_expand_need();
+        NEW_KVALUE(key, value, bucket);
+        _num_filled++;
+        return bucket;
+    }
+
     void insert_or_assign(const KeyT& key, ValueT&& value)
     {
         check_expand_need();
 
         auto bucket = find_or_allocate(key);
-
         // Check if inserting a new value rather than overwriting an old entry
         if (NEXT_BUCKET(_pairs, bucket) != INACTIVE) {
             GET_VAL(_pairs, bucket) = value;
@@ -791,7 +810,7 @@ public:
         /* Check if inserting a new value rather than overwriting an old entry */
         if (NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
             if (check_expand_need())
-                bucket = find_main_bucket(key, true);
+                bucket = insert_main_bucket(key, true);
 
             NEW_KVALUE(key, ValueT(), bucket);
             _num_filled++;
@@ -858,11 +877,10 @@ public:
     }
 
     /// Make room for this many elements
-    bool reserve(uint32_t required_buckets)
+    bool reserve(uint32_t num_elems)
     {
-        if (required_buckets < _load_threshold)
-            return false;
-        else if (required_buckets < _num_filled)
+        auto required_buckets = num_elems * 10 / 9 + 2;
+        if (required_buckets <= _num_buckets)
             return false;
 
         rehash(required_buckets);
@@ -874,11 +892,8 @@ public:
     {
         uint32_t num_buckets = 8;
         while (num_buckets < required_buckets) { num_buckets *= 2; }
-        if (num_buckets <= _num_buckets) {
-            num_buckets = 2 * _num_buckets;
-        }
 
-        assert(num_buckets * _max_load_factor + 2 >= _num_filled);
+        assert(num_buckets > _num_filled);
         auto new_pairs = (PairT*)malloc(num_buckets * sizeof(PairT));
         if (!new_pairs) {
             throw std::bad_alloc();
@@ -887,6 +902,7 @@ public:
         auto old_num_filled  = _num_filled;
         auto old_num_buckets = _num_buckets;
         auto old_pairs = _pairs;
+        auto reset = 0;
 
         _num_filled  = 0;
         _num_buckets = num_buckets;
@@ -899,9 +915,8 @@ public:
         uint32_t collision = 0;
         //set all main bucket first
         for (uint32_t src_bucket = 0; src_bucket < old_num_buckets; src_bucket++) {
-            if (NEXT_BUCKET(old_pairs, src_bucket) == INACTIVE) {
+            if (NEXT_BUCKET(old_pairs, src_bucket) == INACTIVE)
                 continue;
-            }
 
             const auto main_bucket = BUCKET(GET_KEY(old_pairs, src_bucket));
             auto& next_bucket = NEXT_BUCKET(_pairs, main_bucket);
@@ -912,8 +927,8 @@ public:
             }
             else {
                 //move collision bucket to head
-                //NEXT_BUCKET(old_pairs, collision++) = (int)src_bucket;
-                new(old_pairs + collision++) PairT(std::move(src_pair));
+                new(old_pairs + collision) PairT(std::move(src_pair));
+                NEXT_BUCKET(old_pairs, collision++) = main_bucket;
             }
             src_pair.~PairT();
             _num_filled += 1;
@@ -921,13 +936,25 @@ public:
                 break;
         }
 
-        //reset all collisions bucket
-        for (uint32_t bucket = 0; bucket < collision; bucket++) {
-            auto new_bucket = find_main_bucket(GET_KEY(old_pairs, bucket), false);
-            auto& src_pair = old_pairs[bucket];
-            new(_pairs + new_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
-            //memcpy(&_pairs[new_bucket], &src_pair, sizeof(src_pair));
-            NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
+        //reset all collisions bucket, not linke new bucket after main bucket beause of cache miss
+        for (uint32_t src_bucket = 0; src_bucket < collision; src_bucket++) {
+            auto& old_pair = old_pairs[src_bucket];
+            const auto main_bucket = NEXT_BUCKET(old_pairs, src_bucket);
+            auto& next_bucket = NEXT_BUCKET(_pairs, main_bucket);
+            if (main_bucket == next_bucket)
+            {
+                const auto new_bucket = find_empty_bucket(main_bucket);
+                new(_pairs + new_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
+                NEXT_BUCKET(_pairs, new_bucket) = next_bucket = new_bucket;
+            }
+            else
+            {
+                const auto last_bucket = find_last_bucket(next_bucket);//how to fast find the last bucket ?
+                const auto new_bucket  = find_empty_bucket(last_bucket);
+                new(_pairs + new_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
+                NEXT_BUCKET(_pairs, new_bucket) = NEXT_BUCKET(_pairs, last_bucket) = new_bucket;
+                reset++;
+            }
         }
 
 #ifdef EMILIB_LOG_REHASH
@@ -943,7 +970,6 @@ public:
         }
 #endif
 
-        _load_threshold = int(_num_buckets * max_load_factor());
         free(old_pairs);
         assert(old_num_filled == _num_filled);
     }
@@ -1098,7 +1124,7 @@ private:
         const auto bucket = (++bucket_from) & _mask;
         if (NEXT_BUCKET(_pairs, bucket) == INACTIVE)
             return bucket;
-#if 0
+
         constexpr auto max_probe_length = (int)(128 / sizeof(PairT)) + 2;//cpu cache line 64 byte,2-3 cache line miss
         for (auto slot = 1; ; ++slot) {
             const auto bucket = (bucket_from + slot) & _mask;
@@ -1116,35 +1142,20 @@ private:
                     bucket_from += _num_buckets / 2;
             }
         }
-#else
-        //0  1  1  2
-        //1  2  3  4
-        //3  3  6  7
-        //6  4 10 11
-        //10 5 15 16
-        //15 6 21 22
-        //21 7 28 29
-        //28 8 36 37
-        const bool pro_bucket2 = (_num_filled * 10 < 6 * _mask) && (sizeof(PairT) < 32);
-        for (auto slot = 1; ; ++slot) {
-            const auto bucket1 = (bucket_from + slot) & _mask;
-            if (NEXT_BUCKET(_pairs, bucket1) == INACTIVE)
-                return bucket1;
-#if 1
-            const auto cache_slot = reinterpret_cast<size_t>(&NEXT_BUCKET(_pairs, bucket1)) % 64;
-            if (pro_bucket2 && cache_slot + sizeof(PairT) < 64) {
-                const auto bucket2 = (bucket1 + 1) & _mask;
-                if (NEXT_BUCKET(_pairs, bucket2) == INACTIVE)
-                    return bucket2;
-            }
-#endif
-            bucket_from += slot;
-            if (slot > 6) {
-                bucket_from += _num_buckets / 2;
-                slot = 1;
-            }
+    }
+
+    int find_last_bucket(int main_bucket)
+    {
+        auto next_bucket = NEXT_BUCKET(_pairs, main_bucket);
+        if (next_bucket == main_bucket)
+            return main_bucket;
+
+        while (true) {
+            const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
+            if (nbucket == next_bucket)
+                return next_bucket;
+            next_bucket = nbucket;
         }
-#endif
     }
 
     int find_prev_bucket(int main_bucket, const int bucket)
@@ -1161,7 +1172,7 @@ private:
         }
     }
 
-    int find_main_bucket(const KeyT& key, bool check_main)
+    int insert_main_bucket(const KeyT& key, bool check_main)
     {
         const auto bucket = BUCKET(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
@@ -1171,26 +1182,24 @@ private:
         const auto& bucket_key = GET_KEY(_pairs, bucket);
         const auto main_bucket = BUCKET(bucket_key);
         if (main_bucket == bucket) {
-            if (next_bucket == bucket)
-                return NEXT_BUCKET(_pairs, bucket) = find_empty_bucket(next_bucket);
-        } else if (check_main) {
-            //check current bucket_key is linked in main bucket
+            const auto last_bucket = find_last_bucket(next_bucket);
+            const auto new_bucket  = find_empty_bucket(last_bucket);
+            return NEXT_BUCKET(_pairs, last_bucket) = new_bucket;
+        } else {
             reset_main_bucket(main_bucket, bucket);
+#if 0
+            const auto prev_bucket = find_prev_bucket(main_bucket, bucket);
+            NEXT_BUCKET(_pairs, prev_bucket) = new_bucket;
+            new(_pairs + new_bucket) PairT(std::move(_pairs[bucket])); _pairs[bucket].~PairT();
+            if (next_bucket == bucket)
+                NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
+            else
+                NEXT_BUCKET(_pairs, new_bucket) = next_bucket;
+
+            NEXT_BUCKET(_pairs, bucket) = INACTIVE;
+#endif
             return bucket;
         }
-
-        //find a new empty and linked it to tail
-        int last_bucket = next_bucket;
-        while (true) {
-            const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
-            if (nbucket == next_bucket) {
-                last_bucket = nbucket;
-                break;
-            }
-            next_bucket = nbucket;
-        }
-
-        return NEXT_BUCKET(_pairs, last_bucket) = find_empty_bucket(last_bucket);
     }
 
 private:
@@ -1200,15 +1209,11 @@ private:
     uint32_t  _num_buckets;
     uint32_t  _num_filled;
     uint32_t  _mask;  // _num_buckets minus one
-
-    float     _max_load_factor;
-    uint32_t  _load_threshold;
 };
 
 } // namespace emilib
-
 #if __cplusplus > 199711
-//template <class Key, class Val> using emihash3 = emilib3::HashMap<Key, Val, std::hash<Key>>;
+//template <class Key, class Val> using emihash5 = emilib5::HashMap<Key, Val, std::hash<Key>>;
 #endif
 
 #undef EMILIB_ORDER_INDEX
