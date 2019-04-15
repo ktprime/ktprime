@@ -61,7 +61,7 @@
     #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket)
 #endif
 
-namespace emilib1 {
+namespace emilib5 {
 template <typename First, typename Second>
 struct pair {
     typedef First  first_type;
@@ -297,11 +297,42 @@ public:
         reserve(8);
     }
 
+//    template<typename K, typename V, typename std::enable_if<!std::is_integral<K>::value, long>::type = 0>
+//    template<typename K, typename V, typename std::enable_if<std::is_pod<K>::value && std::is_pod<V>::value, long>::type = 0>
     HashMap(const HashMap& other)
     {
-        init();
-        reserve(other.size());
-        insert_unique(other.cbegin(), other.cend());
+        _hasher      = other._hasher;
+        _num_buckets = other._num_buckets;
+        _num_filled  = other._num_filled;
+        _mask        = other._mask;
+        _pairs = (PairT*)malloc((_num_buckets + 1) * sizeof(PairT));
+
+        if (sizeof(PairT) <= 24) {
+            memcpy(_pairs, other._pairs, sizeof(_num_buckets * sizeof(PairT)));
+        }
+#if 0
+        //for (auto begin = other.cbegin(); begin != other.cend(); ++begin)
+            //insert_unique(begin->first, begin->second);
+    }
+
+    template<typename K, typename V, typename std::enable_if<!std::is_pod<K>::value || !std::is_pod<V>::value, long>::type = 0>
+    HashMap(const HashMap& other)
+    {
+        _hasher = other._hasher;
+        _num_buckets = other._num_buckets;
+        _num_filled = other._num_filled;
+        _mask = other._mask;
+        _pairs = (PairT*)malloc((_num_buckets + 1) * sizeof(PairT));
+#endif
+        else {
+            auto old_pairs = other._pairs;
+            for (uint32_t bucket = 0; bucket < _num_buckets; bucket++) {
+                auto state = NEXT_BUCKET(_pairs, bucket) = NEXT_BUCKET(old_pairs, bucket);
+                if (state == INACTIVE)
+                    continue;
+                new(_pairs + bucket) PairT(old_pairs[bucket]);
+            }
+        }
     }
 
     HashMap(HashMap&& other)
@@ -321,10 +352,10 @@ public:
 
     HashMap& operator=(const HashMap& other)
     {
-        clear();
-        reserve(other.size());
-        for (auto begin = other.cbegin(); begin != other.cend(); ++begin)
-            insert_unique(begin->first, begin->second);
+        if (this == &other)
+            return *this;
+        HashMap tmp(other);
+        this->swap(tmp);
         return *this;
     }
 
