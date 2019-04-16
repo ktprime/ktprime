@@ -18,7 +18,8 @@
 #include <initializer_list>
 
 #if TAF_LOG
-    #include "LogHelper.h"
+    #include "servant/AutoLog.h"
+    #include "servant/RollLogHelper.h"
 #endif
 
 #ifdef  GET_KEY
@@ -61,7 +62,7 @@
     #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket)
 #endif
 
-namespace emilib5 {
+namespace emilib1 {
 template <typename First, typename Second>
 struct pair {
     typedef First  first_type;
@@ -308,7 +309,7 @@ public:
         _pairs = (PairT*)malloc((_num_buckets + 1) * sizeof(PairT));
 
         if (sizeof(PairT) <= 24) {
-            memcpy(_pairs, other._pairs, sizeof(_num_buckets * sizeof(PairT)));
+            memcpy(_pairs, other._pairs, _num_buckets * sizeof(PairT));
         }
 #if 0
         //for (auto begin = other.cbegin(); begin != other.cend(); ++begin)
@@ -328,9 +329,8 @@ public:
             auto old_pairs = other._pairs;
             for (uint32_t bucket = 0; bucket < _num_buckets; bucket++) {
                 auto state = NEXT_BUCKET(_pairs, bucket) = NEXT_BUCKET(old_pairs, bucket);
-                if (state == INACTIVE)
-                    continue;
-                new(_pairs + bucket) PairT(old_pairs[bucket]);
+                if (state != INACTIVE)
+                    new(_pairs + bucket) PairT(old_pairs[bucket]);
             }
         }
     }
