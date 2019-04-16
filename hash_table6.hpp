@@ -29,7 +29,8 @@ some Features as fllow:
 #include <initializer_list>
 
 #if TAF_LOG
-    #include "LogHelper.h"
+    #include "servant/AutoLog.h"
+    #include "servant/RollLogHelper.h"
 #endif
 
 #ifdef GET_KEY
@@ -307,15 +308,31 @@ public:
 
     HashMap(const HashMap& other)
     {
-        init();
-        reserve(other.size());
-        insert(other.cbegin(), other.cend());
+        _hasher      = other._hasher;
+        _num_buckets = other._num_buckets;
+        _num_filled  = other._num_filled;
+        _mask        = other._mask;
+        _max_load_factor = other._max_load_factor;
+        _load_threshold  = other._load_threshold;
+
+        _pairs = (PairT*)malloc((_num_buckets + 1) * sizeof(PairT));
+
+        auto old_pairs = other._pairs;
+        if (sizeof(PairT) <= 24) {
+            memcpy(_pairs, old_pairs, _num_buckets * sizeof(PairT));
+        } else {
+            for (uint32_t bucket = 0; bucket < _num_buckets; bucket++) {
+                auto state = NEXT_BUCKET(_pairs, bucket) = NEXT_BUCKET(old_pairs, bucket);
+                if (state != INACTIVE)
+                    new(_pairs + bucket) PairT(old_pairs[bucket]);
+            }
+        }
     }
 
     HashMap(HashMap&& other)
     {
         init();
-        reserve(8);
+        reserve(1);
         *this = std::move(other);
     }
 
@@ -329,10 +346,10 @@ public:
 
     HashMap& operator=(const HashMap& other)
     {
-        clear();
-        reserve(other.size());
-        for (auto begin = other.cbegin(); begin != other.cend(); ++begin)
-            insert(begin->first, begin->second);
+        if (this == &other)
+            return *this;
+        HashMap tmp(other);
+        this->swap(tmp);
         return *this;
     }
 
@@ -352,12 +369,12 @@ public:
     void swap(HashMap& other)
     {
         std::swap(_hasher, other._hasher);
-        std::swap(_max_load_factor, other._max_load_factor);
-        std::swap(_load_threshold, other._load_threshold);
         std::swap(_pairs, other._pairs);
         std::swap(_num_buckets, other._num_buckets);
         std::swap(_num_filled, other._num_filled);
         std::swap(_mask, other._mask);
+        std::swap(_max_load_factor, other._max_load_factor);
+        std::swap(_load_threshold, other._load_threshold);
     }
 
     // -------------------------------------------------------------
@@ -536,9 +553,8 @@ public:
         //find a new empty and linked it to tail
         while (true) {
             const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
-            if (nbucket == next_bucket) {
+            if (nbucket == next_bucket)
                 break;
-            }
 
             steps[get_cache_info(nbucket, next_bucket) % slots] ++;
             ibucket_size ++;
@@ -687,7 +703,7 @@ public:
         }
         else {
             if (check_expand_need())
-                bucket = find_main_bucket(key, true);
+                bucket = insert_main_bucket(key, true);
 
             NEW_KVALUE(key, value, bucket);
             _num_filled++;
@@ -703,7 +719,7 @@ public:
         }
         else {
             if (check_expand_need())
-                bucket = find_main_bucket(key, true);
+                bucket = insert_main_bucket(key, true);
 
             NEW_KVALUE(std::move(key), std::move(value), bucket);
             _num_filled++;
@@ -711,20 +727,27 @@ public:
         }
     }
 
-    inline std::pair<iterator, bool> insert(const std::pair<KeyT, ValueT>& p)
+    std::pair<iterator, bool> insert(const std::pair<KeyT, ValueT>& p)
     {
         return insert(p.first, p.second);
     }
 
-    inline std::pair<iterator, bool> insert(std::pair<KeyT, ValueT>&& p)
+    std::pair<iterator, bool> insert(std::pair<KeyT, ValueT>&& p)
     {
         return insert(std::move(p.first), std::move(p.second));
     }
 
-    void insert(const_iterator begin, const_iterator end)
+    inline void insert(const_iterator begin, const_iterator end)
     {
         for (; begin != end; ++begin) {
             insert(begin->first, begin->second);
+        }
+    }
+
+    inline void insert_unique(const_iterator begin, const_iterator end)
+    {
+        for (; begin != end; ++begin) {
+            insert_unique(begin->first, begin->second);
         }
     }
 
@@ -732,7 +755,7 @@ public:
     uint32_t insert_unique(const KeyT& key, const ValueT& value)
     {
         check_expand_need();
-        auto bucket = find_main_bucket(key, true);
+        auto bucket = insert_main_bucket(key, true);
         NEW_KVALUE(key, value, bucket);
         _num_filled++;
         return bucket;
@@ -741,7 +764,7 @@ public:
     uint32_t insert_unique(KeyT&& key, ValueT&& value)
     {
         check_expand_need();
-        auto bucket = find_main_bucket(key, true);
+        auto bucket = insert_main_bucket(key, true);
         NEW_KVALUE(std::move(key), std::move(value), bucket);
         _num_filled++;
         return bucket;
@@ -820,7 +843,7 @@ public:
         /* Check if inserting a new value rather than overwriting an old entry */
         if (NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
             if (check_expand_need())
-                bucket = find_main_bucket(key, true);
+                bucket = insert_main_bucket(key, true);
 
             NEW_KVALUE(key, ValueT(), bucket);
             _num_filled++;
@@ -929,9 +952,8 @@ public:
         uint32_t collision = 0;
         //set all main bucket first
         for (uint32_t src_bucket = 0; src_bucket < old_num_buckets; src_bucket++) {
-            if (NEXT_BUCKET(old_pairs, src_bucket) == INACTIVE) {
+            if (NEXT_BUCKET(old_pairs, src_bucket) == INACTIVE)
                 continue;
-            }
 
             const auto main_bucket = hash_key(GET_KEY(old_pairs, src_bucket));
             auto& next_bucket = NEXT_BUCKET(_pairs, main_bucket);
@@ -942,7 +964,8 @@ public:
             }
             else {
                 //move collision bucket to head for better cache performance
-                 new(old_pairs + collision++) PairT(std::move(src_pair));
+                new(old_pairs + collision) PairT(std::move(src_pair));
+                NEXT_BUCKET(old_pairs, collision++) = main_bucket;
             }
             src_pair.~PairT();
             _num_filled += 1;
@@ -952,10 +975,9 @@ public:
 
         //reset all collisions bucket
         for (uint32_t bucket = 0; bucket < collision; bucket++) {
-            auto new_bucket = find_main_bucket(GET_KEY(old_pairs, bucket), false);
+            auto new_bucket = insert_main_bucket(GET_KEY(old_pairs, bucket), false);
             auto& src_pair = old_pairs[bucket];
             new(_pairs + new_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
-            //memcpy(&_pairs[new_bucket], &src_pair, sizeof(src_pair));
             NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
         }
 
@@ -1154,7 +1176,7 @@ private:
             }
 #endif
             if (slot > 6)
-                bucket_from += _num_buckets / 4, slot = 1;
+                bucket_from += _num_buckets / 3, slot = 1;
 
             bucket_from += slot;
         }
@@ -1174,7 +1196,7 @@ private:
         }
     }
 
-    int find_main_bucket(const KeyT& key, bool check_main)
+    int insert_main_bucket(const KeyT& key, bool check_main)
     {
         const auto bucket = hash_key(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
