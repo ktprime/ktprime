@@ -62,7 +62,7 @@
     #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket)
 #endif
 
-namespace emilib1 {
+namespace emilib5 {
 template <typename First, typename Second>
 struct pair {
     typedef First  first_type;
@@ -290,6 +290,7 @@ public:
         _num_filled = 0;
         _mask = 0;
         _pairs = nullptr;
+        max_load_factor(0.9);
     }
 
     HashMap()
@@ -306,7 +307,8 @@ public:
         _num_buckets = other._num_buckets;
         _num_filled  = other._num_filled;
         _mask        = other._mask;
-        _pairs = (PairT*)malloc((_num_buckets + 1) * sizeof(PairT));
+
+        _pairs = (PairT*)malloc(_num_buckets * sizeof(PairT));
 
         if (sizeof(PairT) <= 24) {
             memcpy(_pairs, other._pairs, _num_buckets * sizeof(PairT));
@@ -330,7 +332,7 @@ public:
             for (uint32_t bucket = 0; bucket < _num_buckets; bucket++) {
                 auto state = NEXT_BUCKET(_pairs, bucket) = NEXT_BUCKET(old_pairs, bucket);
                 if (state != INACTIVE)
-                    new(_pairs + bucket) PairT(old_pairs[bucket]);
+                new(_pairs + bucket) PairT(old_pairs[bucket]);
             }
         }
     }
@@ -379,6 +381,7 @@ public:
         std::swap(_num_buckets, other._num_buckets);
         std::swap(_num_filled, other._num_filled);
         std::swap(_mask, other._mask);
+        std::swap(_loadlf, other._loadlf);
     }
 
     // -------------------------------------------------------------
@@ -450,7 +453,13 @@ public:
 
     constexpr float max_load_factor() const
     {
-        return 9.0f / 10;
+        return  (1 << 20) / _loadlf;
+    }
+
+    void max_load_factor(float value)
+    {
+        if (value < 0.95 && value > 0.2)
+            _loadlf = (1 << 20) / value;
     }
 
     constexpr size_type max_size() const
@@ -584,7 +593,7 @@ public:
             sumc += steps[i];
             if (steps[i] <= 2)
                 continue;
-            printf("  %2d  %8d  %.2lf  %.2lf\n", i, steps[i], steps[i] * 100.0 / collision, sumc * 100.0 / collision);
+//            printf("  %2d  %8d  %.2lf  %.2lf\n", i, steps[i], steps[i] * 100.0 / collision, sumc * 100.0 / collision);
         }
 
         printf("    _num_filled/bucket_size/packed collision/cache_miss/hit_find = %u/%.2lf/%zd/ %.2lf%%/%.2lf%%/%.2lf\n",
@@ -910,7 +919,8 @@ public:
     /// Make room for this many elements
     bool reserve(uint32_t num_elems)
     {
-        auto required_buckets = num_elems * 10 / 9 + 2;
+//        auto required_buckets = num_elems * 10 / 9 + 2;
+        auto required_buckets = (((size_t)num_elems * _loadlf) >> 20) + 2;
         if (required_buckets <= _num_buckets)
             return false;
 
@@ -1156,12 +1166,14 @@ private:
         if (NEXT_BUCKET(_pairs, bucket) == INACTIVE)
             return bucket;
 
-        constexpr auto max_probe_length = (int)(128 / sizeof(PairT)) + 2;//cpu cache line 64 byte,2-3 cache line miss
+        const auto bucket_address = (int)(reinterpret_cast<size_t>(&NEXT_BUCKET(_pairs, bucket_from)) % CACHE_LINE_SIZE);
+        const auto max_probe_length = (int)((CACHE_LINE_SIZE * 2 - bucket_address + sizeof(int)) / sizeof(PairT));
+        //constexpr auto max_probe_length = (int)(128 / sizeof(PairT)) + 2;//cpu cache line 64 byte,2-3 cache line miss
         for (auto slot = 1; ; ++slot) {
             const auto bucket = (bucket_from + slot) & _mask;
             if (NEXT_BUCKET(_pairs, bucket) == INACTIVE)
                 return bucket;
-            else if (slot > max_probe_length) {
+            else if (slot >= max_probe_length) {
                 const auto bucket1 = (bucket + slot * slot) & _mask; //switch to square search
                 if (NEXT_BUCKET(_pairs, bucket1) == INACTIVE)
                     return bucket1;
@@ -1240,6 +1252,7 @@ private:
     uint32_t  _num_buckets;
     uint32_t  _num_filled;
     uint32_t  _mask;  // _num_buckets minus one
+    uint32_t  _loadlf;
 };
 
 } // namespace emilib
