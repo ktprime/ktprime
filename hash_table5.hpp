@@ -30,9 +30,8 @@
     #undef  GET_PVAL
 #endif
 
-//_mm_crc32_u64(0,key) &(some power of 2 - 1)
 #if 1
-    #define BUCKET(key)  int(_hasher(key) & _mask)
+    #define BUCKET(key)  int((unsigned int)_hasher(key) & _mask)
 //    #define BUCKET(key)  int((int)key & _mask)
 #else
     #define BUCKET(key)  hash_key(key)
@@ -62,7 +61,7 @@
     #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket)
 #endif
 
-namespace emilib1 {
+namespace emilib5 {
 template <typename First, typename Second>
 struct pair {
     typedef First  first_type;
@@ -204,8 +203,6 @@ public:
             } while (_bucket < _map->_num_buckets && _map->NEXT_BUCKET(_pairs, _bucket) == INACTIVE);
         }
 
-        //private:
-        //    friend class MyType;
     public:
         MyType* _map;
         uint32_t  _bucket;
@@ -593,7 +590,7 @@ public:
             sumc += steps[i];
             if (steps[i] <= 2)
                 continue;
-//            printf("  %2d  %8d  %.2lf  %.2lf\n", i, steps[i], steps[i] * 100.0 / collision, sumc * 100.0 / collision);
+            //printf("  %2d  %8d  %.2lf  %.2lf\n", i, steps[i], steps[i] * 100.0 / collision, sumc * 100.0 / collision);
         }
 
         printf("    _num_filled/bucket_size/packed collision/cache_miss/hit_find = %u/%.2lf/%zd/ %.2lf%%/%.2lf%%/%.2lf\n",
@@ -705,7 +702,7 @@ public:
         }
         else {
             if (check_expand_need())
-                bucket = insert_main_bucket(key, true);
+                bucket = insert_main_bucket(key);
 
             NEW_KVALUE(key, value, bucket);
             _num_filled++;
@@ -721,7 +718,7 @@ public:
         }
         else {
             if (check_expand_need())
-                bucket = insert_main_bucket(key, true);
+                bucket = insert_main_bucket(key);
 
             NEW_KVALUE(std::move(key), std::move(value), bucket);
             _num_filled++;
@@ -757,7 +754,7 @@ public:
     uint32_t insert_unique(const KeyT& key, const ValueT& value)
     {
         check_expand_need();
-        auto bucket = insert_main_bucket(key, true);
+        auto bucket = insert_main_bucket(key);
         NEW_KVALUE(key, value, bucket);
         _num_filled++;
         return bucket;
@@ -766,7 +763,7 @@ public:
     uint32_t insert_unique(KeyT&& key, ValueT&& value)
     {
         check_expand_need();
-        auto bucket = insert_main_bucket(key, true);
+        auto bucket = insert_main_bucket(key);
         NEW_KVALUE(std::move(key), std::move(value), bucket);
         _num_filled++;
         return bucket;
@@ -850,7 +847,7 @@ public:
         /* Check if inserting a new value rather than overwriting an old entry */
         if (NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
             if (check_expand_need())
-                bucket = insert_main_bucket(key, true);
+                bucket = insert_main_bucket(key);
 
             NEW_KVALUE(key, ValueT(), bucket);
             _num_filled++;
@@ -885,8 +882,10 @@ public:
     /// Returns an iterator to the next element (or end()).
     iterator erase(iterator it)
     {
-        auto bucket = it._bucket;
-        bucket = erase_from_bucket(it->first);
+        auto bucket = erase_from_bucket(it->first);
+        if (bucket == INACTIVE) {
+            return ++it;
+        }
 
         NEXT_BUCKET(_pairs, bucket) = INACTIVE;
         _pairs[bucket].~PairT();
@@ -919,8 +918,8 @@ public:
     /// Make room for this many elements
     bool reserve(uint32_t num_elems)
     {
-//        auto required_buckets = num_elems * 10 / 9 + 2;
         auto required_buckets = (((size_t)num_elems * _loadlf) >> 20) + 2;
+        //auto required_buckets = num_elems * 10 / 9 + 2;
         if (required_buckets <= _num_buckets)
             return false;
 
@@ -1168,7 +1167,7 @@ private:
 
         const auto bucket_address = (int)(reinterpret_cast<size_t>(&NEXT_BUCKET(_pairs, bucket_from)) % CACHE_LINE_SIZE);
         const auto max_probe_length = (int)((CACHE_LINE_SIZE * 2 - bucket_address + sizeof(int)) / sizeof(PairT));
-        //constexpr auto max_probe_length = (int)(128 / sizeof(PairT)) + 2;//cpu cache line 64 byte,2-3 cache line miss
+//        constexpr auto max_probe_length = (int)(128 / sizeof(PairT)) + 2;//cpu cache line 64 byte,2-3 cache line miss
         for (auto slot = 1; ; ++slot) {
             const auto bucket = (bucket_from + slot) & _mask;
             if (NEXT_BUCKET(_pairs, bucket) == INACTIVE)
@@ -1204,21 +1203,21 @@ private:
     int find_prev_bucket(int main_bucket, const int bucket)
     {
         auto next_bucket = NEXT_BUCKET(_pairs, main_bucket);
-        if (next_bucket == bucket || next_bucket == main_bucket)
+        if (next_bucket == bucket)
             return main_bucket;
 
         while (true) {
-            auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
+            const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
             if (nbucket == bucket)
                 return next_bucket;
             next_bucket = nbucket;
         }
     }
 
-    int insert_main_bucket(const KeyT& key, bool check_main)
+    int insert_main_bucket(const KeyT& key)
     {
         const auto bucket = BUCKET(key);
-        auto next_bucket = NEXT_BUCKET(_pairs, bucket);
+        const auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket == INACTIVE)
             return bucket;
 
@@ -1252,7 +1251,7 @@ private:
     uint32_t  _num_buckets;
     uint32_t  _num_filled;
     uint32_t  _mask;  // _num_buckets minus one
-    uint32_t  _loadlf;
+    uint32_t  _loadlf;  // _num_buckets minus one
 };
 
 } // namespace emilib
