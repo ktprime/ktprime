@@ -67,7 +67,7 @@ some Features as fllow:
     #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket)
 #endif
 
-namespace emilib3 {
+namespace emilib1 {
 /// like std::equal_to but no need to #include <functional>
 
 template <typename First, typename Second>
@@ -210,8 +210,6 @@ public:
             } while (_bucket < _map->_num_buckets && _map->NEXT_BUCKET(_pairs, _bucket) == INACTIVE);
         }
 
-        //private:
-        //    friend class MyType;
     public:
         MyType* _map;
         uint32_t  _bucket;
@@ -300,10 +298,10 @@ public:
         _load_threshold = (int)(4 * _max_load_factor);
     }
 
-    HashMap()
+    HashMap(int bucket = 8)
     {
         init();
-        reserve(8);
+        reserve(bucket);
     }
 
     HashMap(const HashMap& other)
@@ -315,7 +313,7 @@ public:
         _max_load_factor = other._max_load_factor;
         _load_threshold  = other._load_threshold;
 
-        _pairs = (PairT*)malloc((_num_buckets + 1) * sizeof(PairT));
+        _pairs = (PairT*)malloc(_num_buckets * sizeof(PairT));
 
         auto old_pairs = other._pairs;
         if (sizeof(PairT) <= 24) {
@@ -526,7 +524,7 @@ public:
         auto pnext   = reinterpret_cast<size_t>(&_pairs[next_bucket]);
         if (pbucket / CACHE_LINE_SIZE == pnext / CACHE_LINE_SIZE)
             return 0;
-        auto diff = abs(pnext - pbucket);
+        auto diff = abs((int)(pnext - pbucket));
         if (diff < 127 * CACHE_LINE_SIZE)
             return diff / CACHE_LINE_SIZE + 1;
         return 127;
@@ -591,7 +589,7 @@ public:
             sumc += steps[i];
             if (steps[i] <= 2)
                 continue;
-            printf("  %2d  %8d  %.2lf  %.2lf\n", i, steps[i], steps[i] * 100.0 / collision, sumc * 100.0 / collision);
+//            printf("  %2d  %8d  %.2lf  %.2lf\n", i, steps[i], steps[i] * 100.0 / collision, sumc * 100.0 / collision);
         }
 
         printf("    _num_filled/bucket_size/packed collision/cache_miss/hit_find = %u/%.2lf/%zd/ %.2lf%%/%.2lf%%/%.2lf\n",
@@ -1148,25 +1146,29 @@ private:
         if (NEXT_BUCKET(_pairs, bucket) == INACTIVE)
             return bucket;
 
-        auto slot = 1;
-        const auto bucket_address = (int)(reinterpret_cast<size_t>(&NEXT_BUCKET(_pairs, bucket_from ++)) % CACHE_LINE_SIZE);
-        const auto line_probe_length = (int)((CACHE_LINE_SIZE * 2 - bucket_address) / sizeof(PairT));
-        for (; slot < line_probe_length; ++slot) {
-            const auto bucket = ++bucket_from & _mask;
-            if (NEXT_BUCKET(_pairs, bucket) == INACTIVE)
-                return bucket;
+        auto slot = 2;
+        constexpr bool small_kv = sizeof(PairT) * 4 < CACHE_LINE_SIZE * 3;
+        if (small_kv) {
+            //at most only one cache line miss for linear probing
+            const auto bucket_address = (int)(reinterpret_cast<size_t>(&NEXT_BUCKET(_pairs, bucket_from)) % CACHE_LINE_SIZE);
+            const auto line_probe_length = (int)((CACHE_LINE_SIZE * 2 - bucket_address) / sizeof(PairT));
+
+            for (; slot <= line_probe_length; ++slot) {
+                const auto bucket = (bucket_from + slot) & _mask;
+                if (NEXT_BUCKET(_pairs, bucket) == INACTIVE)
+                    return bucket;
+            }
         }
 
         //use quadratic probing to accerate find speed for high load factor and clustering
-        bucket_from += (slot * slot) / 2 + 1;
-        //bucket_from += rand();
         //if (line_probe_length > 6 && _num_filled * 16 > 11 * _mask) bucket_from += _num_buckets / 2;
+        bucket_from += (slot * slot - slot) / 2 + 1;
 
         for ( ; ; ++slot) {
             const auto bucket1 = bucket_from & _mask;
             if (NEXT_BUCKET(_pairs, bucket1) == INACTIVE)
                 return bucket1;
-#if 1
+#if 0
             //check adjacent slot is empty and the slot is in the same cache line which can reduce cpu cache miss.
             const auto cache_offset = reinterpret_cast<size_t>(&NEXT_BUCKET(_pairs,bucket1)) % CACHE_LINE_SIZE;
             if (cache_offset + sizeof(PairT) < CACHE_LINE_SIZE) {
@@ -1185,11 +1187,11 @@ private:
     int find_prev_bucket(int main_bucket, const int bucket)
     {
         auto next_bucket = NEXT_BUCKET(_pairs, main_bucket);
-        if (next_bucket == bucket || next_bucket == main_bucket)
+        if (next_bucket == bucket)
             return main_bucket;
 
         while (true) {
-            auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
+            const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
             if (nbucket == bucket)
                 return next_bucket;
             next_bucket = nbucket;
@@ -1272,7 +1274,7 @@ private:
             return hash32(key) & _mask;
         else
             return hash64(key) & _mask;
-#elif EMILIB_FAST_HASH == 0
+#elif EMILIB_FAST_HASH
         return (uint32_t)key & _mask;
 #else
         return _hasher(key) & _mask;
@@ -1283,7 +1285,7 @@ private:
     inline int hash_key(const UType& key) const
     {
 #ifdef EMILIB_FIBONACCI_HASH
-        return (_hasher(key) * 11400714819323198485ull) >> _shift;
+        return (_hasher(key) * 11400714819323198485ull) & _mask;
 #else
         return _hasher(key) & _mask;
 #endif
@@ -1297,7 +1299,7 @@ private:
     uint32_t  _num_filled;
     uint32_t  _mask;  // _num_buckets minus one
 
-    float         _max_load_factor;
+    float     _max_load_factor;
     uint32_t  _load_threshold;
 };
 
