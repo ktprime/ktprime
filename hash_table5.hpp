@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <cstring>
 #if EMILIB_TAF_LOG
     #include "servant/AutoLog.h"
     #include "servant/RollLogHelper.h"
@@ -1109,7 +1110,6 @@ private:
         const auto prev_bucket = find_prev_bucket(main_bucket, bucket);
         NEXT_BUCKET(_pairs, prev_bucket) = new_bucket;
         new(_pairs + new_bucket) PairT(std::move(_pairs[bucket])); _pairs[bucket].~PairT();
-        _bucket ++;
         if (next_bucket == bucket)
             NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
         else
@@ -1156,6 +1156,7 @@ private:
         //check current bucket_key is in main bucket or not
         const auto main_bucket = hash_key(bucket_key);
         if (main_bucket != bucket) {
+            _bucket ++;
             reset_main_bucket(main_bucket, bucket);
             return bucket;
         }
@@ -1233,8 +1234,10 @@ private:
     {
         const auto bucket = hash_key(key);
         const auto next_bucket = NEXT_BUCKET(_pairs, bucket);
-        if (next_bucket == INACTIVE)
+        if (next_bucket == INACTIVE) {
+            _bucket ++;
             return bucket;
+        }
 
         const auto bucket_key = GET_KEY(_pairs, bucket);
         const auto main_bucket = hash_key(bucket_key);
