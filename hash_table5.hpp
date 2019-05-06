@@ -277,7 +277,7 @@ public:
         _bucket = 0;
         _moves = 0;
         _pairs = nullptr;
-        max_load_factor(0.9f);
+        max_load_factor(0.8f);
     }
 
     HashMap(uint32_t bucket = 4)
@@ -908,7 +908,7 @@ public:
     /// Make room for this many elements
     bool reserve(uint32_t num_elems)
     {
-        auto required_buckets = (((size_t)num_elems * _loadlf) >> 20) + 2;
+//        auto required_buckets = (((size_t)num_elems * _loadlf) >> 20) + 2;
 #if EMILIB_SAFE_HASH00
         if (_bucket * 8 < _num_filled && _bucket > 0 && _moves == 0 && _num_filled > 1000) {
             rehash(num_elems);
@@ -916,7 +916,7 @@ public:
         }
 #endif
 
-//      auto required_buckets = num_elems * 10 / 9 + 2;
+        auto required_buckets = num_elems * 10 / 9 + 2;
         if (required_buckets <= _num_buckets)
             return false;
 
@@ -931,7 +931,7 @@ public:
         while (num_buckets < required_buckets) { num_buckets *= 2; }
 
         //adjust hash function if bad hash function, alloc more memory
-        if (_num_filled > 1000 && _bucket * 8 < _num_filled && _bucket > 0) {
+        if (_num_filled > 20 && _bucket * 8 < _num_filled && _bucket > 0) {
             _moves = 0;
             while (_bucket < (_num_filled >> _moves))
                 _moves ++;
@@ -1318,7 +1318,7 @@ private:
                 return unhash(key) & _mask;
             else
                 return hash64(key) & _mask;
-        }
+       }
 #endif
 
 #if USE_IDENTITY_HASH
