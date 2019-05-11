@@ -1033,7 +1033,7 @@ public:
 #endif
 
 #if EMILIB_REHASH_LOG
-        if (_num_filled > 10'0000) {
+        if (_num_filled > 100000) {
             char buff[255] = {0};
             sprintf(buff, "    _num_filled/_moves/aver_size/K.V/pack/collision = %u/%u/%.2lf/%s.%s/%zd/%.2lf%%",
                     _num_filled, _moves, (double)_num_filled / _bucket, typeid(KeyT).name(), typeid(ValueT).name(), sizeof(_pairs[0]), (collision * 100.0 / _num_filled));
@@ -1101,8 +1101,10 @@ private:
     {
         const auto bucket = hash_key(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
-        if (next_bucket == INACTIVE || key == GET_KEY(_pairs, bucket))
-            return next_bucket;
+        if (next_bucket == INACTIVE)
+            return INACTIVE;
+        else if (key == GET_KEY(_pairs, bucket))
+            return bucket;
         else if (next_bucket == bucket)
             return INACTIVE;
 
@@ -1151,7 +1153,7 @@ private:
     {
         const auto bucket = hash_key(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
-        const auto bucket_key = GET_KEY(_pairs, bucket);
+        const auto& bucket_key = GET_KEY(_pairs, bucket);
         if (next_bucket == INACTIVE) {
             _bucket ++;
             return bucket;
