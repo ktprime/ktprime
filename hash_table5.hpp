@@ -865,10 +865,6 @@ public:
 
         NEXT_BUCKET(_pairs, bucket) = INACTIVE;
         _pairs[bucket].~PairT();
-        //tricky
-        if (std::is_integral<KeyT>::value)
-            GET_KEY(_pairs, bucket) += 1;
-
         _num_filled -= 1;
 
 #ifdef EMILIB_AUTO_SHRINK
@@ -888,20 +884,12 @@ public:
         }
 
         NEXT_BUCKET(_pairs, bucket) = INACTIVE;
-        if (std::is_integral<KeyT>::value)
-            GET_KEY(_pairs, bucket) += 1;
-
         _pairs[bucket].~PairT();
         _num_filled -= 1;
         if (bucket == it._bucket)
             ++it;
 
-#ifdef EMILIB_AUTO_SHRINK
-        if (_num_buckets > 254 && _num_buckets > 4 * _num_filled) {
-            rehash(_num_filled * max_load_factor() + 2);
-            it = begin();
-        }
-#endif
+
         return it;
     }
 
@@ -914,7 +902,6 @@ public:
         if (_num_filled > _num_buckets / 4 && sizeof(PairT) <= 3 * sizeof(int64_t) && std::is_integral<KeyT>::value && std::is_pod<ValueT>::value) {
             _num_filled = 0;
             memset(_pairs, INACTIVE, sizeof(_pairs[0]) * _num_buckets);
-            GET_KEY(_pairs, _mask) += 1;
             return;
         }
 
@@ -925,8 +912,6 @@ public:
                 _num_filled -= 1;
             }
         }
-        if (std::is_integral<KeyT>::value)
-            GET_KEY(_pairs, _mask) += 1;
     }
 
     /// Make room for this many elements
@@ -955,7 +940,7 @@ public:
         while (num_buckets < required_buckets) { num_buckets *= 2; }
 
         //adjust hash function if bad hash function, alloc more memory
-        if (_num_filled > 80 && _bucket * 8 < _num_filled && _bucket > 0) {
+        if (_num_filled > 100 && _bucket * 8 < _num_filled && _bucket > 0) {
             _moves = 0;
             while (_bucket < (_num_filled >> _moves))
                 _moves ++;
@@ -975,18 +960,14 @@ public:
         _num_buckets = num_buckets;
         _mask        = num_buckets - 1;
         _pairs       = new_pairs;
-
-        if (sizeof(PairT) <= EMILIB_CACHE_LINE_SIZE) {
+        _bucket      = 0;
+        if (sizeof(PairT) <= sizeof(int64_t) * 4 && std::is_integral<KeyT>::value && std::is_pod<ValueT>::value)
             memset(_pairs, INACTIVE, sizeof(_pairs[0]) * num_buckets);
-        } else {
-            for (uint32_t bucket = 0; bucket < num_buckets; bucket++)
-                NEXT_BUCKET(_pairs, bucket) = INACTIVE;
-        }
+        else
+        for (uint32_t bucket = 0; bucket < num_buckets; bucket++)
+            NEXT_BUCKET(_pairs, bucket) = INACTIVE;
 
-        if (std::is_integral<KeyT>::value)
-            GET_KEY(_pairs, _mask) += 1;
-
-        uint32_t collision = 0; _bucket      = 0;
+        uint32_t collision = 0;
         //set all main bucket first
         for (uint32_t src_bucket = 0; src_bucket < old_num_buckets; src_bucket++) {
             if (NEXT_BUCKET(old_pairs, src_bucket) == INACTIVE)
@@ -1047,7 +1028,7 @@ public:
 #endif
 
 #if EMILIB_REHASH_LOG
-        if (_num_filled > 10 && _moves > 0) {
+        if (_num_filled > 100000) {
             char buff[255] = {0};
             sprintf(buff, "    _num_filled/_moves/aver_size/K.V/pack/collision = %u/%u/%.2lf/%s.%s/%zd/%.2lf%%",
                     _num_filled, _moves, (double)_num_filled / _bucket, typeid(KeyT).name(), typeid(ValueT).name(), sizeof(_pairs[0]), (collision * 100.0 / _num_filled));
@@ -1115,22 +1096,12 @@ private:
     {
         const auto bucket = hash_key(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
-
-        if (std::is_integral<KeyT>::value) {
-            //no need check exist for performance
-            if (key == GET_KEY(_pairs, bucket))
-                return bucket;
-            // return ((next_bucket != INACTIVE)) ? bucket : INACTIVE;
-            else if (next_bucket == INACTIVE || next_bucket == bucket)
-                return INACTIVE;
-        } else {
-            if (next_bucket == INACTIVE)
-                return INACTIVE;
-            else if (key == GET_KEY(_pairs, bucket))
-                return bucket;
-            else if (next_bucket == bucket)
-                return INACTIVE;
-        }
+        if (next_bucket == INACTIVE)
+            return INACTIVE;
+        else if (key == GET_KEY(_pairs, bucket))
+            return bucket;
+        else if (next_bucket == bucket)
+            return INACTIVE;
 
         //find next linked bucket
 #if EMILIB_LRU_FIND
@@ -1184,7 +1155,15 @@ private:
         }
         else if (bucket_key == key)
             return bucket;
-        else if (next_bucket == bucket && bucket == hash_key(bucket_key))
+
+        //check current bucket_key is in main bucket or not
+        const auto main_bucket = hash_key(bucket_key);
+        if (EMILIB_UNLIKELY(main_bucket != bucket)) {
+            _bucket ++;
+            reset_main_bucket(main_bucket, bucket);
+            return bucket;
+        }
+        else if (next_bucket == bucket)
             return NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
 
         //find next linked bucket and check key
@@ -1204,14 +1183,6 @@ private:
             next_bucket = nbucket;
         }
 
-        //check current bucket_key is in main bucket or not
-        const auto main_bucket = hash_key(bucket_key);
-        if (main_bucket != bucket) {
-            _bucket ++;
-            reset_main_bucket(main_bucket, bucket);
-            return bucket;
-        }
-
         //find a new empty and link it to tail
         const auto new_bucket = find_empty_bucket(next_bucket);
         return NEXT_BUCKET(_pairs, next_bucket) = new_bucket;
@@ -1225,7 +1196,7 @@ private:
             return bucket;
 #if 1
         const auto bucket_address = (uint32_t)(reinterpret_cast<size_t>(&NEXT_BUCKET(_pairs, bucket_from)) % EMILIB_CACHE_LINE_SIZE);
-        const auto max_probe_length = (uint32_t)((EMILIB_CACHE_LINE_SIZE * 1 - bucket_address + sizeof(int)) / sizeof(PairT));
+        const auto max_probe_length = (uint32_t)((EMILIB_CACHE_LINE_SIZE * 2 - bucket_address + sizeof(int)) / sizeof(PairT));
 #else
         constexpr auto max_probe_length = (EMILIB_CACHE_LINE_SIZE * 1 / sizeof(PairT)) + 1;//cpu cache line 64 byte,2-3 cache line miss
 #endif
@@ -1235,7 +1206,7 @@ private:
                 return bucket;
             else if (slot >= max_probe_length) {
                 const auto bucket1 = (bucket + slot * slot) & _mask; //switch to square search
-                if (EMILIB_UNLIKELY(NEXT_BUCKET(_pairs, bucket1) == INACTIVE))
+                if (NEXT_BUCKET(_pairs, bucket1) == INACTIVE)
                     return bucket1;
 #if 0
                 const auto cache_offset = (uint32_t)reinterpret_cast<size_t>(&NEXT_BUCKET(_pairs,bucket1)) % EMILIB_CACHE_LINE_SIZE;
