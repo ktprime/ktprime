@@ -37,7 +37,7 @@
 
 
 #ifndef EMILIB_ORDER_INDEX
-    #define EMILIB_ORDER_INDEX 2
+    #define EMILIB_ORDER_INDEX 1
 #endif
 #if EMILIB_CACHE_LINE_SIZE < 32
     #define EMILIB_CACHE_LINE_SIZE 64
@@ -633,7 +633,7 @@ public:
 
     size_t count(const KeyT& key) const
     {
-        return find_filled_bucket(key) != INACTIVE ? 1 : 0;
+        return find_filled_bucket(key) == INACTIVE ? 0 : 1;
     }
 
     /// Returns the matching ValueT or nullptr if k isn't found.
@@ -953,15 +953,13 @@ public:
         auto old_num_filled  = _num_filled;
         auto old_num_buckets = _num_buckets;
         auto old_pairs = _pairs;
-        auto old_bucket = _bucket;
-        auto reset = 0;
 
         _num_filled  = 0;
         _num_buckets = num_buckets;
         _mask        = num_buckets - 1;
         _pairs       = new_pairs;
         _bucket      = 0;
-        if (sizeof(PairT) <= sizeof(int64_t) * 4 && std::is_integral<KeyT>::value && std::is_pod<ValueT>::value)
+        if (sizeof(PairT) <= sizeof(int64_t) * 4)
             memset(_pairs, INACTIVE, sizeof(_pairs[0]) * num_buckets);
         else
         for (uint32_t bucket = 0; bucket < num_buckets; bucket++)
@@ -996,6 +994,7 @@ public:
                 break;
         }
 #if 1
+        auto reset = 0;
         //reset all collisions bucket, not linke new bucket after main bucket beause of cache miss
         for (uint32_t src_bucket = 0; src_bucket < collision; src_bucket++) {
             auto& old_pair = old_pairs[src_bucket];
@@ -1073,6 +1072,8 @@ private:
             NEXT_BUCKET(_pairs, bucket) = (nbucket == next_bucket) ? bucket : nbucket;
             return next_bucket;
         }
+        else if (bucket != (hash_key(GET_KEY(_pairs, bucket))))
+            return INACTIVE;
 
         auto prev_bucket = bucket;
         while (true) {
@@ -1102,6 +1103,8 @@ private:
             return bucket;
         else if (next_bucket == bucket)
             return INACTIVE;
+//        else if (EMILIB_UNLIKELY(bucket != (hash_key(bucket_key))))
+//           return INACTIVE;
 
         //find next linked bucket
 #if EMILIB_LRU_FIND
@@ -1381,7 +1384,7 @@ private:
 } // namespace emilib
 
 #if __cplusplus > 199711
-template <class Key, class Val> using emihash = emilib1::HashMap<Key, Val, std::hash<Key>>;
+//template <class Key, class Val> using emihash = emilib1::HashMap<Key, Val, std::hash<Key>>;
 #endif
 
 #undef EMILIB_ORDER_INDEX
