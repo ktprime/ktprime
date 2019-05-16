@@ -35,20 +35,20 @@
 #    define EMILIB_UNLIKELY(condition) condition
 #endif
 
-#ifndef EMILIB_ORDER_INDEX
-    #define EMILIB_ORDER_INDEX 1
+#ifndef EMILIB_BUCKET_INDEX
+    #define EMILIB_BUCKET_INDEX 2
 #endif
 #if EMILIB_CACHE_LINE_SIZE < 32
     #define EMILIB_CACHE_LINE_SIZE 64
 #endif
 
-#if EMILIB_ORDER_INDEX == 0
+#if EMILIB_BUCKET_INDEX == 0
     #define GET_KEY(p,n)     p[n].second.first
     #define GET_VAL(p,n)     p[n].second.second
     #define NEXT_BUCKET(s,n) s[n].first
     #define GET_PVAL(s,n)    s[n].second
     #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(bucket, std::pair<KeyT, ValueT>(key, value))
-#elif EMILIB_ORDER_INDEX == 1
+#elif EMILIB_BUCKET_INDEX == 2
     #define GET_KEY(p,n)     p[n].first.first
     #define GET_VAL(p,n)     p[n].first.second
     #define NEXT_BUCKET(s,n) s[n].second
@@ -97,9 +97,9 @@ class HashMap
 private:
     typedef  HashMap<KeyT, ValueT, HashT> MyType;
 
-#if EMILIB_ORDER_INDEX == 0
+#if EMILIB_BUCKET_INDEX == 0
     typedef std::pair<uint32_t, std::pair<KeyT, ValueT>> PairT;
-#elif EMILIB_ORDER_INDEX == 1
+#elif EMILIB_BUCKET_INDEX == 2
     typedef std::pair<std::pair<KeyT, ValueT>, uint32_t> PairT;
 #else
 
@@ -142,7 +142,7 @@ public:
         typedef size_t                    difference_type;
         typedef size_t                    distance_type;
 
-#if EMILIB_ORDER_INDEX > 1
+#if EMILIB_BUCKET_INDEX == 1
         typedef pair<KeyT, ValueT>        value_type;
 #else
         typedef std::pair<KeyT, ValueT>   value_type;
@@ -167,7 +167,7 @@ public:
         {
             auto old_index = _bucket;
             this->goto_next_element();
-            return iterator(_map, old_index);
+            return {_map, old_index};
         }
 
         reference operator*() const
@@ -209,7 +209,7 @@ public:
         typedef std::forward_iterator_tag iterator_category;
         typedef size_t                    difference_type;
         typedef size_t                    distance_type;
-#if EMILIB_ORDER_INDEX > 1
+#if EMILIB_BUCKET_INDEX == 1
         typedef pair<KeyT, ValueT>        value_type;
 #else
         typedef std::pair<KeyT, ValueT>   value_type;
@@ -238,7 +238,7 @@ public:
         {
             auto old_index = _bucket;
             this->goto_next_element();
-            return const_iterator(_map, old_index);
+            return {_map, old_index};
         }
 
         reference operator*() const
@@ -309,7 +309,7 @@ public:
         _moves       = other._moves;
         _loadlf      = other._loadlf;
 
-        if (std::is_integral<KeyT>::value && std::is_pod<ValueT>::value) {
+        if (std::is_integral<KeyT>::value && std::is_trivially_copyable<ValueT>::value) {
             memcpy(_pairs, other._pairs, other._num_buckets * sizeof(PairT));
         }
         else {
@@ -384,7 +384,7 @@ public:
         while (bucket < _num_buckets && NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
             ++bucket;
         }
-        return iterator(this, bucket);
+        return {this, bucket};
     }
 
     const_iterator cbegin() const
@@ -393,7 +393,7 @@ public:
         while (bucket < _num_buckets && NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
             ++bucket;
         }
-        return const_iterator(this, bucket);
+        return {this, bucket};
     }
 
     const_iterator begin() const
@@ -403,12 +403,12 @@ public:
 
     iterator end()
     {
-        return iterator(this, _num_buckets);
+        return  {this, _num_buckets};
     }
 
     const_iterator cend() const
     {
-        return const_iterator(this, _num_buckets);
+        return {this, _num_buckets};
     }
 
     const_iterator end() const
@@ -684,7 +684,7 @@ public:
         const auto find = NEXT_BUCKET(_pairs, bucket) == INACTIVE;
         if (find) {
             if (EMILIB_UNLIKELY(check_expand_need()))
-                bucket = insert_main_bucket(key);
+                bucket = find_unique_bucket(key);
 
             NEW_KVALUE(key, value, bucket);
             _num_filled++;
@@ -698,7 +698,7 @@ public:
         const auto find = NEXT_BUCKET(_pairs, bucket) == INACTIVE;
         if (find) {
             if (check_expand_need())
-                bucket = insert_main_bucket(key);
+                bucket = find_unique_bucket(key);
 
             NEW_KVALUE(std::move(key), std::move(value), bucket);
             _num_filled++;
@@ -734,7 +734,7 @@ public:
     uint32_t insert_unique(const KeyT& key, const ValueT& value)
     {
         check_expand_need();
-        auto bucket = insert_main_bucket(key);
+        auto bucket = find_unique_bucket(key);
         NEW_KVALUE(key, value, bucket);
         _num_filled++;
         return bucket;
@@ -743,7 +743,7 @@ public:
     uint32_t insert_unique(KeyT&& key, ValueT&& value)
     {
         check_expand_need();
-        auto bucket = insert_main_bucket(key);
+        auto bucket = find_unique_bucket(key);
         NEW_KVALUE(std::move(key), std::move(value), bucket);
         _num_filled++;
         return bucket;
@@ -827,7 +827,7 @@ public:
         /* Check if inserting a new value rather than overwriting an old entry */
         if (NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
             if (EMILIB_UNLIKELY(check_expand_need()))
-                bucket = insert_main_bucket(key);
+                bucket = find_unique_bucket(key);
 
             NEW_KVALUE(key, ValueT(), bucket);
             _num_filled++;
@@ -882,7 +882,7 @@ public:
         _bucket = 0;
         _moves = 0;
 
-        if (_num_filled > _num_buckets / 4 && sizeof(PairT) <= 3 * sizeof(int64_t) && std::is_integral<KeyT>::value && std::is_pod<ValueT>::value) {
+        if (_num_filled > _num_buckets / 4 && sizeof(PairT) <= 3 * sizeof(int64_t) && std::is_integral<KeyT>::value && std::is_trivially_copyable<ValueT>::value) {
             _num_filled = 0;
             memset(_pairs, INACTIVE, sizeof(_pairs[0]) * _num_buckets);
             return;
@@ -937,7 +937,6 @@ public:
         auto old_num_buckets = _num_buckets;
         auto old_pairs = _pairs;
 
-
         _num_filled  = 0;
         _num_buckets = num_buckets;
         _mask        = num_buckets - 1;
@@ -949,7 +948,7 @@ public:
         for (uint32_t bucket = 0; bucket < num_buckets; bucket++)
             NEXT_BUCKET(_pairs, bucket) = INACTIVE;
 
-        uint32_t collision = 0; _bucket      = 0;
+        uint32_t collision = _bucket = 0;
         //set all main bucket first
         for (uint32_t src_bucket = 0; src_bucket < old_num_buckets; src_bucket++) {
             if (NEXT_BUCKET(old_pairs, src_bucket) == INACTIVE)
@@ -1004,7 +1003,7 @@ public:
         for (uint32_t bucket = 0; bucket < collision; bucket++) {
             auto src_bucket = NEXT_BUCKET(old_pairs, bucket);
             auto& src_pair = old_pairs[src_bucket];
-            auto new_bucket = insert_main_bucket(GET_KEY(old_pairs, src_bucket));
+            auto new_bucket = find_unique_bucket(GET_KEY(old_pairs, src_bucket));
             new(_pairs + new_bucket) PairT(std::move(src_pair)); src_pair.~PairT();
             NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
         }
@@ -1017,7 +1016,7 @@ public:
                     _num_filled, _moves, (double)_num_filled / _bucket, typeid(KeyT).name(), typeid(ValueT).name(), sizeof(_pairs[0]), (collision * 100.0 / _num_filled));
 #if EMILIB_TAF_LOG
             static uint32_t ihashs = 0;
-            FDLOG() << "EMILIB_ORDER_INDEX = " << EMILIB_ORDER_INDEX << "|hash_nums = " << ihashs ++ << "|" <<__FUNCTION__ << "|" << buff << endl;
+            FDLOG() << "EMILIB_BUCKET_INDEX = " << EMILIB_BUCKET_INDEX << "|hash_nums = " << ihashs ++ << "|" <<__FUNCTION__ << "|" << buff << endl;
 #else
             puts(buff);
 #endif
@@ -1127,10 +1126,13 @@ private:
         return new_bucket;
     }
 
-    // Find the bucket with this key, or return a good empty bucket to place the key in.
-    // In the latter case, the bucket is expected to be filled.
-    // If the bucket opt by other Key who's main bucket is not in this postion, kick it out
-    // and move it to a new empty postion.
+/*
+** inserts a new key into a hash table; first, check whether key's main
+** bucket/position is free. If not, check whether colliding node/bucket is in its main
+** position or not: if it is not, move colliding bucket to an empty place and
+** put new key in its main position; otherwise (colliding bucket is in its main
+** position), new key goes to an empty position.
+*/
     uint32_t find_or_allocate(const KeyT& key)
     {
         const auto bucket = hash_key(key);
@@ -1241,7 +1243,7 @@ private:
         }
     }
 
-    uint32_t insert_main_bucket(const KeyT& key)
+    uint32_t find_unique_bucket(const KeyT& key)
     {
 #if 0
         const auto bucket = hash_key(key);
@@ -1395,4 +1397,4 @@ private:
 //template <class Key, class Val> using emihash = emilib1::HashMap<Key, Val, std::hash<Key>>;
 #endif
 
-#undef EMILIB_ORDER_INDEX
+#undef EMILIB_BUCKET_INDEX
