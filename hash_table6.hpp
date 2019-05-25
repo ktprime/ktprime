@@ -393,6 +393,7 @@ public:
         _num_filled = 0;
         _mask = 0;
         _pairs = nullptr;
+        _pempty = nullptr;
         max_load_factor(0.9f);
     }
 
@@ -405,6 +406,7 @@ public:
     HashMap(const HashMap& other)
     {
         _pairs = (PairT*)malloc(other._num_buckets * sizeof(PairT));
+        _pempty = nullptr;
         clone(other);
     }
 
@@ -428,6 +430,11 @@ public:
                 }
                 _pairs[bucket]._bucket = old_pairs[bucket]._bucket;
             }
+        }
+
+        if (other._pempty) {
+            _pempty = (uint32_t*)malloc(other._pempty[0] * sizeof(uint32_t));
+            memcpy(_pempty, other._pempty, other._pempty[0] * sizeof(uint32_t));
         }
     }
 
@@ -457,6 +464,10 @@ public:
             _pairs = (PairT*)malloc(other._num_buckets * sizeof(PairT));
         }
 
+        if (_pempty) {
+            free(_pempty); _pempty = nullptr;
+        }
+
         clone(other);
         return *this;
     }
@@ -471,6 +482,8 @@ public:
     {
         clear();
         free(_pairs);
+        if (_pempty)
+            free(_pempty);
     }
 
     void swap(HashMap& other)
@@ -481,6 +494,7 @@ public:
         std::swap(_num_filled, other._num_filled);
         std::swap(_mask, other._mask);
         std::swap(_loadlf, other._loadlf);
+        std::swap(_pempty, other._pempty);
     }
 
     // -------------------------------------------------------------
@@ -952,6 +966,7 @@ public:
 
         CLS_BUCKET(_pairs, bucket); _pairs[bucket].~PairT(); _num_filled -= 1;
         CLR_BIT(bucket);
+        push_pempty(bucket);
 //        assert(_pairs[bucket]._bucket == EMILIB_BUCKET_NONE);
 
 #ifdef EMILIB_AUTO_SHRINK
@@ -978,6 +993,7 @@ public:
         //assert(bucket != INACTIVE);
         CLS_BUCKET(_pairs, bucket); _pairs[bucket].~PairT(); _num_filled -= 1;
         CLR_BIT(bucket);
+        push_pempty(bucket);
         //assert(_pairs[bucket]._bucket == EMILIB_BUCKET_NONE);
 
         //erase from main bucket, return main bucket as next
@@ -991,6 +1007,10 @@ public:
     /// Remove all elements, keeping full capacity.
     void clear()
     {
+        if (_pempty) {
+            _pempty[1] = 0;
+        }
+
         if (_num_filled > _num_buckets / 4 && std::is_integral<KeyT>::value && std::is_trivially_copyable<ValueT>::value) {
             _num_filled = 0;
             memset(_pairs, EMILIB_BUCKET_NONE, sizeof(_pairs[0]) * _num_buckets);
@@ -1005,6 +1025,51 @@ public:
         }
     }
 
+    /*
+     * 100         98                98
+     * free_bucket free_size 1 2 .....n
+   */
+    void set_pempty(uint32_t free_bucket)
+    {
+        _pempty = (uint32_t*)malloc(free_bucket * sizeof(uint32_t) + 8);
+        _pempty[0] = free_bucket;
+
+        auto& empty_size = _pempty[1];
+        empty_size = 0;
+
+        for (uint32_t bucket = 0; bucket < _num_buckets ; ++bucket) {
+            if (NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
+                assert(empty_size + 2 < free_bucket);
+                _pempty[2 + empty_size++] = bucket;
+            }
+        }
+    }
+
+    //TODO
+    void push_pempty(uint32_t empty_bucket)
+    {
+        if (_pempty)
+        {
+            auto &empty_size = _pempty[1];
+            if (_pempty[0] > empty_size + 2) {
+                _pempty[++empty_size + 1] = empty_bucket;
+            }
+        }
+    }
+
+    uint32_t pop_pempty()
+    {
+        for (auto last = _pempty[1] + 1; last > 1; last --) {
+            _pempty[1] --;
+            const auto bucket = _pempty[last];
+            if (NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
+                return bucket;
+            }
+        }
+
+        return INACTIVE;
+    }
+
     /// Make room for this many elements
     bool reserve(uint32_t num_elems)
     {
@@ -1012,6 +1077,17 @@ public:
         const auto required_buckets = num_elems * 10 / 8 + 2;
         if (EMILIB_LIKELY(required_buckets <= _num_buckets))
             return false;
+
+        if (_num_filled > 1024*100) {
+            if (!_pempty) {
+                set_pempty(_num_buckets - _num_filled + 4);
+                return false;
+            }
+            else if (_pempty[1] > 100) {
+                return false;
+            }
+            free(_pempty); _pempty = nullptr;
+        }
 
         rehash(required_buckets);
         return true;
@@ -1317,11 +1393,16 @@ private:
     uint32_t find_empty_bucket(uint32_t bucket_from)
     {
         const auto bucket = ++ bucket_from & _mask;
-/**
         if (NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
             return bucket;
         }
-**/
+
+        if (_pempty) {
+            const auto empty_bucket = pop_pempty();
+            if (empty_bucket != INACTIVE)
+                return empty_bucket;
+        }
+
         const auto bofset = bucket % EMILIB_HASH_BIT;
         auto mask_bucket = bucket - bofset;
         auto bmask = GET_BIT(mask_bucket) & ~((1 << bofset) - 1);
@@ -1409,11 +1490,12 @@ private:
     //https://gist.github.com/badboy/6267743
     static inline uint32_t hash32(uint32_t key)
     {
+#if 1
         uint64_t const r = key * UINT64_C(0xca4bcaa75ec3f625);
-        uint32_t h = static_cast<uint32_t>(r >> 32);
-        uint32_t l = static_cast<uint32_t>(r);
+        const uint32_t h = static_cast<uint32_t>(r >> 32);
+        const uint32_t l = static_cast<uint32_t>(r);
         return h + l;
-#if 0
+#elif 1
         key += ~(key << 15);
         key ^= (key >> 10);
         key += (key << 3);
@@ -1424,30 +1506,57 @@ private:
 #endif
     }
 
-    //64 bit to 32 bit Hash Functions
-    static inline uint32_t hash64(uint64_t key)
+    static uint64_t hash64(uint64_t key)
     {
-        key = (~key) + (key << 18); // key = (key << 18) - key - 1;
-        key = key ^ (key >> 31);
-        key = key * 21; // key = (key + (key << 2)) + (key << 4);
-        key = key ^ (key >> 11);
-        key = key + (key << 6);
-        key = key ^ (key >> 22);
-        return (uint32_t) key;
+#if 0
+        //MurmurHash3Mixer
+        uint64_t h = key;
+        h ^= h >> 33;
+        h *= 0xff51afd7ed558ccd;
+        h ^= h >> 33;
+        h *= 0xc4ceb9fe1a85ec53;
+        h ^= h >> 33;
+        return static_cast<size_t>(h);
+#elif 1
+        uint64_t x = key;
+        x = (x ^ (x >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+        x = (x ^ (x >> 27)) * UINT64_C(0x94d049bb133111eb);
+        x = x ^ (x >> 31);
+        return x;
+#endif
     }
 
+    template<typename UType>
+    static inline size_t fnv1a(const UType key)
+    {
+        uint8_t const* data = (uint8_t*)(&key);
+#if SIZE_MAX == UINT32_MAX
+        static constexpr size_t FNV_offset_basis = UINT64_C(14695981039346656037);
+        static constexpr size_t FNV_prime = UINT64_C(1099511628211);
+#else
+        static constexpr size_t FNV_offset_basis = UINT32_C(2166136261);
+        static constexpr size_t FNV_prime = UINT32_C(16777619);
+#endif
+        auto val = FNV_offset_basis;
+        for (uint32_t i = 0; i < (uint32_t)sizeof(UType); ++i) {
+            val ^= static_cast<size_t>(data[i]);
+            val *= FNV_prime;
+        }
+        return val;
+    }
+
+    //    template<class UType, class = typename std::enable_if<std::is_integral<UType>::value, int>::type>
     template<typename UType, typename std::enable_if<std::is_integral<UType>::value, long>::type = 0>
-        //    template<class UType, class = typename std::enable_if<std::is_integral<UType>::value, int>::type>
     inline uint32_t hash_bucket(const UType key) const
     {
 #ifdef EMILIB_FIBONACCI_HASH
         return (key * 2654435761ull) & _mask;
-#elif EMILIB_HASH32
+#elif EMILIB_SAFE_HASH
         if (sizeof(key) <= sizeof(uint32_t))
             return hash32(key) & _mask;
         else
             return hash64(key) & _mask;
-#elif EMILIB_FAST_HASH
+#elif EMILIB_IDENTITY_HASH
         return (uint32_t)key & _mask;
 #else
         return _hasher(key) & _mask;
@@ -1467,6 +1576,8 @@ private:
 private:
     HashT   _hasher;
     PairT*  _pairs;
+
+    uint32_t*  _pempty;
 
     uint32_t  _num_buckets;
     uint32_t  _num_filled;
