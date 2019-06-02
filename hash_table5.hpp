@@ -57,10 +57,10 @@
     #define GET_PVAL(s,n)    s[n].first
     #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(std::pair<KeyT, ValueT>(key, value), bucket)
 #else
-    #define GET_KEY(p,n)     p[n]._mypair.first
-    #define GET_VAL(p,n)     p[n]._mypair.second
-    #define NEXT_BUCKET(s,n) s[n]._mypair._ibucket
-    #define GET_PVAL(s,n)    s[n]._mypair
+    #define GET_KEY(p,n)     p[n].first
+    #define GET_VAL(p,n)     p[n].second
+    #define NEXT_BUCKET(s,n) s[n].nextbucket
+    #define GET_PVAL(s,n)    s[n]
     #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket)
 #endif
 
@@ -69,26 +69,53 @@ namespace emilib1 {
 constexpr static uint32_t INACTIVE = 0xFFFFFFFF;
 
 template <typename First, typename Second>
-struct pair {
-    typedef First  first_type;
-    typedef Second second_type;
+struct myPair {
+    myPair(const First& key, const Second& value, uint32_t bucket)
+        :first(key), second(value)
+    {
+        nextbucket = bucket;
+    }
 
-    // pair constructors are explicit so we don't accidentally call this ctor when we don't have to.
-    pair(const First& firstArg, const Second& secondArg)
-        : second( secondArg ), first( firstArg )
-     { _ibucket = INACTIVE; }
+    myPair(const std::pair<First,Second>& pair)
+        :first(pair.first), second(pair.second)
+    {
+        nextbucket = INACTIVE;
+    }
 
-    pair(First&& firstArg, Second&& secondArg)
-        : second( std::move(secondArg) ), first( std::move(firstArg) )
-    { _ibucket = INACTIVE; }
+    myPair(std::pair<First, Second>&& pair)
+        :first(std::move(pair.first)), second(std::move(pair.second))
+    {
+        nextbucket = INACTIVE;
+    }
 
-    void swap(pair<First, Second>& o) {
+    myPair(const myPair& pairT)
+        :first(pairT.first), second(pairT.second)
+    {
+        nextbucket = pairT.nextbucket;
+    }
+
+    myPair(myPair&& pairT)
+        :first(std::move(pairT.first)), second(std::move(pairT.second))
+    {
+        nextbucket = pairT.nextbucket;
+    }
+
+    myPair& operator = (myPair&& pairT)
+    {
+        first = std::move(pairT.first);
+        second = std::move(pairT.second);
+        nextbucket = pairT.nextbucket;
+        return *this;
+    }
+
+    void swap(myPair<First, Second>& o)
+    {
         std::swap(first, o.first);
         std::swap(second, o.second);
     }
 
     Second second;//int
-    uint32_t _ibucket;
+    uint32_t nextbucket;
     First first; //long
 };// __attribute__ ((packed));
 
@@ -105,29 +132,7 @@ private:
 #elif EMILIB_BUCKET_INDEX == 2
     typedef std::pair<std::pair<KeyT, ValueT>, uint32_t> PairT;
 #else
-
-    struct PairT
-    {
-        explicit PairT(const KeyT& key, const ValueT& value, uint32_t bucket)
-            :_mypair(key, value)
-        {
-            _mypair._ibucket = bucket;
-        }
-
-        explicit PairT(PairT& pairT)
-            :_mypair(pairT._mypair.first, pairT._mypair.second)
-        {
-            _mypair._ibucket = pairT._mypair._ibucket;
-        }
-
-        explicit PairT(PairT&& pairT) noexcept
-            :_mypair(pairT._mypair.first, pairT._mypair.second)
-        {
-            _mypair._ibucket = pairT._mypair._ibucket;
-        }
-
-        pair<KeyT, ValueT> _mypair;
-    };
+    typedef myPair<KeyT, ValueT>                    PairT;
 #endif
 
 public:
@@ -144,7 +149,7 @@ public:
         typedef size_t                    distance_type;
 
 #if EMILIB_BUCKET_INDEX == 1
-        typedef pair<KeyT, ValueT>        value_type;
+        typedef PairT                     value_type;
 #else
         typedef std::pair<KeyT, ValueT>   value_type;
 #endif
@@ -211,7 +216,7 @@ public:
         typedef size_t                    difference_type;
         typedef size_t                    distance_type;
 #if EMILIB_BUCKET_INDEX == 1
-        typedef pair<KeyT, ValueT>        value_type;
+        typedef PairT                     value_type;
 #else
         typedef std::pair<KeyT, ValueT>   value_type;
 #endif
@@ -819,7 +824,7 @@ public:
     {
 //         if (_num_filled == 0)
 //            return 0;
-        const auto bucket = erase_from_key(key);
+        const auto bucket = erase_by_key(key);
         if (bucket == INACTIVE)
             return 0;
 
@@ -919,99 +924,32 @@ public:
             if (next_bucket == INACTIVE) {
                 new(_pairs + main_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
                 next_bucket = main_bucket;
-
-#if EMILIB_REHASH_COPY == 2
-                NEXT_BUCKET(old_pairs, src_bucket) = INACTIVE;
-#endif
             }
             else {
                 //move collision bucket to head for better cache performance
-#if EMILIB_REHASH_COPY == 1
-                //for integer and small kv
-                new(old_pairs + collision) PairT(std::move(old_pair)); old_pair.~PairT();
-                NEXT_BUCKET(old_pairs, collision) = main_bucket;
-#elif EMILIB_REHASH_COPY == 0
-                NEXT_BUCKET(old_pairs, collision) = src_bucket;
-#elif EMILIB_REHASH_COPY == 2
-                NEXT_BUCKET(old_pairs, src_bucket) = main_bucket;
-#endif
-                collision ++;
+                NEXT_BUCKET(old_pairs, collision++) = src_bucket;
             }
             _num_filled += 1;
             if (EMILIB_UNLIKELY(_num_filled >= old_num_filled))
                 break;
         }
 
-#if EMILIB_REHASH_COPY == 1
-        //reset all collisions bucket, not linke new bucket after main bucket beause of cache miss
-        for (uint32_t src_bucket = 0; src_bucket < collision; src_bucket++) {
-            auto& old_pair = old_pairs[src_bucket];
-            const auto main_bucket = NEXT_BUCKET(old_pairs, src_bucket);
-            auto& next_bucket = NEXT_BUCKET(_pairs, main_bucket);
-            if (main_bucket == next_bucket)
-            {
-                const auto new_bucket = find_empty_bucket(main_bucket);
-                new(_pairs + new_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
-                NEXT_BUCKET(_pairs, new_bucket) = next_bucket = new_bucket;
-            }
-            else
-            {
-                const auto last_bucket = find_last_bucket(next_bucket);//how to fast find the last bucket ?
-                const auto new_bucket  = find_empty_bucket(last_bucket);
-                new(_pairs + new_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
-                NEXT_BUCKET(_pairs, new_bucket) = NEXT_BUCKET(_pairs, last_bucket) = new_bucket;
-            }
-        }
-#elif EMILIB_REHASH_COPY == 2
-        for (uint32_t src_bucket = 0; src_bucket < old_num_buckets; src_bucket++) {
-            const auto main_bucket = NEXT_BUCKET(old_pairs, src_bucket);
-            if (main_bucket == INACTIVE)
-                continue;
-
-            auto& old_pair = old_pairs[src_bucket];
-            auto& next_bucket = NEXT_BUCKET(_pairs, main_bucket);
-            if (main_bucket == next_bucket)
-            {
-                const auto new_bucket = find_empty_bucket(main_bucket);
-                new(_pairs + new_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
-                NEXT_BUCKET(_pairs, new_bucket) = next_bucket = new_bucket;
-            }
-            else
-            {
-                const auto last_bucket = find_last_bucket(next_bucket);//how to fast find the last bucket ?
-                const auto new_bucket  = find_empty_bucket(last_bucket);
-                new(_pairs + new_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
-                NEXT_BUCKET(_pairs, new_bucket) = NEXT_BUCKET(_pairs, last_bucket) = new_bucket;
-            }
-        }
-
-#elif EMILIB_REHASH_COPY == 0
         //reset all collisions bucket
         for (uint32_t colls = 0; colls < collision; colls++) {
             const auto src_bucket = NEXT_BUCKET(old_pairs, colls);
             const auto main_bucket = hash_bucket(GET_KEY(old_pairs, src_bucket));
-
-            //
             auto& old_pair = old_pairs[src_bucket];
             {
                 auto next_bucket = NEXT_BUCKET(_pairs, main_bucket);
                 //check current bucket_key is in main bucket or not
-#if 1
                 if (next_bucket != main_bucket)
                     next_bucket = find_last_bucket(next_bucket);
                 //find a new empty and link it to tail
                 auto new_bucket = NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
                 new(_pairs + new_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
                 NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
-#else
-                auto new_bucket = find_empty_bucket(next_bucket);
-                NEXT_BUCKET(_pairs, main_bucket) = new_bucket;
-                new(_pairs + new_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
-                NEXT_BUCKET(_pairs, new_bucket)  = next_bucket == main_bucket ? new_bucket : next_bucket;
-#endif
             }
         }
-#endif
 
 #if EMILIB_REHASH_LOG
         if (_num_filled > 100000) {
@@ -1039,7 +977,7 @@ private:
         return reserve(_num_filled);
     }
 
-    uint32_t erase_from_key(const KeyT& key)
+    uint32_t erase_by_key(const KeyT& key)
     {
         const auto bucket = hash_bucket(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
@@ -1305,5 +1243,3 @@ private:
 //template <class Key, class Val> using emihash = emilib1::HashMap<Key, Val, std::hash<Key>>;
 #endif
 
-#undef EMILIB_BUCKET_INDEX
-#undef hash_bucket
