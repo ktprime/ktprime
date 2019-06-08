@@ -66,7 +66,7 @@
 
 namespace emilib1 {
 
-constexpr static uint32_t INACTIVE = 0xFFFFFFFF;
+constexpr uint32_t INACTIVE = 0xFFFFFFFF;
 
 template <typename First, typename Second>
 struct myPair {
@@ -94,7 +94,7 @@ struct myPair {
         nextbucket = pairT.nextbucket;
     }
 
-    myPair(myPair&& pairT)
+    myPair(myPair&& pairT) noexcept
         :first(std::move(pairT.first)), second(std::move(pairT.second))
     {
         nextbucket = pairT.nextbucket;
@@ -618,6 +618,15 @@ public:
         return find_filled_bucket(key) == _num_buckets ? 0 : 1;
     }
 
+    std::pair<iterator, iterator> equal_range(const KeyT & key)
+    {
+        iterator found = find(key);
+        if (found == end())
+            return { found, found };
+        else
+            return { found, std::next(found) };
+    }
+
     /// Returns the matching ValueT or nullptr if k isn't found.
     bool try_get(const KeyT& key, ValueT& val) const
     {
@@ -673,7 +682,7 @@ public:
         auto bucket = find_or_allocate(key);
         const auto find = NEXT_BUCKET(_pairs, bucket) == INACTIVE;
         if (find) {
-            if (check_expand_need())
+            if (EMILIB_UNLIKELY(check_expand_need()))
                 bucket = find_unique_bucket(key);
 
             NEW_KVALUE(std::move(key), std::move(value), bucket); _num_filled++;
@@ -809,12 +818,6 @@ public:
     //reset remove key which hash_value is not in current bucket
     bool reset_bucket_key(uint32_t mask_bucket)
     {
-        if (std::is_integral<KeyT>::value)
-        {
-            GET_KEY(_pairs, mask_bucket) += 1;
-            while (mask_bucket == hash_bucket(GET_KEY(_pairs, mask_bucket)))
-                GET_KEY(_pairs, mask_bucket) += rand() + 1;
-        }
         return true;
     }
 
@@ -822,14 +825,22 @@ public:
     /// return false if element was not found
     size_type erase(const KeyT& key)
     {
-//         if (_num_filled == 0)
-//            return 0;
-        const auto bucket = erase_by_key(key);
+#if 0
+        auto bucket = find_filled_bucket(key);
+        if (bucket == _num_buckets)
+            return 0;
+
+        bucket = erase_from_bucket(bucket);
+        NEXT_BUCKET(_pairs, bucket) = INACTIVE; _pairs[bucket].~PairT(); _num_filled -= 1;
+        return 1;
+#else
+        const auto bucket = erase_key(key);
         if (bucket == INACTIVE)
             return 0;
 
         NEXT_BUCKET(_pairs, bucket) = INACTIVE; _pairs[bucket].~PairT(); _num_filled -= 1;
         return 1;
+#endif
     }
 
     /// Erase an element typedef an iterator.
@@ -890,23 +901,19 @@ public:
     /// Make room for this many elements
     void rehash(uint32_t required_buckets)
     {
-        uint32_t num_buckets = 4;
-        if (required_buckets >= 1024)
-            num_buckets = 1024 * 2;
+        uint32_t num_buckets = _num_buckets > 64 ? _num_buckets / 2 : 4;
         while (num_buckets < required_buckets) { num_buckets *= 2; }
 
         //assert(num_buckets > _num_filled);
         auto new_pairs = (PairT*)malloc(num_buckets * sizeof(PairT));
-        auto old_num_filled  = _num_filled;
         auto old_num_buckets = _num_buckets;
         auto old_pairs = _pairs;
 
-        _num_filled  = 0;
         _num_buckets = num_buckets;
         _mask        = num_buckets - 1;
         _pairs       = new_pairs;
 
-        if (sizeof(PairT) <= sizeof(int64_t) * 4)
+        if (sizeof(PairT) <= EMILIB_CACHE_LINE_SIZE / 2)
             memset(_pairs, INACTIVE, sizeof(_pairs[0]) * num_buckets);
         else
             for (uint32_t bucket = 0; bucket < num_buckets; bucket++)
@@ -920,8 +927,8 @@ public:
 
             const auto main_bucket = hash_bucket(GET_KEY(old_pairs, src_bucket));
             auto& next_bucket = NEXT_BUCKET(_pairs, main_bucket);
-            auto& old_pair = old_pairs[src_bucket];
             if (next_bucket == INACTIVE) {
+                auto& old_pair = old_pairs[src_bucket];
                 new(_pairs + main_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
                 next_bucket = main_bucket;
             }
@@ -929,9 +936,6 @@ public:
                 //move collision bucket to head for better cache performance
                 NEXT_BUCKET(old_pairs, collision++) = src_bucket;
             }
-            _num_filled += 1;
-            if (EMILIB_UNLIKELY(_num_filled >= old_num_filled))
-                break;
         }
 
         //reset all collisions bucket
@@ -939,16 +943,15 @@ public:
             const auto src_bucket = NEXT_BUCKET(old_pairs, colls);
             const auto main_bucket = hash_bucket(GET_KEY(old_pairs, src_bucket));
             auto& old_pair = old_pairs[src_bucket];
-            {
-                auto next_bucket = NEXT_BUCKET(_pairs, main_bucket);
-                //check current bucket_key is in main bucket or not
-                if (next_bucket != main_bucket)
-                    next_bucket = find_last_bucket(next_bucket);
-                //find a new empty and link it to tail
-                auto new_bucket = NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
-                new(_pairs + new_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
-                NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
-            }
+
+            auto next_bucket = NEXT_BUCKET(_pairs, main_bucket);
+            //check current bucket_key is in main bucket or not
+            if (next_bucket != main_bucket)
+                next_bucket = find_last_bucket(next_bucket);
+            //find a new empty and link it to tail
+            auto new_bucket = NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
+            new(_pairs + new_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
+            NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
         }
 
 #if EMILIB_REHASH_LOG
@@ -967,7 +970,7 @@ public:
 #endif
 
         free(old_pairs);
-        assert(old_num_filled == _num_filled);
+        //assert(old_num_filled == _num_filled);
     }
 
 private:
@@ -977,7 +980,7 @@ private:
         return reserve(_num_filled);
     }
 
-    uint32_t erase_by_key(const KeyT& key)
+    uint32_t erase_key(const KeyT& key)
     {
         const auto bucket = hash_bucket(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
@@ -1057,24 +1060,13 @@ private:
 #endif
 
         //find next linked bucket
-#if EMILIB_LRU_FIND
-        auto prev_bucket = bucket;
-#endif
         while (true) {
-            if (key == GET_KEY(_pairs, next_bucket)) {
-#if EMILIB_LRU_FIND
-                GET_PVAL(_pairs, next_bucket).swap(GET_PVAL(_pairs, prev_bucket));
-                return prev_bucket;
-#else
+            if (key == GET_KEY(_pairs, next_bucket))
                 return next_bucket;
-#endif
-            }
+
             const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
             if (nbucket == next_bucket)
                 break;
-#if EMILIB_LRU_FIND
-            prev_bucket = next_bucket;
-#endif
             next_bucket = nbucket;
         }
 
@@ -1090,7 +1082,7 @@ private:
         new(_pairs + new_bucket) PairT(std::move(_pairs[bucket])); _pairs[bucket].~PairT();
         NEXT_BUCKET(_pairs, new_bucket) = (next_bucket == bucket) ? new_bucket : next_bucket;
         NEXT_BUCKET(_pairs, bucket) = INACTIVE;
-        return new_bucket;
+        return bucket;
     }
 
 /*
@@ -1110,10 +1102,8 @@ private:
 
         //check current bucket_key is in main bucket or not
         const auto main_bucket = hash_bucket(bucket_key);
-        if (main_bucket != bucket) {
-            reset_main_bucket(main_bucket, bucket);
-            return bucket;
-        }
+        if (main_bucket != bucket)
+            return reset_main_bucket(main_bucket, bucket);
         else if (next_bucket == bucket)
             return NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
 
@@ -1145,11 +1135,11 @@ private:
         const auto bucket = (++bucket_from) & _mask;
         if (NEXT_BUCKET(_pairs, bucket) == INACTIVE)
             return bucket;
-#if 1
+#if 0
         const auto bucket_address = (uint32_t)(reinterpret_cast<size_t>(&NEXT_BUCKET(_pairs, bucket_from)) % EMILIB_CACHE_LINE_SIZE);
         const auto max_probe_length = (uint32_t)((EMILIB_CACHE_LINE_SIZE * 2 - bucket_address + sizeof(int)) / sizeof(PairT));
 #else
-        constexpr auto max_probe_length = (EMILIB_CACHE_LINE_SIZE * 2 / sizeof(PairT)) + 2;//cpu cache line 64 byte,2-3 cache line miss
+        constexpr auto max_probe_length = (EMILIB_CACHE_LINE_SIZE * 1 / sizeof(PairT)) + 2;//cpu cache line 64 byte,2-3 cache line miss
 #endif
         for (uint32_t slot = 1; ; ++slot) {
             const auto bucket = (bucket_from + slot) & _mask;
@@ -1159,20 +1149,14 @@ private:
                 const auto bucket1 = (bucket + slot * slot) & _mask; //switch to square search
                 if (NEXT_BUCKET(_pairs, bucket1) == INACTIVE)
                     return bucket1;
-#if 0
-                const auto cache_offset = (uint32_t)reinterpret_cast<size_t>(&NEXT_BUCKET(_pairs,bucket1)) % EMILIB_CACHE_LINE_SIZE;
-                if (cache_offset + sizeof(PairT) < EMILIB_CACHE_LINE_SIZE) {
-                    const auto bucket2 = (bucket_from + 1) & _mask;
-                    if (NEXT_BUCKET(_pairs, bucket2) == INACTIVE)
-                        return bucket2;
-                }
-#else
+
                 const auto bucket2 = (bucket1 + 1) & _mask;
                 if (NEXT_BUCKET(_pairs, bucket2) == INACTIVE)
                     return bucket2;
-#endif
+
                 else if (slot > 6 /*|| max_probe_length > 5*/)
                     bucket_from += _num_filled;
+                    //bucket_from += _num_buckets / 4;
             }
         }
     }
@@ -1214,10 +1198,8 @@ private:
 
         //check current bucket_key is in main bucket or not
         const auto main_bucket = hash_bucket(GET_KEY(_pairs, bucket));
-        if (EMILIB_UNLIKELY(main_bucket != bucket)) {
-            reset_main_bucket(main_bucket, bucket);
-            return bucket;
-        }
+        if (main_bucket != bucket)
+            return reset_main_bucket(main_bucket, bucket);
         else if (next_bucket != bucket)
             next_bucket = find_last_bucket(next_bucket);
 
@@ -1237,9 +1219,7 @@ private:
     uint32_t  _num_filled;
     PairT*    _pairs;
 };
-
 } // namespace emilib
 #if __cplusplus > 199711
 //template <class Key, class Val> using emihash = emilib1::HashMap<Key, Val, std::hash<Key>>;
 #endif
-
