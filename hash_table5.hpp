@@ -79,7 +79,7 @@
     #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket)
 #endif
 
-namespace emilib1 {
+namespace emilib {
 
 constexpr uint32_t INACTIVE = 0xFFFFFFFF;
 
@@ -1018,7 +1018,7 @@ private:
         if (next_bucket == INACTIVE)
             return INACTIVE;
 
-        const auto eqkey = key == GET_KEY(_pairs, bucket);
+        const auto eqkey = _eq(key, GET_KEY(_pairs, bucket));
         if (next_bucket == bucket)
             return eqkey ? bucket : INACTIVE;
         else if (eqkey) {
@@ -1033,7 +1033,7 @@ private:
         auto prev_bucket = bucket;
         while (true) {
             const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
-            if (key == GET_KEY(_pairs, next_bucket)) {
+            if (_eq(key, GET_KEY(_pairs, next_bucket))) {
                 NEXT_BUCKET(_pairs, prev_bucket) = (nbucket == next_bucket) ? prev_bucket : nbucket;
                 return next_bucket;
             }
@@ -1073,7 +1073,7 @@ private:
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
 #if 0
         const auto& bucket_key = GET_KEY(_pairs, bucket);
-        if (key == bucket_key && next_bucket != INACTIVE)
+        if (_eq(key, bucket_key) && next_bucket != INACTIVE)
             return bucket;
         else if (next_bucket == INACTIVE || next_bucket == bucket)
             return _num_buckets;
@@ -1082,7 +1082,7 @@ private:
 #else
         if (next_bucket == INACTIVE)
             return _num_buckets;
-        else if (key == GET_KEY(_pairs, bucket))
+        else if (_eq(key, GET_KEY(_pairs, bucket)))
             return bucket;
         else if (next_bucket == bucket)
             return _num_buckets;
@@ -1092,7 +1092,7 @@ private:
 
         //find next from linked bucket
         while (true) {
-            if (key == GET_KEY(_pairs, next_bucket))
+            if (_eq(key, GET_KEY(_pairs, next_bucket)))
                 return next_bucket;
 
             const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
@@ -1128,7 +1128,7 @@ private:
         const auto bucket = hash_bucket(key);
         const auto& bucket_key = GET_KEY(_pairs, bucket);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
-        if (next_bucket == INACTIVE || key == bucket_key)
+        if (next_bucket == INACTIVE || _eq(key, bucket_key))
             return bucket;
 
         //check current bucket_key is in main bucket or not
@@ -1143,7 +1143,7 @@ private:
 #endif
         //find next linked bucket and check key
         while (true) {
-            if (key == GET_KEY(_pairs, next_bucket)) {
+            if (_eq(key, GET_KEY(_pairs, next_bucket))) {
 #if EMILIB_LRU_SET
                 GET_PVAL(_pairs, next_bucket).swap(GET_PVAL(_pairs, prev_bucket));
                 return prev_bucket;
@@ -1260,6 +1260,7 @@ private:
 
     //the first cache line packed
     HashT     _hasher;
+    EqT       _eq;
     uint32_t  _loadlf;
     uint32_t  _num_buckets;
     uint32_t  _mask;
