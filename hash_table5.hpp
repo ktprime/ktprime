@@ -64,22 +64,22 @@
     #define GET_VAL(p,n)     p[n].second.second
     #define NEXT_BUCKET(s,n) s[n].first
     #define GET_PVAL(s,n)    s[n].second
-    #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(bucket, std::pair<KeyT, ValueT>(key, value))
+    #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(bucket, std::pair<KeyT, ValueT>(key, value)); _num_filled ++
 #elif EMILIB_BUCKET_INDEX == 2
     #define GET_KEY(p,n)     p[n].first.first
     #define GET_VAL(p,n)     p[n].first.second
     #define NEXT_BUCKET(s,n) s[n].second
     #define GET_PVAL(s,n)    s[n].first
-    #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(std::pair<KeyT, ValueT>(key, value), bucket)
+    #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(std::pair<KeyT, ValueT>(key, value), bucket); _num_filled ++
 #else
     #define GET_KEY(p,n)     p[n].first
     #define GET_VAL(p,n)     p[n].second
     #define NEXT_BUCKET(s,n) s[n].nextbucket
     #define GET_PVAL(s,n)    s[n]
-    #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket)
+    #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket); _num_filled ++
 #endif
 
-namespace emilib {
+namespace emilib1 {
 
 constexpr uint32_t INACTIVE = 0xFFFFFFFF;
 
@@ -219,10 +219,11 @@ public:
         {
             do {
                 _bucket++;
-            } while (_bucket < _map->_num_buckets && _map->NEXT_BUCKET(_pairs, _bucket) == INACTIVE);
-            //} while (_map->NEXT_BUCKET(_pairs, _bucket) == INACTIVE);
+            // } while (_bucket < _map->_num_buckets && _map->NEXT_BUCKET(_pairs, _bucket) == INACTIVE);
+            } while (_map->NEXT_BUCKET(_pairs, _bucket) == INACTIVE);
         }
 
+    public:
         MyType* _map;
         uint32_t  _bucket;
     };
@@ -290,8 +291,8 @@ public:
         {
             do {
                 _bucket++;
-            } while (_bucket < _map->_num_buckets && _map->NEXT_BUCKET(_pairs, _bucket) == INACTIVE);
-            //} while (_map->NEXT_BUCKET(_pairs, _bucket) == INACTIVE);
+            //} while (_bucket < _map->_num_buckets && _map->NEXT_BUCKET(_pairs, _bucket) == INACTIVE);
+            } while (_map->NEXT_BUCKET(_pairs, _bucket) == INACTIVE);
         }
 
     public:
@@ -687,26 +688,22 @@ public:
     /// and a bool denoting whether the insertion took place.
     std::pair<iterator, bool> insert(const KeyT& key, const ValueT& value)
     {
+        check_expand_need();
         auto bucket = find_or_allocate(key);
         const auto find = NEXT_BUCKET(_pairs, bucket) == INACTIVE;
         if (find) {
-            if (EMILIB_UNLIKELY(check_expand_need()))
-                bucket = find_unique_bucket(key);
-
-            NEW_KVALUE(key, value, bucket); _num_filled++;
+            NEW_KVALUE(key, value, bucket);
         }
         return { {this, bucket}, find };
     }
 
     std::pair<iterator, bool> insert(KeyT&& key, ValueT&& value)
     {
+        check_expand_need();
         auto bucket = find_or_allocate(key);
         const auto find = NEXT_BUCKET(_pairs, bucket) == INACTIVE;
         if (find) {
-            if (EMILIB_UNLIKELY(check_expand_need()))
-                bucket = find_unique_bucket(key);
-
-            NEW_KVALUE(std::move(key), std::move(value), bucket); _num_filled++;
+            NEW_KVALUE(std::move(key), std::move(value), bucket);
         }
         return { {this, bucket}, find };
     }
@@ -721,17 +718,36 @@ public:
         return insert(std::move(p.first), std::move(p.second));
     }
 
-    inline void insert(const_iterator begin, const_iterator end)
+    template <typename Iter>
+    inline void insert(Iter begin, Iter end)
     {
         for (; begin != end; ++begin) {
-            insert(begin->first, begin->second);
+            insert(*begin);
         }
     }
 
-    inline void insert_unique(const_iterator begin, const_iterator end)
+    template <typename Iter>
+    inline void insert2(Iter begin, Iter end)
     {
+        Iter citbeg = begin;
+        Iter citend = begin;
+        //reserve(end - begin);
         for (; begin != end; ++begin) {
-            insert_unique(begin->first, begin->second);
+            if (try_insert_mainbucket(begin->first, begin->second) == INACTIVE) {
+                std::swap(*begin, *citend++);
+            }
+        }
+
+        for (; citbeg != citend; ++citbeg)
+            insert(*citbeg);
+    }
+
+    template <typename Iter>
+    inline void insert_unique(Iter begin, Iter end)
+    {
+        //reserve(end - begin);
+        for (; begin != end; ++begin) {
+            insert_unique(*begin);
         }
     }
 
@@ -740,7 +756,7 @@ public:
     {
         check_expand_need();
         auto bucket = find_unique_bucket(key);
-        NEW_KVALUE(key, value, bucket); _num_filled++;
+        NEW_KVALUE(key, value, bucket);
         return bucket;
     }
 
@@ -748,7 +764,7 @@ public:
     {
         check_expand_need();
         auto bucket = find_unique_bucket(key);
-        NEW_KVALUE(std::move(key), std::move(value), bucket); _num_filled++;
+        NEW_KVALUE(std::move(key), std::move(value), bucket);
         return bucket;
     }
 
@@ -784,13 +800,15 @@ public:
 
     uint32_t try_insert_mainbucket(const KeyT& key, const ValueT& value)
     {
-        const auto bucket = hash_bucket(key);
+        auto bucket = hash_bucket(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket != INACTIVE)
             return INACTIVE;
 
-        check_expand_need();
-        NEW_KVALUE(key, value, bucket); _num_filled++;
+        if (EMILIB_UNLIKELY(check_expand_need()))
+            bucket = find_unique_bucket(key);
+
+        NEW_KVALUE(key, value, bucket);
         return bucket;
     }
 
@@ -801,7 +819,7 @@ public:
         auto bucket = find_or_allocate(key);
         // Check if inserting a new value rather than overwriting an old entry
         if (NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
-            NEW_KVALUE(key, value, bucket); _num_filled++;
+            NEW_KVALUE(key, value, bucket);
         }
         else {
             GET_VAL(_pairs, bucket) = value;
@@ -817,7 +835,7 @@ public:
 
         // Check if inserting a new value rather than overwriting an old entry
         if (NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
-            NEW_KVALUE(key, new_value, bucket); _num_filled++;
+            NEW_KVALUE(key, new_value, bucket);
             return ValueT();
         }
         else {
@@ -830,13 +848,15 @@ public:
     /// Like std::map<KeyT,ValueT>::operator[].
     ValueT& operator[](const KeyT& key)
     {
+        //check_expand_need();
+
         auto bucket = find_or_allocate(key);
         /* Check if inserting a new value rather than overwriting an old entry */
         if (NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
             if (EMILIB_UNLIKELY(check_expand_need()))
                 bucket = find_unique_bucket(key);
 
-            NEW_KVALUE(key, ValueT(), bucket); _num_filled++;
+            NEW_KVALUE(key, ValueT(), bucket);
         }
 
         return GET_VAL(_pairs, bucket);
@@ -910,6 +930,7 @@ public:
             clearkv();
         else
             memset(_pairs, INACTIVE, sizeof(_pairs[0]) * _num_buckets);
+
         _num_filled = 0;
     }
 
