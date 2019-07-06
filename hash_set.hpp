@@ -547,7 +547,7 @@ public:
     std::pair<iterator, bool> insert(const KeyT& key)
     {
         check_expand_need();
-        auto bucket = find_or_allocate(key);
+        const auto bucket = find_or_allocate(key);
         if (NEXT_BUCKET(_pairs, bucket) != INACTIVE) {
             return { {this, bucket}, false };
         }
@@ -560,7 +560,7 @@ public:
     std::pair<iterator, bool> insert(KeyT&& key)
     {
         check_expand_need();
-        auto bucket = find_or_allocate(key);
+        const auto bucket = find_or_allocate(key);
         if (NEXT_BUCKET(_pairs, bucket) != INACTIVE) {
             return { {this, bucket}, false };
         }
@@ -570,43 +570,50 @@ public:
         }
     }
 
+#if 0
     template <typename Iter>
     inline void insert(Iter begin, Iter end)
     {
-        reserve(end - begin);
+        reserve(end - begin + _num_filled);
         for (; begin != end; ++begin) {
             insert(*begin);
         }
     }
+#endif
 
     void insert(std::initializer_list<value_type> ilist)
     {
-        reserve((uint32_t)ilist.size());
+        reserve((uint32_t)ilist.size() + _num_filled);
         for (auto begin = ilist.begin(); begin != ilist.end(); ++begin) {
             insert(*begin);
         }
     }
 
     template <typename Iter>
-    inline void insert2(Iter begin, Iter end)
+    inline void insert(Iter begin, Iter end)
     {
         Iter citbeg = begin;
         Iter citend = begin;
-        reserve(end - begin);
+        reserve(end - begin + _num_filled);
         for (; begin != end; ++begin) {
             if (try_insert_mainbucket(*begin) == INACTIVE) {
                 std::swap(*begin, *citend++);
             }
         }
 
-        for (; citbeg != citend; ++citbeg)
-            insert(*citbeg);
+        for (; citbeg != citend; ++citbeg) {
+            auto& key = *citbeg;
+            const auto bucket = find_or_allocate(key);
+            if (NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
+                NEW_KEY(key, bucket);
+            }
+        }
     }
 
     template <typename Iter>
     inline void insert_unique(Iter begin, Iter end)
     {
-        reserve(end - begin);
+        reserve(end - begin + _num_filled);
         for (; begin != end; ++begin) {
             insert_unique(*begin);
         }
@@ -654,8 +661,6 @@ public:
 
     uint32_t try_insert_mainbucket(const KeyT& key)
     {
-//      check_expand_need();
-
         auto bucket = hash_bucket(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket != INACTIVE)
@@ -669,7 +674,7 @@ public:
     {
         check_expand_need();
 
-        auto bucket = find_or_allocate(key);
+        const auto bucket = find_or_allocate(key);
         // Check if inserting a new value rather than overwriting an old entry
         if (NEXT_BUCKET(_pairs, bucket) != INACTIVE) {
             NEXT_BUCKET(_pairs, bucket) = bucket;
@@ -1003,8 +1008,26 @@ private:
         const auto bucket_address = (uint32_t)(reinterpret_cast<size_t>(&NEXT_BUCKET(_pairs, bucket_from)) % EMILIB_CACHE_LINE_SIZE);
         const auto max_probe_length = 2 + (uint32_t)((EMILIB_CACHE_LINE_SIZE * 2 - bucket_address) / sizeof(PairT));
 #else
-        constexpr auto max_probe_length = 1 + EMILIB_CACHE_LINE_SIZE / sizeof(PairT);//cpu cache line 64 byte,2-3 cache line miss
+        constexpr auto max_probe_length = 2 + EMILIB_CACHE_LINE_SIZE / sizeof(PairT);//cpu cache line 64 byte,2-3 cache line miss
 #endif
+
+#if 0
+        for (auto slot = 1; ; ++slot) {
+            const auto bucket1 = (bucket_from + slot) & _mask;
+            if (NEXT_BUCKET(_pairs, bucket1) == INACTIVE)
+                return bucket1;
+
+            const auto bucket2 = (bucket1 + 1) & _mask;
+            if (NEXT_BUCKET(_pairs, bucket2) == INACTIVE)
+                return bucket2;
+
+            bucket_from += slot;
+            if (slot > 6) {
+                bucket_from += _num_buckets / 2;
+                slot = 1;
+            }
+        }
+#else
 
         for (uint32_t slot = 1; ; ++slot) {
             const auto bucket = (bucket_from + slot) & _mask;
@@ -1019,7 +1042,7 @@ private:
                 if (NEXT_BUCKET(_pairs, bucket2) == INACTIVE)
                     return bucket2;
 
-                else if (slot > 6 /*|| max_probe_length > 5*/) {
+                else if (slot > 6 || max_probe_length > 5) {
 #if 0
                     const auto bucket3 = (bucket_from + rand()) & _mask;
                     if (NEXT_BUCKET(_pairs, bucket3) == INACTIVE)
@@ -1030,10 +1053,12 @@ private:
                         return bucket4;
 #endif
                     bucket_from += _num_filled;
+                    slot = 1;
                     //bucket_from += _num_buckets / 4;
                 }
             }
         }
+#endif
     }
 
     uint32_t find_last_bucket(uint32_t main_bucket) const
