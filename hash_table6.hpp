@@ -1,23 +1,48 @@
 
-// By Huang Yuanbing 2019
-// bailuzhou@163.com
-// https://github.com/ktprime/ktprime/blob/master/hash_table6.hpp
-
-// LICENSE:
-//   This software is dual-licensed to the public domain and under the following
-//   license: you are granted a perpetual, irrevocable license to copy, modify,
-//   publish, and distribute this file as you see fit.
+// emilib::HashMap for C++11
+// version 1.0.0
+// https://github.com/ktprime/ktprime/blob/master/hash_table5.hpp
+//
+// Licensed under the MIT License <http://opensource.org/licenses/MIT>.
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2019-2019 Huang Yuanbing & bailuzhou AT 163.com
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE
 
 /*****
-    This a very fast and efficent c++ hash map implemention and foucus optimization with small k/v.
-some Features as fllow:
-1. combine Linear Probing and Quadratic Probing
-2. open Addressing with Linked collsion slot
+    This a very simple & efficent open addressing hash map implemention and foucus optimization on small k.v performance 
+main features as fllow:
+0. the main bucket/slot is core ideal, use only one array to save data.
+1. combine 3 different linear/quadratic/random probing ways
+2. linked collsion slot like separate chaining, it's the most fastest find performance(special for hot cache)
 3. specially optimization with cpu cache line size
-4. very fast/good rehash algorithm
-5. high load factor(0.9) and can save memory than unordered_map.
-6. can set lru get/set by set marco
-7.
+4. a very newly and fast rehash algorithm
+5. can set a high load factor(0.99, 10% performance lost)
+6. lru get/set by set compile marco
+7. change a default hash function during rehash if the input's hash function is not good or high collisions(average slot size is more than 4)
+8. if the key and value's size is different, it can save more memory than other open addressing hash map implemention (ex key = int64, value = int)
+9. with c++ pod data, it's clear/copy is efficent by using memcpy
+
+some bad:
+1. iterator performance is normal, bad if the load_factor is very low
+2. clear sometimes is not cache good
+3. key = string performance is not highly optimization
 */
 
 #pragma once
@@ -480,7 +505,15 @@ public:
 
     ~HashMap()
     {
-        clear();
+        if (!std::is_pod<ValueT>::value || !std::is_pod<KeyT>::value)
+        {
+            for (uint32_t bucket = 0; bucket < _num_buckets ; ++bucket) {
+                if (NEXT_BUCKET(_pairs, bucket) != INACTIVE) {
+                    _pairs[bucket].~PairT(); _num_filled -= 1;
+                }
+            }
+        }
+
         free(_pairs);
         if (_pempty)
             free(_pempty);
@@ -589,7 +622,7 @@ public:
     //Returns the bucket number where the element with key k is located.
     size_type bucket(const KeyT& key) const
     {
-        const auto bucket = hash_bucket(key);
+        const auto bucket = hash_key(key) & _mask;
         const auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket == INACTIVE)
             return 0;
@@ -597,7 +630,7 @@ public:
             return bucket + 1;
 
         const auto& bucket_key = GET_KEY(_pairs, bucket);
-        return hash_bucket(bucket_key) + 1;
+        return (hash_key(bucket_key) & _mask) + 1;
     }
 
     //Returns the number of elements in bucket n.
@@ -610,7 +643,7 @@ public:
             return 0;
 
         const auto& bucket_key = GET_KEY(_pairs, bucket);
-        next_bucket = hash_bucket(bucket_key);
+        next_bucket = hash_key(bucket_key) & _mask;
         uint32_t ibucket_size = 1;
 
         //iterator each item in current main bucket
@@ -633,7 +666,7 @@ public:
             return INACTIVE;
 
         const auto& bucket_key = GET_KEY(_pairs, bucket);
-        const auto main_bucket = hash_bucket(bucket_key);
+        const auto main_bucket = hash_key(bucket_key) & _mask;
         return main_bucket;
     }
 
@@ -656,7 +689,7 @@ public:
             return -1;
 
         const auto& bucket_key = GET_KEY(_pairs, bucket);
-        const auto main_bucket = hash_bucket(bucket_key);
+        const auto main_bucket = hash_key(bucket_key) & _mask;
         if (main_bucket != bucket)
             return 0;
         else if (next_bucket == bucket)
@@ -697,7 +730,7 @@ public:
             sumn += bucketsi * i;
             collision += bucketsi * (i - 1);
             finds += bucketsi * i * (i + 1) / 2;
-            printf("  %2d  %8d  %.2lf  %.2lf\n", i, bucketsi, bucketsi * 100.0 * i / _num_filled, sumn * 100.0 / _num_filled);
+            printf("  %2u  %8u  %.2lf  %.2lf\n", i, bucketsi, bucketsi * 100.0 * i / _num_filled, sumn * 100.0 / _num_filled);
         }
 
         puts("========== collision miss ration ===========");
@@ -705,7 +738,7 @@ public:
             sumc += steps[i];
             if (steps[i] <= 2)
                 continue;
-            printf("  %2d  %8d  %.2lf  %.2lf\n", i, steps[i], steps[i] * 100.0 / collision, sumc * 100.0 / collision);
+            printf("  %2u  %8u  %.2lf  %.2lf\n", i, steps[i], steps[i] * 100.0 / collision, sumc * 100.0 / collision);
         }
 
         if (sumb == 0)  return;
@@ -894,7 +927,7 @@ public:
 #if 0
     uint32_t try_insert_mainbucket(const KeyT& key, const ValueT& value)
     {
-        const auto bucket = hash_bucket(key);
+        const auto bucket = hash_key(key) & _mask;
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket != INACTIVE)
             return INACTIVE;
@@ -1029,45 +1062,49 @@ public:
      * 100         98                98
      * free_bucket free_size 1 2 .....n
    */
-    void set_pempty(uint32_t free_bucket)
+    void set_pempty(uint32_t free_buckets)
     {
-        _pempty = (uint32_t*)malloc(free_bucket * sizeof(uint32_t) + 8);
-        _pempty[0] = free_bucket;
+        _pempty = (uint32_t*)malloc(free_buckets * sizeof(uint32_t) + 8);
+        _pempty[0] = free_buckets;
 
         auto& empty_size = _pempty[1];
         empty_size = 0;
 
-        for (uint32_t bucket = 0; bucket < _num_buckets ; ++bucket) {
-            if (NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
-                assert(empty_size + 2 < free_bucket);
-                _pempty[2 + empty_size++] = bucket;
-            }
+        for (uint32_t bucket = 0; bucket < _num_buckets && empty_size + 2 < free_buckets; ++bucket) {
+            if (NEXT_BUCKET(_pairs, bucket) == INACTIVE)
+                _pempty[++empty_size + 1] = bucket;
         }
     }
 
     //TODO
     void push_pempty(uint32_t empty_bucket)
     {
+#if EMILIB_HIGH_LOAD
         if (_pempty)
         {
             auto &empty_size = _pempty[1];
-            if (_pempty[0] > empty_size + 2) {
+            if (_pempty[0] > empty_size + 2)
                 _pempty[++empty_size + 1] = empty_bucket;
-            }
         }
+#endif
     }
 
     uint32_t pop_pempty()
     {
-        for (auto last = _pempty[1] + 1; last > 1; last --) {
-            _pempty[1] --;
-            const auto bucket = _pempty[last];
-            if (NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
+        auto& empty_size = _pempty[1];
+        for (; empty_size > 0; ) {
+            const auto bucket = _pempty[--empty_size + 2];
+            if (NEXT_BUCKET(_pairs, bucket) == INACTIVE)
                 return bucket;
-            }
         }
 
-        return INACTIVE;
+        empty_size = 0;
+        for (uint32_t bucket = 0; bucket < _num_buckets && empty_size + 2 < _pempty[0]; ++bucket) {
+            if (NEXT_BUCKET(_pairs, bucket) == INACTIVE)
+                _pempty[++empty_size + 1] = bucket;
+        }
+
+        return _pempty[--empty_size + 2];
     }
 
     /// Make room for this many elements
@@ -1078,16 +1115,19 @@ public:
         if (EMILIB_LIKELY(required_buckets <= _num_buckets))
             return false;
 
-        if (_num_filled > 1024*100) {
+#if EMILIB_HIGH_LOAD > 10000
+        if (_num_filled > EMILIB_HIGH_LOAD) {
+            const auto left = _num_buckets - _num_filled;
             if (!_pempty) {
-                set_pempty(_num_buckets - _num_filled + 4);
+                set_pempty(std::min(left + 2, _num_buckets * 2 / 10));
                 return false;
             }
-            else if (_pempty[1] > 100) {
+            else if (left > 1000) {
                 return false;
             }
             free(_pempty); _pempty = nullptr;
         }
+#endif
 
         rehash(required_buckets);
         return true;
@@ -1130,7 +1170,7 @@ public:
             if (NEXT_BUCKET(old_pairs, src_bucket) == INACTIVE)
                 continue;
 
-            const auto hashkey = (uint32_t)_hasher(GET_KEY(old_pairs, src_bucket));
+            const auto hashkey = hash_key(GET_KEY(old_pairs, src_bucket));
             const auto main_bucket = hashkey & _mask;
 
             auto next_bucket = NEXT_BUCKET(_pairs, main_bucket);
@@ -1154,7 +1194,7 @@ public:
         for (uint32_t colls = 0; colls < collision; colls++) {
             const auto src_bucket = ADDR_BUCKET(old_pairs, colls);
 
-            const auto hashkey = (uint32_t)_hasher(GET_KEY(old_pairs, src_bucket));
+            const auto hashkey = hash_key(GET_KEY(old_pairs, src_bucket));
             const auto main_bucket = hashkey & _mask;
             //
             auto& old_pair = old_pairs[src_bucket];
@@ -1209,7 +1249,7 @@ private:
 
     uint32_t erase_from_key(const KeyT& key)
     {
-        const auto hashkey = (uint32_t)_hasher(key);
+        const auto hashkey = hash_key(key);
         const auto bucket = hashkey & _mask;
 
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
@@ -1252,7 +1292,7 @@ private:
     {
         const auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         //assert(next_bucket != INACTIVE && next_bucket < _num_buckets);
-        const auto main_bucket = hash_bucket(GET_KEY(_pairs, bucket));
+        const auto main_bucket = hash_key(GET_KEY(_pairs, bucket)) & _mask;
         CLEAR_MHASH(main_bucket);
 
         if (bucket == main_bucket) {
@@ -1274,7 +1314,7 @@ private:
     // Find the bucket with this key, or return INACTIVE
     uint32_t find_filled_bucket(const KeyT& key) const
     {
-        const auto hashkey = (uint32_t)_hasher(key);
+        const auto hashkey = hash_key(key);
         const auto bucket  = hashkey & _mask;
 
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
@@ -1333,7 +1373,7 @@ private:
     // and move it to a new empty postion.
     uint32_t find_or_allocate(const KeyT& key)
     {
-        const auto hashkey = (uint32_t)_hasher(key);
+        const auto hashkey = hash_key(key);
         const auto bucket = hashkey & _mask;
 
         const auto& bucket_key = GET_KEY(_pairs, bucket);
@@ -1345,7 +1385,7 @@ private:
         }
 
         //check current bucket_key is in main bucket or not
-        const auto main_bucket = hash_bucket(bucket_key);
+        const auto main_bucket = hash_key(bucket_key) & _mask;
         if (main_bucket != bucket) {
             reset_main_bucket(main_bucket, bucket);
             SET_MHASH(bucket, hashkey);
@@ -1397,12 +1437,6 @@ private:
             return bucket;
         }
 
-        if (_pempty) {
-            const auto empty_bucket = pop_pempty();
-            if (empty_bucket != INACTIVE)
-                return empty_bucket;
-        }
-
         const auto bofset = bucket % EMILIB_HASH_BIT;
         auto mask_bucket = bucket - bofset;
         auto bmask = GET_BIT(mask_bucket) & ~((1 << bofset) - 1);
@@ -1418,6 +1452,10 @@ private:
 
         bucket_from = (mask_bucket + EMILIB_HASH_BIT) & _mask;
          for (uint32_t slot = 1; ; ++slot) {
+#if EMILIB_HIGH_LOAD
+            if (_pempty)
+                return pop_pempty();
+#endif
             const auto empty_bucket = TST_BIT(bucket_from);
             if (empty_bucket != INACTIVE)
                 return empty_bucket;
@@ -1459,7 +1497,7 @@ private:
 
     uint32_t find_unique_bucket(const KeyT& key)
     {
-        const auto hashkey = (uint32_t)_hasher(key);
+        const auto hashkey = hash_key(key);
         const auto bucket = hashkey & _mask;
 
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
@@ -1470,7 +1508,7 @@ private:
         }
 
         //check current bucket_key is in main bucket or not
-        const auto main_bucket = hash_bucket(GET_KEY(_pairs, bucket));
+        const auto main_bucket = hash_key(GET_KEY(_pairs, bucket)) & _mask;
         if (EMILIB_UNLIKELY(main_bucket != bucket)) {
             reset_main_bucket(main_bucket, bucket);
             SET_MHASH(bucket, hashkey);
@@ -1506,7 +1544,7 @@ private:
 #endif
     }
 
-    static uint64_t hash64(uint64_t key)
+    static inline uint64_t hash64(uint64_t key)
     {
 #if 0
         //MurmurHash3Mixer
@@ -1545,31 +1583,30 @@ private:
         return val;
     }
 
-    //    template<class UType, class = typename std::enable_if<std::is_integral<UType>::value, int>::type>
     template<typename UType, typename std::enable_if<std::is_integral<UType>::value, long>::type = 0>
-    inline uint32_t hash_bucket(const UType key) const
+    inline uint32_t hash_key(const UType key) const
     {
 #ifdef EMILIB_FIBONACCI_HASH
-        return (key * 2654435761ull) & _mask;
+        return (key * 2654435761ull);
 #elif EMILIB_SAFE_HASH
         if (sizeof(key) <= sizeof(uint32_t))
-            return hash32(key) & _mask;
+            return hash32(key);
         else
-            return hash64(key) & _mask;
+            return hash64(key);
 #elif EMILIB_IDENTITY_HASH
-        return (uint32_t)key & _mask;
+        return (uint32_t)key;
 #else
-        return _hasher(key) & _mask;
+        return _hasher(key);
 #endif
     }
 
     template<typename UType, typename std::enable_if<!std::is_integral<UType>::value, long>::type = 0>
-    inline uint32_t hash_bucket(const UType& key) const
+    inline uint32_t hash_key(const UType& key) const
     {
 #ifdef EMILIB_FIBONACCI_HASH
-        return (_hasher(key) * 11400714819323198485ull) & _mask;
+        return (_hasher(key) * 11400714819323198485ull);
 #else
-        return _hasher(key) & _mask;
+        return _hasher(key);
 #endif
     }
 
