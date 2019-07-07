@@ -1,11 +1,29 @@
-// By Huang Yuanbing 2019-2020
-// bailuzhou@163.com
-// https://github.com/ktprime/ktprime/blob/master/hash_table5.hpp
 
-// LICENSE:
-//   This software is dual-licensed to the public domain and under the following
-//   license: you are granted a perpetual, irrevocable license to copy, modify,
-//   publish, and distribute this file as you see fit.
+// emilib6::HashSet for C++11
+// version 1.0.0
+// https://github.com/ktprime/ktprime/blob/master/hash_table5.hpp
+//
+// Licensed under the MIT License <http://opensource.org/licenses/MIT>.
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2019-2019 Huang Yuanbing // bailuzhou AT 163.com
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE
 
 
 // From
@@ -663,11 +681,13 @@ public:
     {
         auto bucket = hash_bucket(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
-        if (next_bucket != INACTIVE)
-            return INACTIVE;
+        if (next_bucket == INACTIVE) {
+            NEW_KEY(key, bucket);
+            return bucket;
+        } else if(_eq(key, GET_KEY(_pairs, bucket)))
+            return bucket;
 
-        NEW_KEY(key, bucket);
-        return bucket;
+        return INACTIVE;
     }
 
     void insert_or_assign(const KeyT& key)
@@ -1028,7 +1048,6 @@ private:
             }
         }
 #else
-
         for (uint32_t slot = 1; ; ++slot) {
             const auto bucket = (bucket_from + slot) & _mask;
             if (NEXT_BUCKET(_pairs, bucket) == INACTIVE)
@@ -1053,7 +1072,7 @@ private:
                         return bucket4;
 #endif
                     bucket_from += _num_filled;
-                    slot = 1;
+//                    slot = 1;
                     //bucket_from += _num_buckets / 4;
                 }
             }
