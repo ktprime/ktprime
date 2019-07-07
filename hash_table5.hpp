@@ -1,12 +1,29 @@
-// By Huang Yuanbing 2019-2020
-// bailuzhou@163.com
+
+// emilib5::HashMap for C++11
+// version 1.0.0
 // https://github.com/ktprime/ktprime/blob/master/hash_table5.hpp
-
-// LICENSE:
-//   This software is dual-licensed to the public domain and under the following
-//   license: you are granted a perpetual, irrevocable license to copy, modify,
-//   publish, and distribute this file as you see fit.
-
+//
+// Licensed under the MIT License <http://opensource.org/licenses/MIT>.
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2019-2019 Huang Yuanbing & bailuzhou AT 163.com
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE
 
 // From
 // NUMBER OF PROBES / LOOKUP       Successful            Unsuccessful
@@ -27,6 +44,9 @@
 #include <cstdlib>
 #include <type_traits>
 #include <cassert>
+#if EMILIB_AVX_MEMCPY
+#include "FastMemcpy_Avx.h"
+#endif
 
 #if EMILIB_TAF_LOG
     #include "servant/AutoLog.h"
@@ -325,7 +345,11 @@ public:
         _loadlf      = other._loadlf;
 
         if (std::is_pod<KeyT>::value && std::is_trivially_copyable<ValueT>::value) {
+#if EMILIB_AVX_MEMCPY
+            memcpy_fast(_pairs, other._pairs, other._num_buckets * sizeof(PairT));
+#else
             memcpy(_pairs, other._pairs, other._num_buckets * sizeof(PairT));
+#endif
         }
         else {
             auto old_pairs = other._pairs;
@@ -686,7 +710,7 @@ public:
     std::pair<iterator, bool> insert(const KeyT& key, const ValueT& value) noexcept
     {
         check_expand_need();
-        auto bucket = find_or_allocate(key);
+        const auto bucket = find_or_allocate(key);
         const auto find = NEXT_BUCKET(_pairs, bucket) == INACTIVE;
         if (find) {
             NEW_KVALUE(key, value, bucket);
@@ -699,7 +723,7 @@ public:
     std::pair<iterator, bool> insert(const KeyT& key, const ValueT&& value) noexcept
     {
         check_expand_need();
-        auto bucket = find_or_allocate(key);
+        const auto bucket = find_or_allocate(key);
         const auto find = NEXT_BUCKET(_pairs, bucket) == INACTIVE;
         if (find) {
             NEW_KVALUE(key, std::move(value), bucket);
@@ -710,7 +734,7 @@ public:
     std::pair<iterator, bool> insert(KeyT&& key, ValueT&& value) noexcept
     {
         check_expand_need();
-        auto bucket = find_or_allocate(key);
+        const auto bucket = find_or_allocate(key);
         const auto find = NEXT_BUCKET(_pairs, bucket) == INACTIVE;
         if (find) {
             NEW_KVALUE(std::move(key), std::move(value), bucket);
@@ -728,17 +752,19 @@ public:
         return insert(std::move(p.first), std::move(p.second));
     }
 
-#if 0
     template <typename Iter>
     void insert(Iter begin, Iter end)
     {
+        reserve(end - begin + _num_filled);
         for (; begin != end; ++begin) {
             emplace(*begin);
         }
     }
 
+#if 0
     void insert(std::initializer_list<value_type> ilist)
     {
+        reserve(ilist.size() + _num_filled);
         for (auto begin = ilist.begin(); begin != end; ++begin) {
             emplace(*begin);
         }
@@ -746,11 +772,11 @@ public:
 #endif
 
     template <typename Iter>
-    inline void insert2(Iter begin, Iter end)
+    void insert2(Iter begin, Iter end)
     {
         Iter citbeg = begin;
         Iter citend = begin;
-        reserve(end - begin);
+        reserve(end - begin + _num_filled);
         for (; begin != end; ++begin) {
             if (try_insert_mainbucket(begin->first, begin->second) == INACTIVE) {
                 std::swap(*begin, *citend++);
@@ -762,9 +788,9 @@ public:
     }
 
     template <typename Iter>
-    inline void insert_unique(Iter begin, Iter end)
+    void insert_unique(Iter begin, Iter end)
     {
-        //reserve(end - begin);
+        reserve(end - begin + _num_filled);
         for (; begin != end; ++begin) {
             insert_unique(*begin);
         }
@@ -828,7 +854,7 @@ public:
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket != INACTIVE)
             return INACTIVE;
-
+        //if (!_eq(key, GET_KEY(_pairs, bucket))
         NEW_KVALUE(key, value, bucket);
         return bucket;
     }
@@ -848,7 +874,7 @@ public:
     {
         check_expand_need();
 
-        auto bucket = find_or_allocate(key);
+        const auto bucket = find_or_allocate(key);
 
         // Check if inserting a new value rather than overwriting an old entry
         if (NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
@@ -976,14 +1002,14 @@ public:
 
     void shrink_to_fit() noexcept
     {
-        reserve(_num_filled);
+        rehash(_num_filled);
     }
 
     /// Make room for this many elements
     bool reserve(uint32_t num_elems) noexcept
     {
-        //auto required_buckets = (uint32_t)(((uint64_t)num_elems * _loadlf) >> 13) + 2;
-        const auto required_buckets = num_elems * 10 / 8 + 2;
+        auto required_buckets = (uint32_t)(((uint64_t)num_elems * _loadlf) >> 13) + 2;
+        //const auto required_buckets = num_elems * 10 / 8 + 2;
         if (EMILIB_LIKELY(required_buckets <= _num_buckets))
             return false;
 
@@ -1097,8 +1123,8 @@ private:
             NEXT_BUCKET(_pairs, bucket) = (nbucket == next_bucket) ? bucket : nbucket;
             return next_bucket;
         }
-        //else if (EMILIB_UNLIKELY(bucket != hash_bucket(GET_KEY(_pairs, bucket))))
-        //    return INACTIVE;
+        else if (EMILIB_UNLIKELY(bucket != hash_bucket(GET_KEY(_pairs, bucket))))
+            return INACTIVE;
 
         auto prev_bucket = bucket;
         while (true) {
@@ -1282,8 +1308,8 @@ private:
                     if (NEXT_BUCKET(_pairs, bucket4) == INACTIVE)
                         return bucket4;
 #endif
-                    bucket_from += _num_filled;
-                    //bucket_from += _num_buckets / 4;
+                    //bucket_from += _num_filled;
+                    bucket_from += _num_buckets / 4;
                 }
             }
         }
@@ -1350,5 +1376,6 @@ private:
 };
 } // namespace emilib
 #if __cplusplus > 199711
-//template <class Key, class Val> using emihash = emilib1::HashMap<Key, Val, std::hash<Key>>;
+//template <class Key, class Val> using ktprime_hash = emilib5::HashMap<Key, Val, std::hash<Key>>;
 #endif
+
