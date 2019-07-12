@@ -44,6 +44,10 @@
 #include <cstdlib>
 #include <type_traits>
 #include <cassert>
+#include <utility>
+#include <cstdint>
+#include <functional>
+
 #if EMILIB_AVX_MEMCPY
 #include "FastMemcpy_Avx.h"
 #endif
@@ -143,7 +147,13 @@ struct myPair {
         return *this;
     }
 
-    myPair& operator = (myPair& pairT) = default;
+    myPair& operator = (myPair& o)
+    {
+        second = o.second;
+        nextbucket = o.nextbucket;
+        first  = o.first;
+        return *this;
+    }
 
     void swap(myPair<First, Second>& o)
     {
@@ -184,7 +194,7 @@ public:
     class iterator
     {
     public:
-        typedef std::forward_iterator_tag iterator_category;
+        //typedef std::forward_iterator_tag iterator_category;
         typedef size_t                    difference_type;
         typedef size_t                    distance_type;
 
@@ -250,7 +260,7 @@ public:
     class const_iterator
     {
     public:
-        typedef std::forward_iterator_tag iterator_category;
+        //typedef std::forward_iterator_tag iterator_category;
         typedef size_t                    difference_type;
         typedef size_t                    distance_type;
 #if EMILIB_BUCKET_INDEX == 1
@@ -332,7 +342,6 @@ public:
     HashMap(const HashMap& other)
     {
         _pairs = (PairT*)malloc((1 + other._num_buckets) * sizeof(PairT));
-        NEXT_BUCKET(_pairs, other._num_buckets) = 0;
         clone(other);
     }
 
@@ -359,6 +368,7 @@ public:
                     new(_pairs + bucket) PairT(old_pairs[bucket]);
             }
         }
+        NEXT_BUCKET(_pairs, _num_buckets) = 0;
     }
 
     HashMap(HashMap&& other)
@@ -387,7 +397,6 @@ public:
         if (_num_buckets < other._num_buckets) {
             free(_pairs);
             _pairs = (PairT*)malloc((1 + other._num_buckets) * sizeof(PairT));
-            NEXT_BUCKET(_pairs, other._num_buckets) = 0;
         }
 
         clone(other);
@@ -850,7 +859,7 @@ public:
 
     uint32_t try_insert_mainbucket(const KeyT& key, const ValueT& value)
     {
-        auto bucket = hash_bucket(key);
+        const auto bucket = hash_bucket(key);
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket != INACTIVE)
             return INACTIVE;
@@ -1068,6 +1077,7 @@ public:
             auto& old_pair = old_pairs[src_bucket];
 
             auto next_bucket = NEXT_BUCKET(_pairs, main_bucket);
+#if 0
             //check current bucket_key is in main bucket or not
             if (next_bucket != main_bucket)
                 next_bucket = find_last_bucket(next_bucket);
@@ -1075,6 +1085,12 @@ public:
             auto new_bucket = NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
             new(_pairs + new_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
             NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
+#else
+            auto new_bucket = find_empty_bucket(next_bucket);
+            new(_pairs + new_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
+            NEXT_BUCKET(_pairs, new_bucket) = (main_bucket == next_bucket) ? new_bucket : next_bucket;
+			NEXT_BUCKET(_pairs, main_bucket) = new_bucket;
+#endif
         }
 
 #if EMILIB_REHASH_LOG
@@ -1308,8 +1324,8 @@ private:
                     if (NEXT_BUCKET(_pairs, bucket4) == INACTIVE)
                         return bucket4;
 #endif
-                    //bucket_from += _num_filled;
-                    bucket_from += _num_buckets / 4;
+                    bucket_from += _num_filled;
+                    //bucket_from += _num_buckets / 4;
                 }
             }
         }
@@ -1354,11 +1370,21 @@ private:
         const auto main_bucket = hash_bucket(GET_KEY(_pairs, bucket));
         if (main_bucket != bucket)
             return reset_main_bucket(main_bucket, bucket);
+#if 1
         else if (next_bucket != bucket)
             next_bucket = find_last_bucket(next_bucket);
-
         //find a new empty and link it to tail
         return NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
+#else
+        auto new_bucket = find_empty_bucket(next_bucket);
+        if (next_bucket == main_bucket) {
+            NEXT_BUCKET(_pairs, main_bucket) = new_bucket;
+        } else {
+            NEXT_BUCKET(_pairs, new_bucket) = next_bucket;
+            NEXT_BUCKET(_pairs, main_bucket) = new_bucket;
+        }
+        return new_bucket;
+#endif
     }
 
 private:
