@@ -45,6 +45,9 @@
 #include <cstdlib>
 #include <type_traits>
 #include <cassert>
+#include <utility>
+#include <cstdint>
+#include <functional>
 
 #if EMILIB_TAF_LOG
     #include "servant/AutoLog.h"
