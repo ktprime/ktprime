@@ -25,6 +25,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE
 
+// By Huang Yuanbing 2019-2020
+// bailuzhou@163.com
+// https://github.com/ktprime/ktprime/blob/master/hash_table5.hpp
 // From
 // NUMBER OF PROBES / LOOKUP       Successful            Unsuccessful
 // Quadratic collision resolution   1 - ln(1-L) - L/2    1/(1-L) - L - ln(1-L)
@@ -352,8 +355,12 @@ public:
         _num_filled  = other._num_filled;
         _mask        = other._mask;
         _loadlf      = other._loadlf;
+#if __cplusplus >= 201103L || _MSC_VER > 1600 || __clang__
+        if (std::is_trivially_copyable<KeyT>::value && std::is_trivially_copyable<ValueT>::value) {
+#else
+        if (std::is_pod<KeyT>::value && std::is_pod<ValueT>::value) {
+#endif
 
-        if (std::is_pod<KeyT>::value && std::is_trivially_copyable<ValueT>::value) {
 #if EMILIB_AVX_MEMCPY
             memcpy_fast(_pairs, other._pairs, other._num_buckets * sizeof(PairT));
 #else
@@ -879,7 +886,7 @@ public:
     }
 
     /// Return the old value or ValueT() if it didn't exist.
-    ValueT set_get(const KeyT& key, const ValueT& new_value)
+    ValueT set_get(const KeyT& key, const ValueT& value)
     {
         check_expand_need();
 
@@ -887,12 +894,12 @@ public:
 
         // Check if inserting a new value rather than overwriting an old entry
         if (NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
-            NEW_KVALUE(key, new_value, bucket);
+            NEW_KVALUE(key, value, bucket);
             return ValueT();
         }
         else {
             ValueT old_value = GET_VAL(_pairs, bucket);
-            GET_VAL(_pairs, bucket) = new_value;
+            GET_VAL(_pairs, bucket) = value;
             return old_value;
         }
     }
@@ -986,7 +993,11 @@ public:
 
     constexpr bool is_notrivially() noexcept
     {
-        return !(std::is_pod<KeyT>::value && std::is_trivially_destructible<ValueT>::value);
+#if __cplusplus >= 201103L || _MSC_VER > 1600 || __clang__
+        return !(std::is_trivially_destructible<KeyT>::value && std::is_trivially_destructible<ValueT>::value);
+#else
+        return !(std::is_pod<KeyT>::value && std::is_pod<ValueT>::value);
+#endif
     }
 
     void clearkv()
@@ -1017,7 +1028,7 @@ public:
     /// Make room for this many elements
     bool reserve(uint32_t num_elems) noexcept
     {
-        auto required_buckets = (uint32_t)(((uint64_t)num_elems * _loadlf) >> 13) + 2;
+        const auto required_buckets = (uint32_t)(((uint64_t)num_elems * _loadlf) >> 13) + 2;
         //const auto required_buckets = num_elems * 10 / 8 + 2;
         if (EMILIB_LIKELY(required_buckets <= _num_buckets))
             return false;
@@ -1026,13 +1037,14 @@ public:
         return true;
     }
 
+private:
     /// Make room for this many elements
     void rehash(uint32_t required_buckets) noexcept
     {
         if (required_buckets < _num_filled)
             return ;
 
-        uint32_t num_buckets = _num_filled > 1024 ? 512 : 8;
+        uint32_t num_buckets = _num_filled > 1024 ? 512 : 4;
         while (num_buckets < required_buckets) { num_buckets *= 2; }
 
         //assert(num_buckets > _num_filled);
@@ -1077,7 +1089,7 @@ public:
             auto& old_pair = old_pairs[src_bucket];
 
             auto next_bucket = NEXT_BUCKET(_pairs, main_bucket);
-#if 0
+#if 1
             //check current bucket_key is in main bucket or not
             if (next_bucket != main_bucket)
                 next_bucket = find_last_bucket(next_bucket);
@@ -1089,7 +1101,7 @@ public:
             auto new_bucket = find_empty_bucket(next_bucket);
             new(_pairs + new_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
             NEXT_BUCKET(_pairs, new_bucket) = (main_bucket == next_bucket) ? new_bucket : next_bucket;
-			NEXT_BUCKET(_pairs, main_bucket) = new_bucket;
+            NEXT_BUCKET(_pairs, main_bucket) = new_bucket;
 #endif
         }
 
@@ -1202,8 +1214,8 @@ private:
             return bucket;
         else if (next_bucket == bucket)
             return _num_buckets;
-//        else if (hash_bucket(GET_KEY(_pairs, bucket)) != bucket)
-//            return _num_buckets;
+        //else if (EMILIB_UNLIKELY(bucket != (hash_bucket(bucket_key))))
+        //    return _num_buckets;
 #endif
 
         //find next from linked bucket
@@ -1401,7 +1413,7 @@ private:
     PairT*    _pairs;
 };
 } // namespace emilib
-#if __cplusplus > 199711
-//template <class Key, class Val> using ktprime_hash = emilib5::HashMap<Key, Val, std::hash<Key>>;
+#if __cplusplus >= 201103L
+template <class Key, class Val, typename Hash = std::hash<Key>> using ktprime_hash_v5 = emilib5::HashMap<Key, Val, Hash>;
 #endif
 
