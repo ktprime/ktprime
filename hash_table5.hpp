@@ -1,6 +1,6 @@
 
 // emilib5::HashMap for C++11
-// version 1.0.0
+// version 1.0.1
 // https://github.com/ktprime/ktprime/blob/master/hash_table5.hpp
 //
 // Licensed under the MIT License <http://opensource.org/licenses/MIT>.
@@ -25,9 +25,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE
 
-// By Huang Yuanbing 2019-2020
-// bailuzhou@163.com
-// https://github.com/ktprime/ktprime/blob/master/hash_table5.hpp
+
 // From
 // NUMBER OF PROBES / LOOKUP       Successful            Unsuccessful
 // Quadratic collision resolution   1 - ln(1-L) - L/2    1/(1-L) - L - ln(1-L)
@@ -79,31 +77,8 @@
 
 #define hash_bucket(key)  ((uint32_t)_hasher(key) & _mask)
 
-#ifndef EMILIB_BUCKET_INDEX
-    #define EMILIB_BUCKET_INDEX 1
-#endif
 #if EMILIB_CACHE_LINE_SIZE < 32
     #define EMILIB_CACHE_LINE_SIZE 64
-#endif
-
-#if EMILIB_BUCKET_INDEX == 0
-    #define GET_KEY(p,n)     p[n].second.first
-    #define GET_VAL(p,n)     p[n].second.second
-    #define NEXT_BUCKET(s,n) s[n].first
-    #define GET_PVAL(s,n)    s[n].second
-    #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(bucket, std::pair<KeyT, ValueT>(key, value)); _num_filled ++
-#elif EMILIB_BUCKET_INDEX == 2
-    #define GET_KEY(p,n)     p[n].first.first
-    #define GET_VAL(p,n)     p[n].first.second
-    #define NEXT_BUCKET(s,n) s[n].second
-    #define GET_PVAL(s,n)    s[n].first
-    #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(std::pair<KeyT, ValueT>(key, value), bucket); _num_filled ++
-#else
-    #define GET_KEY(p,n)     p[n].first
-    #define GET_VAL(p,n)     p[n].second
-    #define NEXT_BUCKET(s,n) s[n].nextbucket
-    #define GET_PVAL(s,n)    s[n]
-    #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket), _num_filled ++
 #endif
 
 namespace emilib5 {
@@ -114,6 +89,12 @@ template <typename First, typename Second>
 struct myPair {
     myPair(const First& key, const Second& value, uint32_t bucket)
         :second(value),first(key)
+    {
+        nextbucket = bucket;
+    }
+
+    myPair(First&& key, Second&& value, uint32_t bucket)
+        :second(std::move(value)), first(std::move(key))
     {
         nextbucket = bucket;
     }
@@ -173,16 +154,25 @@ struct myPair {
 template <typename KeyT, typename ValueT, typename HashT = std::hash<KeyT>, typename EqT = std::equal_to<KeyT>>
 class HashMap
 {
-
 private:
-    typedef  HashMap<KeyT, ValueT, HashT> MyType;
+    typedef HashMap<KeyT, ValueT, HashT, EqT> MyType;
 
-#if EMILIB_BUCKET_INDEX == 0
-    typedef std::pair<uint32_t, std::pair<KeyT, ValueT>> PairT;
-#elif EMILIB_BUCKET_INDEX == 2
-    typedef std::pair<std::pair<KeyT, ValueT>, uint32_t> PairT;
+    //using KVE = conditional_t< sizeof(KeyT) != sizeof(ValueT), true, false>;
+    static const bool bkvEq = sizeof(KeyT) == sizeof(ValueT);
+
+#if EMILIB_BUCKET_INDEX == 1
+    typedef myPair<KeyT, ValueT>             PairT;
+    typedef myPair<KeyT, ValueT>             value_pair;
+#elif __cplusplus >= 201103L || _MSC_VER > 1600 || __clang__
+    template<bool B, class T, class F> struct conditional { typedef T type; };
+    template<class T, class F>         struct conditional<false, T, F> { typedef F type; };
+    template<class T, class F>         struct conditional<true, T, F> { typedef T type; };
+    template<bool B, class T, class F> using  conditional_t = typename conditional<B, T, F>::type;
+
+    using PairT      = conditional_t<!bkvEq, myPair<KeyT, ValueT>, std::pair<std::pair<KeyT, ValueT>, uint32_t>>;
+    using value_pair = conditional_t<!bkvEq, myPair<KeyT, ValueT>, std::pair<KeyT, ValueT>>;
 #else
-    typedef myPair<KeyT, ValueT>                         PairT;
+    static_assert(false, "not support");
 #endif
 
 public:
@@ -194,6 +184,227 @@ public:
     typedef  PairT&       reference;
     typedef  const PairT& const_reference;
 
+#if EMILIB_BUCKET_INDEX == 1
+    #define GET_KEY(p,n)     p[n].first
+    #define GET_VAL(p,n)     p[n].second
+    #define NEXT_BUCKET(s,n) s[n].nextbucket
+    #define GET_PVAL(s,n)    s[n]
+    #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket), _num_filled ++
+#elif __cplusplus >= 201703L || _MSC_VER > 1600 || __clang__
+    inline KeyT& GET_KEY(PairT* p, uint32_t n)
+    {
+        if constexpr(bkvEq)
+            return p[n].first.first;
+        else
+            return p[n].first;
+    }
+
+    inline KeyT GET_KEY(PairT* p, uint32_t n) const
+    {
+        if constexpr (bkvEq)
+            return p[n].first.first;
+        else
+            return p[n].first;
+    }
+
+    inline ValueT& GET_VAL(PairT* p, uint32_t n)
+    {
+        if constexpr (bkvEq)
+            return p[n].first.second;
+        else
+            return p[n].second;
+    }
+
+    inline ValueT GET_VAL(PairT* p, uint32_t n) const
+    {
+        if constexpr (bkvEq)
+            return p[n].first.second;
+        else
+            return p[n].second;
+    }
+
+    inline uint32_t& NEXT_BUCKET(PairT* p, uint32_t n)
+    {
+        if constexpr (bkvEq)
+            return p[n].second;
+        else
+            return p[n].nextbucket;
+    }
+
+    inline uint32_t NEXT_BUCKET(PairT* p, uint32_t n) const
+    {
+        if constexpr (sizeof(KeyT) == sizeof(ValueT))
+            return p[n].second;
+        else
+            return p[n].nextbucket;
+    }
+
+    inline value_pair& GET_PVAL(PairT* p, uint32_t n)
+    {
+        if constexpr (bkvEq)
+            return p[n].first;
+        else
+            return p[n];
+    }
+
+    inline value_pair GET_PVAL(PairT* p, uint32_t n) const
+    {
+        if constexpr (bkvEq)
+            return p[n].first;
+        else
+            return p[n];
+    }
+
+    void NEW_KVALUE(KeyT&& key, ValueT&& value, uint32_t bucket)
+    {
+        if constexpr (bkvEq) {
+            new(_pairs + bucket) PairT(std::pair<KeyT, ValueT>(std::move(key), std::move(value)), bucket);
+        } else {
+            new(_pairs + bucket) PairT(std::move(key), std::move(value), bucket);
+        }
+        _num_filled++;
+    }
+
+    void NEW_KVALUE(const KeyT& key, const ValueT& value, const uint32_t bucket)
+    {
+        if constexpr (bkvEq) {
+            new(_pairs + bucket) PairT(std::pair<KeyT, ValueT>(key, value), bucket);
+        }
+        else {
+            new(_pairs + bucket) PairT(key, value, bucket);
+        }
+        _num_filled++;
+    }
+#else
+    template<class K = KeyT> typename std::enable_if <bkvEq, K&>::type
+    inline GET_KEY(PairT* p, uint32_t n)
+    {
+        return p[n].first.first;
+    }
+
+    template<class K = KeyT> typename std::enable_if <!bkvEq, K&>::type
+    inline GET_KEY(PairT* p, uint32_t n)
+    {
+        return p[n].first;
+    }
+
+    template<class K = KeyT> typename std::enable_if <bkvEq, K>::type
+    inline GET_KEY(PairT* p, uint32_t n) const
+    {
+        return p[n].first.first;
+    }
+
+    template<class K = KeyT> typename std::enable_if <!bkvEq, K>::type
+    inline  GET_KEY(PairT* p, uint32_t n) const
+    {
+        return p[n].first;
+    }
+
+    template<class V = ValueT> typename std::enable_if < bkvEq, V&>::type
+    inline  GET_VAL(PairT* p, uint32_t n)
+    {
+        return p[n].first.second;
+    }
+
+    template<class V = ValueT> typename std::enable_if < !bkvEq, V&>::type
+    inline GET_VAL(PairT* p, uint32_t n)
+    {
+        return p[n].second;
+    }
+
+    template<class V = ValueT> typename std::enable_if < bkvEq, V>::type
+    inline GET_VAL(PairT* p, uint32_t n) const
+    {
+        return p[n].first.second;
+    }
+
+    template<class V = ValueT> typename std::enable_if < !bkvEq, V>::type
+    inline GET_VAL(PairT* p, uint32_t n) const
+    {
+        return p[n].second;
+    }
+
+    template<class T = uint32_t> typename std::enable_if < bkvEq, T&>::type
+    inline NEXT_BUCKET(PairT* p, uint32_t n)
+    {
+        return p[n].second;
+    }
+
+    template<class T = uint32_t> typename std::enable_if < !bkvEq, T&>::type
+    inline NEXT_BUCKET(PairT* p, uint32_t n)
+    {
+        return p[n].nextbucket;
+    }
+
+    template<class T = uint32_t> typename std::enable_if < bkvEq, T>::type
+    inline NEXT_BUCKET(PairT* p, uint32_t n) const
+    {
+        return p[n].second;
+    }
+
+    template<class T = uint32_t> typename std::enable_if < !bkvEq, T>::type
+    inline NEXT_BUCKET(PairT* p, uint32_t n) const
+    {
+        return p[n].nextbucket;
+    }
+
+    template<class KV = value_pair> typename std::enable_if < bkvEq, KV&>::type
+    inline GET_PVAL(PairT* p, uint32_t n)
+    {
+        return p[n].first;
+    }
+
+    template<class KV = value_pair> typename std::enable_if < !bkvEq, KV&>::type
+    inline GET_PVAL(PairT* p, uint32_t n)
+    {
+        return p[n];
+    }
+
+    template<class KV = value_pair> typename std::enable_if < bkvEq, KV>::type
+    inline GET_PVAL(PairT* p, uint32_t n) const
+    {
+        return p[n].first;
+    }
+
+    template<class KV = value_pair> typename std::enable_if < !bkvEq, KV>::type
+    inline GET_PVAL(PairT* p, uint32_t n) const
+    {
+        return p[n];
+    }
+
+    template<class K = KeyT, class V = ValueT>  typename std::enable_if < bkvEq, K>::type
+    NEW_KVALUE(K&& key, V&& value, uint32_t bucket)
+    {
+        new(_pairs + bucket) PairT(std::pair<K, V>(std::move(key), std::move(value)), bucket);
+        _num_filled++;
+        return key;
+    }
+
+    template<class K = KeyT, class V = ValueT> typename std::enable_if < !bkvEq, K>::type
+    NEW_KVALUE(K&& key, V&& value, uint32_t bucket)
+    {
+        new(_pairs + bucket) PairT(std::move(key), std::move(value), bucket);
+        _num_filled++;
+        return key;
+    }
+
+    template<class K = KeyT, class V = ValueT>  typename std::enable_if < bkvEq, K>::type
+    NEW_KVALUE(K& key, V& value, uint32_t bucket)
+    {
+        new(_pairs + bucket) PairT(std::pair<K, V>(key, value), bucket);
+        _num_filled++;
+        return key;
+    }
+
+    template<class K = KeyT, class V = ValueT>  typename std::enable_if < !bkvEq, K>::type
+    NEW_KVALUE(K& key, V& value, uint32_t bucket)
+    {
+        new(_pairs + bucket) PairT(key, value, bucket);
+        _num_filled++;
+        return key;
+    }
+#endif
+
     class iterator
     {
     public:
@@ -201,14 +412,8 @@ public:
         typedef size_t                    difference_type;
         typedef size_t                    distance_type;
 
-#if EMILIB_BUCKET_INDEX == 1
-        typedef PairT                     value_type;
-#else
-        typedef std::pair<KeyT, ValueT>   value_type;
-#endif
-
-        typedef value_type*               pointer;
-        typedef value_type&               reference;
+        typedef value_pair*               pointer;
+        typedef value_pair&               reference;
 
         iterator() { }
         iterator(MyType* hash_map, uint32_t bucket) : _map(hash_map), _bucket(bucket) { }
@@ -228,12 +433,20 @@ public:
 
         reference operator*() const
         {
+#if EMILIB_BUCKET_INDEX == 1
             return _map->GET_PVAL(_pairs, _bucket);
+#else
+            return _map->GET_PVAL(_map->_pairs, _bucket);
+#endif
         }
 
         pointer operator->() const
         {
+#if EMILIB_BUCKET_INDEX == 1
             return &(_map->GET_PVAL(_pairs, _bucket));
+#else
+            return &_map->GET_PVAL(_map->_pairs, _bucket);
+#endif
         }
 
         bool operator==(const iterator& rhs) const
@@ -251,8 +464,11 @@ public:
         {
             do {
                 _bucket++;
-            // } while (_bucket < _map->_num_buckets && _map->NEXT_BUCKET(_pairs, _bucket) == INACTIVE);
+#if EMILIB_BUCKET_INDEX == 1
             } while (_map->NEXT_BUCKET(_pairs, _bucket) == INACTIVE);
+#else
+            } while (_map->NEXT_BUCKET(_map->_pairs, _bucket) == INACTIVE);
+#endif
         }
 
     public:
@@ -266,14 +482,9 @@ public:
         //typedef std::forward_iterator_tag iterator_category;
         typedef size_t                    difference_type;
         typedef size_t                    distance_type;
-#if EMILIB_BUCKET_INDEX == 1
-        typedef PairT                     value_type;
-#else
-        typedef std::pair<KeyT, ValueT>   value_type;
-#endif
 
-        typedef value_type*               pointer;
-        typedef value_type&               reference;
+        typedef value_pair*               pointer;
+        typedef value_pair&               reference;
 
         const_iterator() { }
         const_iterator(iterator proto) : _map(proto._map), _bucket(proto._bucket) { }
@@ -294,12 +505,20 @@ public:
 
         reference operator*() const
         {
+#if EMILIB_BUCKET_INDEX == 1
             return _map->GET_PVAL(_pairs, _bucket);
+#else
+            return _map->GET_PVAL(_map->_pairs, _bucket);
+#endif
         }
 
         pointer operator->() const
         {
+#if EMILIB_BUCKET_INDEX == 1
             return &(_map->GET_PVAL(_pairs, _bucket));
+#else
+            return &_map->GET_PVAL(_map->_pairs, _bucket);
+#endif
         }
 
         bool operator==(const const_iterator& rhs) const
@@ -317,7 +536,11 @@ public:
         {
             do {
                 _bucket++;
+#if EMILIB_BUCKET_INDEX == 1
             } while (_map->NEXT_BUCKET(_pairs, _bucket) == INACTIVE);
+#else
+            } while (_map->NEXT_BUCKET(_map->_pairs, _bucket) == INACTIVE);
+#endif
         }
 
     public:
@@ -366,8 +589,7 @@ public:
 #else
             memcpy(_pairs, other._pairs, other._num_buckets * sizeof(PairT));
 #endif
-        }
-        else {
+        } else {
             auto old_pairs = other._pairs;
             for (uint32_t bucket = 0; bucket < _num_buckets; bucket++) {
                 auto next_bucket = NEXT_BUCKET(_pairs, bucket) = NEXT_BUCKET(old_pairs, bucket);
@@ -493,7 +715,7 @@ public:
     /// Returns average number of elements per bucket.
     float load_factor() const
     {
-        return static_cast<float>(_num_filled) / static_cast<float>(_num_buckets);
+        return static_cast<float>(_num_filled) / static_cast<float>(_num_buckets + 1);
     }
 
     HashT hash_function() const
@@ -734,7 +956,7 @@ public:
         return { {this, bucket}, find };
     }
 
-//    std::pair<iterator, bool> insert(const value_type& value) { return m_ht.insert(value); }
+//    std::pair<iterator, bool> insert(const value_pair& value) { return insert(value.first, value.second); }
 
     std::pair<iterator, bool> insert(const KeyT& key, const ValueT&& value) noexcept
     {
@@ -896,8 +1118,7 @@ public:
         if (NEXT_BUCKET(_pairs, bucket) == INACTIVE) {
             NEW_KVALUE(key, value, bucket);
             return ValueT();
-        }
-        else {
+        } else {
             ValueT old_value = GET_VAL(_pairs, bucket);
             GET_VAL(_pairs, bucket) = value;
             return old_value;
@@ -939,7 +1160,7 @@ public:
 
     // -------------------------------------------------------
     /// Erase an element from the hash table.
-    /// return false if element was not found
+    /// return 0 if element was not found
     size_type erase(const KeyT& key) noexcept
     {
 #if 0
@@ -980,8 +1201,9 @@ public:
         else if (INACTIVE == NEXT_BUCKET(_pairs, it._bucket)) {
             return ++it;
         }
+        assert(it->first == GET_KEY(_pairs, it._bucket));
 #endif
-        //assert(it->first == GET_KEY(_pairs, it._bucket));
+
         const auto bucket = erase_from_bucket(it._bucket);
         NEXT_BUCKET(_pairs, bucket) = INACTIVE; _pairs[bucket].~PairT(); _num_filled -= 1;
         //erase from main bucket, return main bucket as next
@@ -1075,8 +1297,7 @@ private:
                 auto& old_pair = old_pairs[src_bucket];
                 new(_pairs + main_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
                 next_bucket = main_bucket;
-            }
-            else {
+            } else {
                 //move collision bucket to head for better cache performance
                 NEXT_BUCKET(old_pairs, collision++) = src_bucket;
             }
@@ -1113,7 +1334,7 @@ private:
                     _num_filled, double (_num_filled) / mbucket, typeid(KeyT).name(), typeid(ValueT).name(), sizeof(_pairs[0]), (collision * 100.0 / _num_filled));
 #if EMILIB_TAF_LOG
             static uint32_t ihashs = 0;
-            FDLOG() << "EMILIB_BUCKET_INDEX = " << EMILIB_BUCKET_INDEX << "|hash_nums = " << ihashs ++ << "|" <<__FUNCTION__ << "|" << buff << endl;
+            FDLOG() << "hash_nums = " << ihashs ++ << "|" <<__FUNCTION__ << "|" << buff << endl;
 #else
             puts(buff);
 #endif
@@ -1139,9 +1360,9 @@ private:
             return INACTIVE;
 
         const auto eqkey = _eq(key, GET_KEY(_pairs, bucket));
-        if (next_bucket == bucket)
+        if (next_bucket == bucket) {
             return eqkey ? bucket : INACTIVE;
-        else if (eqkey) {
+         } else if (eqkey) {
             const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
             if (is_notrivially())
                 GET_PVAL(_pairs, bucket).swap(GET_PVAL(_pairs, next_bucket));
@@ -1150,8 +1371,7 @@ private:
 
             NEXT_BUCKET(_pairs, bucket) = (nbucket == next_bucket) ? bucket : nbucket;
             return next_bucket;
-        }
-        else if (EMILIB_UNLIKELY(bucket != hash_bucket(GET_KEY(_pairs, bucket))))
+        } else if (EMILIB_UNLIKELY(bucket != hash_bucket(GET_KEY(_pairs, bucket))))
             return INACTIVE;
 
         auto prev_bucket = bucket;
@@ -1399,7 +1619,7 @@ private:
 #endif
     }
 
-private:
+//private:
 
     //the first cache line packed
     HashT     _hasher;
@@ -1414,6 +1634,6 @@ private:
 };
 } // namespace emilib
 #if __cplusplus >= 201103L
-template <class Key, class Val, typename Hash = std::hash<Key>> using ktprime_hash_v5 = emilib5::HashMap<Key, Val, Hash>;
+template <class Key, class Val, typename Hash = std::hash<Key>> using ktprime_hashmap_v5 = emilib5::HashMap<Key, Val, Hash>;
 #endif
 
