@@ -1,6 +1,6 @@
 
 // emilib5::HashMap for C++11
-// version 1.0.1
+// version 2.0.1
 // https://github.com/ktprime/ktprime/blob/master/hash_table5.hpp
 //
 // Licensed under the MIT License <http://opensource.org/licenses/MIT>.
@@ -157,20 +157,25 @@ class HashMap
 private:
     typedef HashMap<KeyT, ValueT, HashT, EqT> MyType;
 
-    //using KVE = conditional_t< sizeof(KeyT) != sizeof(ValueT), true, false>;
     static const bool bkvEq = sizeof(KeyT) == sizeof(ValueT);
 
 #if EMILIB_BUCKET_INDEX == 1
     typedef myPair<KeyT, ValueT>             PairT;
     typedef myPair<KeyT, ValueT>             value_pair;
-#elif __cplusplus >= 201103L || _MSC_VER > 1600 || __clang__
+#elif __cplusplus || _MSC_VER > 1600 || __clang__
     template<bool B, class T, class F> struct conditional { typedef T type; };
     template<class T, class F>         struct conditional<false, T, F> { typedef F type; };
     template<class T, class F>         struct conditional<true, T, F> { typedef T type; };
-    template<bool B, class T, class F> using  conditional_t = typename conditional<B, T, F>::type;
 
+#if 1
+    typedef typename conditional<!bkvEq, myPair<KeyT, ValueT>, std::pair<std::pair<KeyT, ValueT>, uint32_t>>::type PairT;
+    typedef typename conditional<!bkvEq, myPair<KeyT, ValueT>, std::pair<KeyT, ValueT>>::type value_pair;
+#else
+    template<bool B, class T, class F> using  conditional_t = typename conditional<B, T, F>::type;
     using PairT      = conditional_t<!bkvEq, myPair<KeyT, ValueT>, std::pair<std::pair<KeyT, ValueT>, uint32_t>>;
     using value_pair = conditional_t<!bkvEq, myPair<KeyT, ValueT>, std::pair<KeyT, ValueT>>;
+#endif
+
 #else
     static_assert(false, "not support");
 #endif
@@ -387,7 +392,7 @@ public:
         _num_filled++;
         return key;
     }
-
+/**
     template<class K = KeyT, class V = ValueT>  typename std::enable_if < bkvEq, K>::type
     NEW_KVALUE(K& key, V& value, uint32_t bucket)
     {
@@ -402,7 +407,7 @@ public:
         new(_pairs + bucket) PairT(key, value, bucket);
         _num_filled++;
         return key;
-    }
+    }*/
 #endif
 
     class iterator
@@ -517,7 +522,7 @@ public:
 #if EMILIB_BUCKET_INDEX == 1
             return &(_map->GET_PVAL(_pairs, _bucket));
 #else
-            return &_map->GET_PVAL(_map->_pairs, _bucket);
+            return &const_cast<MyType*>(_map)->GET_PVAL(_map->_pairs, _bucket);
 #endif
         }
 
@@ -559,7 +564,7 @@ public:
         max_load_factor(0.8f);
     }
 
-    HashMap(uint32_t bucket = 2)
+    HashMap(uint32_t bucket = 4)
     {
         init();
         reserve(bucket);
@@ -957,18 +962,6 @@ public:
     }
 
 //    std::pair<iterator, bool> insert(const value_pair& value) { return insert(value.first, value.second); }
-
-    std::pair<iterator, bool> insert(const KeyT& key, const ValueT&& value) noexcept
-    {
-        check_expand_need();
-        const auto bucket = find_or_allocate(key);
-        const auto find = NEXT_BUCKET(_pairs, bucket) == INACTIVE;
-        if (find) {
-            NEW_KVALUE(key, std::move(value), bucket);
-        }
-        return { {this, bucket}, find };
-    }
-
     std::pair<iterator, bool> insert(KeyT&& key, ValueT&& value) noexcept
     {
         check_expand_need();
@@ -1119,7 +1112,7 @@ public:
             NEW_KVALUE(key, value, bucket);
             return ValueT();
         } else {
-            ValueT old_value = GET_VAL(_pairs, bucket);
+            const ValueT& old_value = GET_VAL(_pairs, bucket);
             GET_VAL(_pairs, bucket) = value;
             return old_value;
         }
@@ -1136,7 +1129,7 @@ public:
             if (EMILIB_UNLIKELY(check_expand_need()))
                 bucket = find_unique_bucket(key);
 
-            NEW_KVALUE(key, ValueT(), bucket);
+            NEW_KVALUE(key, std::move(ValueT()), bucket);
         }
 
         return GET_VAL(_pairs, bucket);
@@ -1152,7 +1145,7 @@ public:
             if (EMILIB_UNLIKELY(check_expand_need()))
                 bucket = find_unique_bucket(key);
 
-            NEW_KVALUE(std::move(key), ValueT(), bucket);
+            NEW_KVALUE(std::move(key), std::move(ValueT()), bucket);
         }
 
         return GET_VAL(_pairs, bucket);
@@ -1272,8 +1265,10 @@ private:
         //assert(num_buckets > _num_filled);
         auto new_pairs = (PairT*)malloc((1 + num_buckets) * sizeof(PairT));
         auto old_num_buckets = _num_buckets;
+        auto old_num_filled  = _num_filled;
         auto old_pairs = _pairs;
 
+        _num_filled  = 0;
         _num_buckets = num_buckets;
         _mask        = num_buckets - 1;
         _pairs       = new_pairs;
@@ -1301,8 +1296,8 @@ private:
                 //move collision bucket to head for better cache performance
                 NEXT_BUCKET(old_pairs, collision++) = src_bucket;
             }
+            _num_filled += 1;
         }
-
         //reset all collisions bucket
         for (uint32_t colls = 0; colls < collision; colls++) {
             const auto src_bucket = NEXT_BUCKET(old_pairs, colls);
@@ -1342,7 +1337,7 @@ private:
 #endif
 
         free(old_pairs);
-        //assert(old_num_filled == _num_filled);
+        assert(old_num_filled == _num_filled);
     }
 
 private:
@@ -1396,14 +1391,12 @@ private:
         const auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         const auto main_bucket = hash_bucket(GET_KEY(_pairs, bucket));
         if (bucket == main_bucket) {
-            //more than one bucket
             if (bucket != next_bucket) {
                 const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
                 if (is_notrivially())
                     GET_PVAL(_pairs, bucket).swap(GET_PVAL(_pairs, next_bucket));
                 else
                     GET_PVAL(_pairs, bucket) = GET_PVAL(_pairs, next_bucket);
-
                 NEXT_BUCKET(_pairs, bucket) = (nbucket == next_bucket) ? bucket : nbucket;
             }
             return next_bucket;
@@ -1619,7 +1612,7 @@ private:
 #endif
     }
 
-//private:
+private:
 
     //the first cache line packed
     HashT     _hasher;
