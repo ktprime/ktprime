@@ -293,8 +293,6 @@ int main(int argc, char** argv){
   khiter_t k;
 #elif EMIMAP
    emilib2::HashMap<uint32_t, uint32_t> test;
-#elif HOODMAP
-  robin_hood::unordered_map<uint32_t, uint32_t> test;
 #elif ROBINMAP
    tsl::robin_map<uint32_t,uint32_t> test;
 #elif PHMAP
