@@ -17,10 +17,10 @@
 #include "sparse_patchmap.hpp"
 #endif
 #ifdef FLATMAP
-#include "tsl/flat_hash_map.hpp"
+#include "flat_hash_map.hpp"
 #endif
 #ifdef BYTELL
-#include "tsl/bytell_hash_map.hpp"
+#include "bytell_hash_map.hpp"
 #endif
 #ifdef SPARSEPP
 #include "sparsepp/spp.h"
@@ -35,18 +35,20 @@
 #include "khash.h"
 #endif
 #ifdef EMIMAP
-#include "hash_table52.hpp"
+#include "hash_table5.hpp"
 #endif
 
 #if HOODMAP
-#include "tsl/robin_hood.h"
+#include "robin_hood.h"
 #endif
 
 #if PHMAP
 #include "phmap/phmap.h"
 #endif
 
-#include "tsl/robin_map.h"
+#if ROBINMAP
+#include "robin_map.h"
+#endif
 
 #include <stdio.h>
 #if defined (__has_include) && (__has_include(<x86intrin.h>))
