@@ -68,7 +68,7 @@
 #    define EMILIB_LIKELY(condition)   __builtin_expect(condition, 1)
 #    define EMILIB_UNLIKELY(condition) __builtin_expect(condition, 0)
 #else
-#    define EMILIB_LIKELY(condition)   condition
+#    define EMILIB_LIKELY(condition) condition
 #    define EMILIB_UNLIKELY(condition) condition
 #endif
 
@@ -266,7 +266,7 @@ public:
         typedef value_pair&               reference;
 
         const_iterator() { }
-        //const_iterator(iterator proto) : _map(proto._map), _bucket(proto._bucket) { }
+        const_iterator(iterator proto) : _map(proto._map), _bucket(proto._bucket) { }
         const_iterator(const MyType* hash_map, uint32_t bucket) : _map(hash_map), _bucket(bucket) { }
 
         const_iterator& operator++()
@@ -347,6 +347,7 @@ public:
         _mask        = other._mask;
         _hash_inter       = other._hash_inter;
         _loadlf      = other._loadlf;
+
 #if __cplusplus >= 201103L || _MSC_VER > 1600 || __clang__
         if (std::is_trivially_copyable<KeyT>::value && std::is_trivially_copyable<ValueT>::value) {
 #else
@@ -1019,9 +1020,9 @@ private:
         _pairs       = new_pairs;
 
 #if EMILIB_SAFE_HASH
-        if (_hash_inter == 0 && old_num_filled > 10000) {
+        if (_hash_inter == 0 && old_num_filled > 100) {
             //adjust hash function if bad hash function, alloc more memory
-            auto mbucket = 0;
+            uint32_t mbucket = 0;
             for (uint32_t src_bucket = 0; src_bucket < old_num_buckets; src_bucket++) {
                 if (NEXT_BUCKET(old_pairs, src_bucket) == src_bucket)
                     mbucket ++;
@@ -1186,6 +1187,15 @@ private:
 #endif
 
         //find next from linked bucket
+        if (_eq(key, GET_KEY(_pairs, next_bucket)))
+            return next_bucket;
+
+        const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
+        if (nbucket == next_bucket)
+            return _num_buckets;
+
+        next_bucket = nbucket;
+
         while (true) {
             if (_eq(key, GET_KEY(_pairs, next_bucket)))
                 return next_bucket;
@@ -1287,7 +1297,9 @@ private:
                 return bucket2;
 
             else if (slot > 5) {
-                const auto next = (bucket_from + _num_filled + slot) & _mask;
+                //const auto next = (bucket_from + _num_filled + last) & _mask;
+                const auto next = (bucket_from + _num_filled + last) & _mask;
+
                 const auto bucket3 = next;
                 if (NEXT_BUCKET(_pairs, bucket3) == INACTIVE)
                     return bucket3;
@@ -1371,8 +1383,25 @@ private:
 
     static inline uint64_t hash64(uint64_t key)
     {
-//       return (key >> 33 ^ key ^ key << 11);
-#if 0
+#if __SIZEOF_INT128__ && _MPCLMUL
+        //uint64_t const inline clmul_mod(const uint64_t& i,const uint64_t& j){
+        __m128i I{}; I[0] ^= key;
+        __m128i J{}; J[0] ^= UINT64_C(0xde5fb9d2630458e9);
+        __m128i M{}; M[0] ^= 0xb000000000000000ull;
+        __m128i X = _mm_clmulepi64_si128(I,J,0);
+        __m128i A = _mm_clmulepi64_si128(X,M,0);
+        __m128i B = _mm_clmulepi64_si128(A,M,0);
+        return A[0]^A[1]^B[1]^X[0]^X[1];
+#elif __SIZEOF_INT128__ 
+        constexpr uint64_t k = UINT64_C(0xde5fb9d2630458e9);
+        __uint128_t r = key; r *= k;
+        return (r >> 64) + r;
+#elif 1
+        uint64_t const r = key * UINT64_C(0xca4bcaa75ec3f625);
+        const uint32_t h = static_cast<uint32_t>(r >> 32);
+        const uint32_t l = static_cast<uint32_t>(r);
+        return h + l;
+#elif 1
         //MurmurHash3Mixer
         uint64_t h = key;
         h ^= h >> 33;
@@ -1393,9 +1422,7 @@ private:
     template<typename UType, typename std::enable_if<std::is_integral<UType>::value, uint32_t>::type = 0>
     inline uint32_t hash_bucket(const UType key) const
     {
-#if EMILIB_IDENTITY_HASH
-        return ((uint32_t)key) & _mask;
-#elif EMILIB_SAFE_HASH
+#if EMILIB_SAFE_HASH
         if (_hash_inter > 0) {
             if (sizeof(UType) <= sizeof(uint32_t))
                 return unhash(key) & _mask;
@@ -1403,6 +1430,8 @@ private:
                 return uint32_t(hash64(key) & _mask);
         }
         return _hasher(key) & _mask;
+#elif EMILIB_IDENTITY_HASH
+        return ((uint32_t)key) & _mask;
 #else
         return _hasher(key) & _mask;
 #endif
@@ -1413,6 +1442,15 @@ private:
     {
 #ifdef EMILIB_FIBONACCI_HASH
         return (_hasher(key) * 11400714819323198485ull) & _mask;
+#elif EMILIB_STD_STRING
+        uint32_t hash = 0;
+        if (key.size() < 32) {
+            for (const auto c : key) hash = c + hash * 131;
+        } else {
+            for (int i = 0, j = 1; i < key.size(); i += j++) 
+                hash = key[i] + hash * 131;
+        }
+        return hash & _mask;
 #else
         return _hasher(key) & _mask;
 #endif
@@ -1433,6 +1471,6 @@ private:
 };
 } // namespace emilib
 #if __cplusplus >= 201103L
-template <class Key, class Val> using emihash = emilib2::HashMap<Key, Val, std::hash<Key>>;
+    template <class Key, class Val> using emihash = emilib2::HashMap<Key, Val, std::hash<Key>>;
 #endif
 
