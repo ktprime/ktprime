@@ -1,6 +1,7 @@
-// emilib5::HashMap for C++11
-// version 1.3.3
-// https://github.com/ktprime/ktprime/blob/master/hash_table5.hpp
+// emilib3::HashMap for C++11/14/17
+
+// version 1.3.4
+// https://github.com/ktprime/ktprime/blob/master/hash_table6.hpp
 //
 // Licensed under the MIT License <http://opensource.org/licenses/MIT>.
 // SPDX-License-Identifier: MIT
@@ -96,6 +97,8 @@
     #define GET_PKV(s,n)    s[n]
     #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket), _num_filled ++
 #endif
+
+#define CLEAR_BUCKET(bucket)  NEXT_BUCKET(_pairs, bucket) = INACTIVE; _pairs[bucket].~PairT(); _num_filled -= 1
 
 namespace emilib3 {
 
@@ -362,7 +365,7 @@ public:
                     new(_pairs + bucket) PairT(old_pairs[bucket]);
             }
         }
-        NEXT_BUCKET(_pairs, _num_buckets + 0) = NEXT_BUCKET(_pairs, _num_buckets + 1) = 0;
+        NEXT_BUCKET(_pairs, _num_buckets) = NEXT_BUCKET(_pairs, _num_buckets + 1) = 0; //set final two tombstones
 
         if (other._pempty) {
             _pempty = (uint32_t*)malloc(other._pempty[0] * sizeof(uint32_t));
@@ -531,7 +534,7 @@ public:
         const auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket == INACTIVE)
             return 0;
-        if (bucket == next_bucket)
+        else if (bucket == next_bucket)
             return bucket + 1;
 
         const auto& bucket_key = GET_KEY(_pairs, bucket);
@@ -939,7 +942,7 @@ public:
         if (bucket == INACTIVE)
             return 0;
 
-        NEXT_BUCKET(_pairs, bucket) = INACTIVE; _pairs[bucket].~PairT(); _num_filled -= 1;
+        CLEAR_BUCKET(bucket);
 //      push_pempty(bucket);
         return 1;
     }
@@ -967,8 +970,8 @@ public:
         assert(it->first == GET_KEY(_pairs, it._bucket));
 #endif
 
-        const auto bucket = erase_from_bucket(it._bucket);
-        NEXT_BUCKET(_pairs, bucket) = INACTIVE; _pairs[bucket].~PairT(); _num_filled -= 1;
+        const auto bucket = erase_bucket(it._bucket);
+        CLEAR_BUCKET(bucket);
 //      push_pempty(bucket);
         //erase from main bucket, return main bucket as next
         if (bucket == it._bucket)
@@ -979,8 +982,8 @@ public:
 
     void _erase(const_iterator it)
     {
-        const auto bucket = erase_from_bucket(it._bucket);
-        NEXT_BUCKET(_pairs, bucket) = INACTIVE; _pairs[bucket].~PairT(); _num_filled -= 1;
+        const auto bucket = erase_bucket(it._bucket);
+        CLEAR_BUCKET(bucket);
     }
 
     static constexpr bool is_notrivially() noexcept
@@ -1008,7 +1011,7 @@ public:
             if (next_bucket != INACTIVE) {
                 if (std::is_integral<KeyT>::value && bucket == hash_bucket(GET_KEY(_pairs, bucket)))
                     reset_bucket_key(bucket);
-                next_bucket = INACTIVE;_pairs[bucket].~PairT(); _num_filled -= 1;
+                CLEAR_BUCKET(bucket);
             }
         }
     }
@@ -1172,21 +1175,28 @@ private:
             _num_filled += 1;
         }
 
-        //reset all collisions bucket, not linke new bucket after main bucket beause of cache miss
+        //reset all collisions bucket, not link new bucket after main bucket beause of cache miss
         for (uint32_t colls = 0; colls < collision; colls++) {
             const auto src_bucket = NEXT_BUCKET(old_pairs, colls);
             const auto main_bucket = hash_bucket(GET_KEY(old_pairs, src_bucket));
             auto& old_pair = old_pairs[src_bucket];
 
-                auto next_bucket = NEXT_BUCKET(_pairs, main_bucket);
-                //check current bucket_key is in main bucket or not
-                if (next_bucket != main_bucket)
-                    next_bucket = find_last_bucket(next_bucket);
-                //find a new empty and link it to tail
-                auto new_bucket = NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
-                new(_pairs + new_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
-                NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
-        }
+            auto next_bucket = NEXT_BUCKET(_pairs, main_bucket);
+#if 0
+            //check current bucket_key is in main bucket or not
+            if (next_bucket != main_bucket)
+                next_bucket = find_last_bucket(next_bucket);
+            //find a new empty and link it to tail
+            auto new_bucket = NEXT_BUCKET(_pairs, next_bucket) = find_empty_bucket(next_bucket);
+            new(_pairs + new_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
+            NEXT_BUCKET(_pairs, new_bucket) = new_bucket;
+#else
+            const auto new_bucket = find_empty_bucket(next_bucket);
+            new(_pairs + new_bucket) PairT(std::move(old_pair)); old_pair.~PairT();
+            NEXT_BUCKET(_pairs, new_bucket) = (main_bucket == next_bucket) ? new_bucket : next_bucket;
+            NEXT_BUCKET(_pairs, main_bucket) = new_bucket;
+#endif
+    }
 
 #if EMILIB_REHASH_LOG
         if (_num_filled > 100) {
@@ -1264,7 +1274,7 @@ private:
         return INACTIVE;
     }
 
-    uint32_t erase_from_bucket(const uint32_t bucket) noexcept
+    uint32_t erase_bucket(const uint32_t bucket) noexcept
     {
         const auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         const auto main_bucket = hash_bucket(GET_KEY(_pairs, bucket));
@@ -1276,8 +1286,8 @@ private:
                 else
                     GET_PKV(_pairs, bucket) = GET_PKV(_pairs, next_bucket);
                 NEXT_BUCKET(_pairs, bucket) = (nbucket == next_bucket) ? bucket : nbucket;
-            }
-            reset_bucket_key(bucket);
+            } else
+                reset_bucket_key(bucket);
             return next_bucket;
         }
 
@@ -1399,16 +1409,19 @@ private:
 
         //fibonacci an2 = an1 + an0 --> 1, 2, 3, 5, 8, 13, 21 ...
         for (uint32_t last = 2, slot = 3; ; slot += last, last = slot - last) {
-            const auto bucket1 = (bucket_from + slot) & _mask;
+            const auto next = (bucket_from + slot) & _mask;
+            const auto bucket1 = next + 0;
             if (NEXT_BUCKET(_pairs, bucket1) == INACTIVE)
                 return bucket1;
 
-            const auto bucket2 = bucket1 + 1;
+            const auto bucket2 = next + 1;
             if (NEXT_BUCKET(_pairs, bucket2) == INACTIVE)
                 return bucket2;
 
             else if (slot > 5) {
                 const auto next = (bucket_from + _num_filled + last) & _mask;
+//                const auto next = (bucket_from - last) & _mask;
+
                 const auto bucket3 = next + 0;
                 if (NEXT_BUCKET(_pairs, bucket3) == INACTIVE)
                     return bucket3;
