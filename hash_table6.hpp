@@ -1,7 +1,6 @@
-// emilib3::HashMap for C++11/14/17
-
-// version 1.3.4
-// https://github.com/ktprime/ktprime/blob/master/hash_table6.hpp
+// emilib3::HashMap for C++11
+// version 1.3.3
+// https://github.com/ktprime/ktprime/blob/master/hash_table5.hpp
 //
 // Licensed under the MIT License <http://opensource.org/licenses/MIT>.
 // SPDX-License-Identifier: MIT
@@ -1033,6 +1032,11 @@ public:
         _num_filled = 0;
     }
 
+    void shrink_to_fit()
+    {
+        rehash(_num_filled);
+    }
+
 #if EMILIB_HIGH_LOAD
    /***
      * 100         98                98
@@ -1147,6 +1151,7 @@ private:
 
         if (sizeof(PairT) <= EMILIB_CACHE_LINE_SIZE / 2) {
             memset(_pairs, INACTIVE, sizeof(_pairs[0]) * num_buckets);
+            if (std::is_integral<KeyT>::value)
             reset_bucket_key(hash_bucket(GET_KEY(_pairs, 0)));
         }
         else {
@@ -1250,7 +1255,7 @@ private:
         } else if (EMILIB_UNLIKELY(bucket != hash_bucket(GET_KEY(_pairs, bucket))))
             return INACTIVE;
 
-        auto prev_bucket = bucket, remove_bucket = INACTIVE;
+        uint32_t prev_bucket = bucket, remove_bucket = INACTIVE;
         while (true) {
             const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
             if (_eq(key, GET_KEY(_pairs, next_bucket))) {
