@@ -55,7 +55,7 @@
     #include "servant/RollLogHelper.h"
 #endif
 
-#ifdef  GET_KEY
+#ifdef GET_KEY
     #undef  GET_KEY
     #undef  GET_VAL
     #undef  NEXT_BUCKET
@@ -97,6 +97,8 @@
     #define GET_PKV(s,n)    s[n]
     #define NEW_KVALUE(key, value, bucket) new(_pairs + bucket) PairT(key, value, bucket), _num_filled ++
 #endif
+
+#define CLEAR_BUCKET(bucket)  NEXT_BUCKET(_pairs, bucket) = INACTIVE; _pairs[bucket].~PairT(); _num_filled -= 1
 
 namespace emilib2 {
 
@@ -314,8 +316,6 @@ public:
         uint32_t  _bucket;
     };
 
-    // ------------------------------------------------------------------------
-
     void init(uint32_t bucket)
     {
         _num_buckets = 0;
@@ -385,7 +385,7 @@ public:
         if (is_notrivially())
             clearkv();
 
-        if (_num_buckets < other._num_buckets) {
+        if (_num_buckets != other._num_buckets) {
             free(_pairs);
             _pairs = (PairT*)malloc((2 + other._num_buckets) * sizeof(PairT));
         }
@@ -498,7 +498,7 @@ public:
 
     void max_load_factor(float value)
     {
-        if (value < 0.95f && value > 0.2f)
+        if (value < 0.90f && value > 0.2f)
             _loadlf = (uint32_t)((1 << 13) / value);
     }
 
@@ -519,7 +519,7 @@ public:
         const auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         if (next_bucket == INACTIVE)
             return 0;
-        if (bucket == next_bucket)
+        else if (bucket == next_bucket)
             return bucket + 1;
 
         const auto& bucket_key = GET_KEY(_pairs, bucket);
@@ -913,7 +913,7 @@ public:
         if (bucket == INACTIVE)
             return 0;
 
-        NEXT_BUCKET(_pairs, bucket) = INACTIVE; _pairs[bucket].~PairT(); _num_filled -= 1;
+        CLEAR_BUCKET(bucket);
         return 1;
     }
 
@@ -940,8 +940,8 @@ public:
         assert(it->first == GET_KEY(_pairs, it._bucket));
 #endif
 
-        const auto bucket = erase_from_bucket(it._bucket);
-        NEXT_BUCKET(_pairs, bucket) = INACTIVE; _pairs[bucket].~PairT(); _num_filled -= 1;
+        const auto bucket = erase_bucket(it._bucket);
+        CLEAR_BUCKET(bucket);
         //erase from main bucket, return main bucket as next
         if (bucket == it._bucket)
             ++it;
@@ -951,8 +951,8 @@ public:
 
     void _erase(const_iterator it)
     {
-        const auto bucket = erase_from_bucket(it._bucket);
-        NEXT_BUCKET(_pairs, bucket) = INACTIVE; _pairs[bucket].~PairT(); _num_filled -= 1;
+        const auto bucket = erase_bucket(it._bucket);
+        CLEAR_BUCKET(bucket);
     }
 
     static constexpr bool is_notrivially() noexcept
@@ -977,7 +977,7 @@ public:
     {
         for (uint32_t bucket = 0; _num_filled > 0; ++bucket) {
             if (NEXT_BUCKET(_pairs, bucket) != INACTIVE) {
-                NEXT_BUCKET(_pairs, bucket) = INACTIVE; _pairs[bucket].~PairT(); _num_filled -= 1;
+                CLEAR_BUCKET(bucket);
             }
         }
     }
@@ -985,7 +985,7 @@ public:
     /// Remove all elements, keeping full capacity.
     void clear() noexcept
     {
-        if (is_notrivially() || sizeof(PairT) > EMILIB_CACHE_LINE_SIZE / 2 || _num_filled < _num_buckets / 4)
+        if (is_notrivially() || sizeof(PairT) > EMILIB_CACHE_LINE_SIZE / 2 || _num_filled < _num_buckets / 2)
             clearkv();
         else
             memset(_pairs, INACTIVE, sizeof(_pairs[0]) * _num_buckets);
@@ -1065,7 +1065,7 @@ private:
         }
 
 #if EMILIB_REHASH_LOG
-        if (_num_filled > 100000 && _hash_inter > 0) {
+        if (_num_filled > 100) {
             uint32_t collision = 0;
             auto mbucket = _num_filled - collision;
             char buff[255] = {0};
@@ -1099,22 +1099,14 @@ private:
             return INACTIVE;
 
         const auto eqkey = _eq(key, GET_KEY(_pairs, bucket));
-        if (next_bucket == bucket) {
+        if (next_bucket == bucket)
             return eqkey ? bucket : INACTIVE;
-         } else if (eqkey) {
-            const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
-            //if k.v not support swap or copy, then need call destructor and constructor again
-            if (is_copy_trivially())
-                GET_PKV(_pairs, bucket).swap(GET_PKV(_pairs, next_bucket));
-            else
-                GET_PKV(_pairs, bucket) = GET_PKV(_pairs, next_bucket);
-
-            NEXT_BUCKET(_pairs, bucket) = (nbucket == next_bucket) ? bucket : nbucket;
-            return next_bucket;
-        } else if (EMILIB_UNLIKELY(bucket != hash_bucket(GET_KEY(_pairs, bucket))))
+        else if (EMILIB_UNLIKELY(bucket != hash_bucket(GET_KEY(_pairs, bucket))))
             return INACTIVE;
 
+        //find erase key and swap to last bucket
         auto prev_bucket = bucket, erase_bucket = INACTIVE;
+        next_bucket = bucket;
         while (true) {
             const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
             if (_eq(key, GET_KEY(_pairs, next_bucket))) {
@@ -1123,12 +1115,10 @@ private:
                     NEXT_BUCKET(_pairs, prev_bucket) = prev_bucket;
                     break;
                 }
-                //NEXT_BUCKET(_pairs, prev_bucket) = (nbucket == next_bucket) ? prev_bucket : nbucket;
-                //return next_bucket;
             }
             if (nbucket == next_bucket) {
                 if (erase_bucket != INACTIVE) {
-                    GET_PKV(_pairs, erase_bucket).swap(GET_PKV(_pairs, next_bucket));
+                    GET_PKV(_pairs, erase_bucket).swap(GET_PKV(_pairs, nbucket));
 //                    GET_PKV(_pairs, erase_bucket) = GET_PKV(_pairs, nbucket);
                     NEXT_BUCKET(_pairs, prev_bucket) = prev_bucket;
                     erase_bucket = nbucket;
@@ -1142,27 +1132,10 @@ private:
         return erase_bucket;
     }
 
-    uint32_t erase_from_bucket(const uint32_t bucket) noexcept
+    uint32_t erase_bucket(const uint32_t bucket) noexcept
     {
         auto next_bucket = NEXT_BUCKET(_pairs, bucket);
         const auto main_bucket = hash_bucket(GET_KEY(_pairs, bucket));
-#if 0
-        if (bucket == main_bucket) {
-            if (bucket != next_bucket) {
-                const auto nbucket = NEXT_BUCKET(_pairs, next_bucket);
-                if (is_notrivially())
-                    GET_PKV(_pairs, bucket).swap(GET_PKV(_pairs, next_bucket));
-                else
-                    GET_PKV(_pairs, bucket) = GET_PKV(_pairs, next_bucket);
-                NEXT_BUCKET(_pairs, bucket) = (nbucket == next_bucket) ? bucket : nbucket;
-            }
-            return next_bucket;
-        }
-
-        const auto prev_bucket = find_prev_bucket(main_bucket, bucket);
-        NEXT_BUCKET(_pairs, prev_bucket) = (bucket == next_bucket) ? prev_bucket : next_bucket;
-        return bucket;
-#else
         if (bucket == next_bucket) {
             if (bucket != main_bucket) {
                 const auto prev_bucket = find_prev_bucket(main_bucket, bucket);
@@ -1183,7 +1156,6 @@ private:
             prev_bucket = next_bucket;
             next_bucket = nbucket;
         }
-#endif
     }
 
     // Find the bucket with this key, or return bucket size
