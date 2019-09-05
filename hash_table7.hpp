@@ -1,7 +1,7 @@
 
-// emilib6::HashMap for C++11
+// emilib5::HashMap for C++11
 // version 1.6.0
-// https://github.com/ktprime/ktprime/blob/master/hash_table5.hpp
+// https://github.com/ktprime/ktprime/blob/master/hash_table7.hpp
 //
 // Licensed under the MIT License <http://opensource.org/licenses/MIT>.
 // SPDX-License-Identifier: MIT
@@ -49,6 +49,11 @@
 #include <cstdint>
 #include <functional>
 #include <iterator>
+
+#if EMILIB_TAF_LOG
+    #include "servant/AutoLog.h"
+    #include "servant/RollLogHelper.h"
+#endif
 
 #ifdef GET_KEY
     #undef  GET_KEY
@@ -335,32 +340,6 @@ public:
         clone(other);
     }
 
-    void clone(const HashMap& other)
-    {
-        _hasher      = other._hasher;
-        _num_buckets = other._num_buckets;
-        _num_filled  = other._num_filled;
-        _mask        = other._mask;
-        _hash_inter       = other._hash_inter;
-        _loadlf      = other._loadlf;
-
-#if __cplusplus >= 201402L || _MSC_VER > 1600 || __clang__
-        if (std::is_trivially_copyable<KeyT>::value && std::is_trivially_copyable<ValueT>::value) {
-#else
-        if (std::is_pod<KeyT>::value && std::is_pod<ValueT>::value) {
-#endif
-            memcpy(_pairs, other._pairs, other._num_buckets * sizeof(PairT));
-        } else {
-            auto old_pairs = other._pairs;
-            for (uint32_t bucket = 0; bucket < _num_buckets; bucket++) {
-                auto next_bucket = ADDR_BUCKET(_pairs, bucket) = ADDR_BUCKET(old_pairs, bucket);
-                if (next_bucket != INACTIVE)
-                    new(_pairs + bucket) PairT(old_pairs[bucket]);
-            }
-        }
-        ADDR_BUCKET(_pairs, _num_buckets) = ADDR_BUCKET(_pairs, _num_buckets + 1) = 0; //set final two tombstones
-    }
-
     HashMap(HashMap&& other)
     {
         init(1);
@@ -379,7 +358,7 @@ public:
         if (this == &other)
             return *this;
 
-        if (is_notriviall_destructable())
+        if (is_notrivially())
             clearkv();
 
         if (_num_buckets != other._num_buckets) {
@@ -399,10 +378,37 @@ public:
 
     ~HashMap()
     {
-        if (is_notriviall_destructable())
+        if (is_notrivially())
             clearkv();
 
         free(_pairs);
+    }
+
+    void clone(const HashMap& other)
+    {
+        _hasher      = other._hasher;
+        _num_buckets = other._num_buckets;
+        _num_filled  = other._num_filled;
+        _mask        = other._mask;
+        _hash_inter  = other._hash_inter;
+        _loadlf      = other._loadlf;
+
+#if __cplusplus >= 201402L || _MSC_VER > 1600 || __clang__
+        if (std::is_trivially_copyable<KeyT>::value && std::is_trivially_copyable<ValueT>::value) {
+#else
+        if (std::is_pod<KeyT>::value && std::is_pod<ValueT>::value) {
+#endif
+            memcpy(_pairs, other._pairs, other._num_buckets * sizeof(PairT));
+        }
+        else {
+            auto old_pairs = other._pairs;
+            for (uint32_t bucket = 0; bucket < _num_buckets; bucket++) {
+                auto next_bucket = ADDR_BUCKET(_pairs, bucket) = ADDR_BUCKET(old_pairs, bucket);
+                if (next_bucket != INACTIVE)
+                    new(_pairs + bucket) PairT(old_pairs[bucket]);
+            }
+        }
+        ADDR_BUCKET(_pairs, _num_buckets) = ADDR_BUCKET(_pairs, _num_buckets + 1) = 0; //set final two tombstones
     }
 
     void swap(HashMap& other)
@@ -863,7 +869,7 @@ public:
                 next = bucket / 2;
             }
 
-            NEW_BUCKET(std::move(key), std::move(ValueT()), next, bucket);
+            NEW_BUCKET(key, std::move(ValueT()), next, bucket);
         }
 
         return GET_VAL(_pairs, next);
@@ -937,7 +943,7 @@ public:
         CLEAR_BUCKET(bucket);
     }
 
-    static constexpr bool is_notriviall_destructable() noexcept
+    static constexpr bool is_notrivially() noexcept
     {
 #if __cplusplus >= 201402L || _MSC_VER > 1600 || __clang__
         return !(std::is_trivially_destructible<KeyT>::value && std::is_trivially_destructible<ValueT>::value);
@@ -967,7 +973,7 @@ public:
     /// Remove all elements, keeping full capacity.
     void clear() noexcept
     {
-        if (is_notriviall_destructable() || sizeof(PairT) > EMILIB_CACHE_LINE_SIZE / 2 || _num_filled < _num_buckets / 2)
+        if (is_notrivially() || sizeof(PairT) > EMILIB_CACHE_LINE_SIZE / 2 || _num_filled < _num_buckets / 2)
             clearkv();
         else
             memset(_pairs, INACTIVE, sizeof(_pairs[0]) * _num_buckets);
@@ -1249,10 +1255,10 @@ private:
             const auto bucket2 = next + 1;
             if (ADDR_BUCKET(_pairs, bucket2) == INACTIVE)
                 return bucket2;
-#if 1
+
             else if (slot > 5) {
                 const auto next = (bucket_from + _num_filled + last) & _mask;
-//                const auto next = (bucket_from - slot + last) & _mask;
+//                const auto next = (bucket_from - last) & _mask;
 
                 const auto bucket3 = next + 0;
                 if (ADDR_BUCKET(_pairs, bucket3) == INACTIVE)
@@ -1262,7 +1268,6 @@ private:
                 if (ADDR_BUCKET(_pairs, bucket4) == INACTIVE)
                     return bucket4;
             }
-#endif
         }
     }
 
