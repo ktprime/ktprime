@@ -7,7 +7,8 @@
 #include <string>
 #include <algorithm>
 #include <array>
-#include "sfc64.h"
+
+#include "sfc64.h" //https://github.com/martinus/robin-hood-hashing/blob/master/src/test/app/sfc64.h
 //#include "wyhash.h"
 
 #define TP                   1
@@ -145,17 +146,18 @@ emilib3::HashMap<std::string, std::string> show_name = {
     {"emilib5", "emilib5"},
 //    {"emilib7", "emilib7"},
 
-#if ET
+
     {"martin", "martin flat"},
     {"phmap", "phmap flat"},
 #if HOOD_HASH || KEY_INT == 0
     {"robin", "tessil robin"},
-//    {"hopsco", "tessil hopsco"},
+
     {"flat", "skarupk flat"},
 #endif
-#endif
-
-//    {"byte", "skarupk byte"},
+#if ET 
+    {"hopsco", "tessil hopsco"},
+    {"byte", "skarupk byte"},
+ #endif
 };
 
 static int64_t getTime()
