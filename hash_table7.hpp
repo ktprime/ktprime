@@ -1,6 +1,6 @@
 
 // emilib6::HashMap for C++11
-// version 1.6.0
+// version 1.6.1
 // https://github.com/ktprime/ktprime/blob/master/hash_table7.hpp
 //
 // Licensed under the MIT License <http://opensource.org/licenses/MIT>.
@@ -161,8 +161,8 @@ private:
     typedef std::pair<KeyT, ValueT>         value_pair;
     typedef std::pair<value_pair, uint32_t> PairT;
 #else
-    typedef myPair<KeyT, ValueT>             PairT;
-    typedef myPair<KeyT, ValueT>             value_pair;
+    typedef myPair<KeyT, ValueT>            PairT;
+    typedef myPair<KeyT, ValueT>            value_pair;
 #endif
 
 public:
@@ -300,7 +300,7 @@ public:
         _pairs = nullptr;
         _num_filled = 0;
         _hash_inter = 0;
-        max_load_factor(0.8f);
+        max_load_factor(0.9f);
         reserve(bucket);
     }
 
@@ -470,12 +470,12 @@ public:
 
     constexpr float max_load_factor() const
     {
-        return (1 << 13) / _loadlf;
+        return (1 << 13) / (float)_loadlf;
     }
 
     void max_load_factor(float value)
     {
-        if (value < 0.90f && value > 0.2f)
+        if (value < 0.95f && value > 0.2f)
             _loadlf = (uint32_t)((1 << 13) / value);
     }
 
@@ -489,7 +489,7 @@ public:
         return (1 << 30) / sizeof(PairT);
     }
 
-    //Returns the bucket number where the element with key k is located.
+    //Returns the bucket number where the element with key is located.
     size_type bucket(const KeyT& key) const
     {
         const auto bucket = hash_bucket(key);
@@ -938,7 +938,7 @@ public:
     void clearkv()
     {
         for (uint32_t bucket = 0; _num_filled > 0; ++bucket) {
-            if (ISEMPTY_BUCKET(_pairs, bucket)) 
+            if (ISEMPTY_BUCKET(_pairs, bucket))
                 continue;
             CLEAR_BUCKET(bucket);
         }
@@ -963,7 +963,7 @@ public:
     /// Make room for this many elements
     bool reserve(uint64_t num_elems) noexcept
     {
-        const auto required_buckets = (uint32_t)(num_elems * _loadlf >> 13);
+        const auto required_buckets = (uint32_t)(num_elems * _loadlf >> 13) + 2;
         //const auto required_buckets = num_elems * 19 / 16;
         if (EMILIB_LIKELY(required_buckets < _num_buckets))
             return false;
@@ -1188,8 +1188,8 @@ private:
         return _num_buckets;
     }
 
-    //kick out from position bucket and find empty to occpuy
-    //it will break the orgin link and relik again.
+    //kick out bucket and find empty to occpuy
+    //it will break the orgin link and relnik again.
     //before: main_bucket-->prev_bucket --> bucket   --> next_bucket
     //atfer : main_bucket-->prev_bucket --> (removed)--> new_bucket--> next_bucket
     uint32_t kickout_bucket(const uint32_t bucket) noexcept
@@ -1226,8 +1226,7 @@ private:
         if (next_bucket % 2 > 0) {
             return kickout_bucket(bucket);
         } else if (next_bucket == bucket * 2) {
-            ADDR_BUCKET(_pairs, bucket) = find_empty_bucket(bucket) * 2;
-            return ADDR_BUCKET(_pairs, bucket) + 1;
+            return (ADDR_BUCKET(_pairs, bucket) = find_empty_bucket(bucket) * 2) + 1;
         }
 
         next_bucket /= 2;
@@ -1271,24 +1270,24 @@ private:
 
         //fibonacci an2 = an1 + an0 --> 1, 2, 3, 5, 8, 13, 21 ...
         for (uint32_t last = 2, slot = 3; ; slot += last, last = slot - last) {
-            const auto next1 = (bucket_from + slot) & _mask;
-            const auto bucket1 = next1 + 0;
+            const auto next = (bucket_from + slot) & _mask;
+            const auto bucket1 = next + 0;
             if (ISEMPTY_BUCKET(_pairs, bucket1))
                 return bucket1;
 
-            const auto bucket2 = next1 + 1;
+            const auto bucket2 = next + 1;
             if (ISEMPTY_BUCKET(_pairs, bucket2))
                 return bucket2;
 
-            else if (slot > 5) {
-                const auto next2 = (bucket_from + _num_filled + last) & _mask;
-//                const auto next2 = (bucket_from - last) & _mask;
+            else if (slot > 8) {
+                const auto next = (bucket_from + _num_filled + last) & _mask;
+//                const auto next = (bucket_from - last) & _mask;
 
-                const auto bucket3 = next2 + 0;
+                const auto bucket3 = next + 0;
                 if (ISEMPTY_BUCKET(_pairs, bucket3))
                     return bucket3;
 
-                const auto bucket4 = next2 + 1;
+                const auto bucket4 = next + 2;
                 if (ISEMPTY_BUCKET(_pairs, bucket4))
                     return bucket4;
             }
@@ -1450,7 +1449,6 @@ private:
     //8 * 3 + 4 + 4 + 4 * 3 = 32 + 12 = 44
     HashT     _hasher;
     EqT       _eq;
-    PairT*    _pairs;
     uint32_t  _mask;
     uint32_t  _num_buckets;
     //unchar  _cache_packed[128 / sizeof(char)];//packed no thread cache line share read
@@ -1458,6 +1456,7 @@ private:
     uint32_t  _num_filled;
     uint32_t  _hash_inter;
     uint32_t  _loadlf;
+    PairT*    _pairs;
 };
 } // namespace emilib
 #if __cplusplus >= 201103L
