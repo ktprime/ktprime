@@ -1,3 +1,4 @@
+//https://www.geeksforgeeks.org/k-largestor-smallest-elements-in-an-array/
 #include <algorithm>
 #include <numeric>
 #include <queue>
@@ -9,7 +10,7 @@
 #include <climits>
 #include <random>
 
-using stype = int;
+typedef int stype;
 static int AK = 2;
 
 template<class T>
@@ -51,9 +52,7 @@ public:
 			a[p] = a[c];
 			p = c;
 			c *= 2;
-			if (a[c + 1] > a[c]) {
-				c++;
-			}
+			c += (a[c + 1] > a[c]);
 		}
 		a[p] = x;
 	}
@@ -142,7 +141,7 @@ void stl_nth(stype a[], int n, const int k)
 
 	stype maxe = a[k - 1];
 	stype sum =  std::accumulate(a, a + k, 0);
-	printf("stl nth_element  %4ld ms, a[%d] = %d, sum = %d\n", getTime() - ts, k, maxe, sum);
+	printf("stl nth_element %4ld ms, a[%d] = %d, sum = %d\n", getTime() - ts, k, maxe, sum);
 
 	memcpy(a + n * 2, a, k * sizeof(a[0]));
 	check(a, n, k);
@@ -268,7 +267,7 @@ void bucket_sort(stype a[], int n, const int k)
 
 	std::sort(a, a + j);
 	stype sum = std::accumulate(a, a + k, 0);
-	printf("bucket_sort      %4ld ms, a[%d] = %d, sum = %d\n", getTime() - ts, j, a[k - 1], sum);
+	printf("bucket_sort     %4ld ms, a[%d] = %d, sum = %d\n", getTime() - ts, j, a[k - 1], sum);
 	check(a, n, k);
 }
 
@@ -474,7 +473,7 @@ int main(int argc, char* argv[])
 	std::exponential_distribution<> p(0.1);
 
 	printf("n = %d, topk = %d, r = %d\n", n, k, AK);
-	for (int j = 0; j <= 6; j ++) {
+	for (int j = 0; j <= 7; j ++) {
 		stype s = rand(), r = 0;
 		type = j;
 		for (int i = 0; i < n; i++) {
@@ -493,6 +492,8 @@ int main(int argc, char* argv[])
 				r = e() - i * i;
 			} else if (type == 6) {
 				r = n - i; // i + 1
+			} else if (type == 7) {
+				r = 0;
 			}
 
 			if (r < 0) {
