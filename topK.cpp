@@ -63,13 +63,16 @@ public:
 		int p = 1, l = 2, r = 3;
 		a[1] = a[l] > a[r] ? a[l] : a[r];
 
-		while (v < a[l] || v < a[r]) {
-			const int lp = a[l] >= a[r] ? l : r;
-			a[p] = a[lp];
-			p = lp;
+		while (l <= size) {
+			const int c = a[l] >= a[r] ? l : r;
+			if (v >= a[c])
+				break;
 
-			l = lp * 2;
-			r = lp * 2 + 1;
+			a[p] = a[c];
+			p = c;
+
+			l = c * 2;
+			r = l + 1;
 		}
 
 		a[p] = v;
