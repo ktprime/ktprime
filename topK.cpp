@@ -20,9 +20,9 @@ public:
 	maxheap(int k)
 	{
 		size = 0;
-		a = (T*)malloc(sizeof(T) * (2*k + 2));
+		a = (T*)malloc(sizeof(T) * (2*k + 4));
 		a[0] = INT_MAX;
-		for (int i = 0; i <= k; i++) {
+		for (int i = 0; i <= k + 1; i++) {
 			a[k + i] = INT_MIN;
 		}
 	}
@@ -52,9 +52,28 @@ public:
 			a[p] = a[c];
 			p = c;
 			c *= 2;
+			//if (a[c + 1] > a[c]) c++;
 			c += (a[c + 1] > a[c]);
 		}
 		a[p] = x;
+	}
+
+	T pop_push(const T v)
+	{
+		int p = 1, l = 2, r = 3;
+		a[1] = a[l] > a[r] ? a[l] : a[r];
+
+		while (v < a[l] || v < a[r]) {
+			const int lp = a[l] >= a[r] ? l : r;
+			a[p] = a[lp];
+			p = lp;
+
+			l = lp * 2;
+			r = lp * 2 + 1;
+		}
+
+		a[p] = v;
+		return a[1];
 	}
 
 	//private:
@@ -215,9 +234,13 @@ void max_heap(stype a[], int n, const int k)
 	stype maxe = my_heap.top();
 	for (int j = k; j < n; j++) {
 		if (a[j] < maxe) {
+#ifdef POP_PSUH
 			my_heap.pop();
 			my_heap.push(a[j]);
 			maxe = my_heap.top();
+#else
+			maxe = my_heap.pop_push(a[j]);
+#endif
 		}
 	}
 
@@ -506,7 +529,7 @@ int main(int argc, char* argv[])
 		stl_nth(arr, n, k);
 
 #if __cplusplus
-		if (sizeof(stype) <= sizeof(int)) { bucket_sort(arr, n, k); }
+//		if (sizeof(stype) <= sizeof(int)) { bucket_sort(arr, n, k); }
 		max_heap(arr, n, k);
 		stl_priqueue(arr, n, k);
 		stl_makeheap(arr, n, k);
