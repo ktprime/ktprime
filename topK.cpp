@@ -64,7 +64,7 @@ public:
 		a[1] = a[l] > a[r] ? a[l] : a[r];
 
 		while (l <= size) {
-			const int c = a[l] >= a[r] ? l : r;
+			const T c = a[l] >= a[r] ? l : r;
 			if (v >= a[c])
 				break;
 
