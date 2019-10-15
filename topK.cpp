@@ -13,7 +13,6 @@
 #include <climits>
 #include <random>
 
-#define U32 1
 #if I32
 	typedef int stype;
 	const stype max_v = INT_MAX;
@@ -33,7 +32,7 @@
 static int AK = 4;
 #endif
 #ifndef AK2
-static int AK2 = 1;
+static int AK2 = 2;
 #endif
 
 typedef unsigned int uint;
@@ -294,10 +293,11 @@ void mymax_heap(stype a[], int n, const int k)
 	}
 
 	int64_t sum = std::accumulate(my_heap.a + 1, my_heap.a + k + 1, 0);
+	memcpy(a, my_heap.a + 1, k * sizeof(a[0]));
+	std::sort(a, a + k);
+
 	printf("  ktprime max_heap%5ld ms, a[%d] = %lld, sum = %lld\n", getTime() - ts, k, (int64_t)maxe, sum);
 
-	memcpy(a, my_heap.a + 1 , k * sizeof(a[0]));
-	std::sort(a, a + k);
 	check(a, n, k);
 }
 #endif
@@ -352,7 +352,7 @@ void bucket_sort(uint a[], uint n, uint k)
 		}
 	}
 
-	uint sum_size = 0, min_size = k * 3 / 2;
+	uint sum_size = 0, min_size = k < 100 ? 4 * k + 32 : k * 3 / 2;
 	for (uint i = 0; i < n; i++) {
 		if (a[i] < maxe) {
 			a[sum_size++] = a[i];
@@ -398,12 +398,15 @@ static int find_kth(stype a[], const int m, stype b[], const int n, const int kt
 	}
 
 	assert(i + j == kth);
-//	int s = j >= n || (i < m && a[i] < b[j]) ? i++ : j++;
-	return j >= n ? i : i - 1;
 
-//	if ((m + n) & 1)
-//		return s;
-//	return j >= n || i < m && a[i] < b[j] ? i : n - j;
+
+//	while (a[i - 1] > b[j]) i--, j++;
+//	while (a[i + 1] < b[j]) i ++, j--;
+
+	return (j >= n || i < m && a[i] <= b[j]) ? i : i - 1;
+
+	//int s = j >= n || i < m && a[i] < b[j] ? a[i++] : b[j++];
+	//return m+n & 1 ? s : (j >= n || i < m && a[i] < b[j] ? s+a[i] : s+b[j]) * 0.5;
 }
 
 static void merge_array(stype a[], stype b[], const int n, const int m)
@@ -419,9 +422,9 @@ static void merge_array(stype a[], stype b[], const int n, const int m)
 		return;
 	}
 
-	int i = find_kth(a, n, b, m, n - 1);
-	int j = n - 2 - i;
 	int t = n - 1;
+	int i = find_kth(a, n, b, m, t);
+	int j = t - 1 - i;
 
 	//merge a[0, i]/b[0, j] into a[0, n - 1]
 	while (j >= 0) {
@@ -436,7 +439,7 @@ void merge_sort(stype a[], int n, const int k)
 	clock_t ts = getTime();
 
 	std::sort(a, a + k);
-	//a[-1] = a[-2] = ~max_v;
+	a[-1] = ~max_v;
 
 	stype* ax_a = a + k;
 	stype maxe = a[k - 1];
@@ -582,6 +585,7 @@ int main(int argc, char* argv[])
 
 		if (c == 'k') {
 			if (r > 0) { k = r; }
+			else k = rand() % 100000;
 		} else if (c == 'n') {
 			if (r >= -100 && r < 0) { n = maxn / (-r); }
 			else if (r <= 100 && r > 0) { n = maxn * r; }
