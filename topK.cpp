@@ -28,12 +28,8 @@
 	stype max_v = INT64_MAX;
 #endif
 
-#ifndef AK
 static int AK = 4;
-#endif
-#ifndef AK2
-static int AK2 = 2;
-#endif
+static int AK2 = 1;
 
 typedef unsigned int uint;
 
@@ -45,7 +41,7 @@ public:
 	{
 		size = 0;
 
-#if POP_PUSH || CHECK
+#if POP_PUSH || NC
 		a = (T*)malloc(sizeof(T) * (2*k + 3));
 		for (int i = 0; i <= k + 1; i++)
 			a[k + i] = ~max_v;
@@ -89,9 +85,9 @@ public:
 
 	T pop_push(const T v)
 	{
-		size_t p = 1, l = 2, r = 3;
+		uint p = 1, l = 2, r = 3;
 
-#if !CHECK
+#if !NC
 		while (l <= size) {
 #else
 		while (true) {
@@ -100,10 +96,8 @@ public:
 			if (v >= a[c])
 				break;
 
-			a[p] = a[c], p = c;
-
-			l = c * 2;
-			r = l + 1;
+			l = c * 2; r = l + 1;
+			a[p] = a[c]; p = c;
 		}
 
 		a[p] = v;
@@ -146,7 +140,7 @@ void check(const stype a[], int n, int k)
 
 	for (int i = 0; i < k; i++) {
 		if (a[i] != a[n * 2 + i]) {
-			printf("%d %lld != %lld\n", i, (int64_t)a[i], (int64_t)a[n * 2 + i]);
+			printf("%d %ld != %ld\n", i, (int64_t)a[i], (int64_t)a[n * 2 + i]);
 			break;
 		}
 	}
@@ -158,7 +152,7 @@ void check(const stype a[], int n, int k)
 	#include <windows.h>
 #endif
 
-static clock_t getTime()
+static clock_t NowMs()
 {
 #if _WIN32
 	FILETIME ptime[4] = {0};
@@ -183,17 +177,17 @@ static clock_t getTime()
 void stl_sort(stype a[], int n, const int k)
 {
 	reset(a, n, k);
-	clock_t ts = getTime();
+	clock_t ts = NowMs();
 
 	std::sort(a, a + n);
-	printf("  stl sort       %5ld ms, a[%d] = %lld\n\n", getTime() - ts, k, (int64_t)a[k - 1]);
+	printf("  stl sort       %5ld ms, a[%d] = %ld\n\n", NowMs() - ts, k, (int64_t)a[k - 1]);
 }
 #endif
 
 void stl_nth(stype a[], int n, const int k)
 {
 	reset(a, n, n);
-	clock_t ts = getTime();
+	clock_t ts = NowMs();
 
 #if 1
 	std::nth_element(a, a + k, a + n);
@@ -204,7 +198,7 @@ void stl_nth(stype a[], int n, const int k)
 
 	stype maxe = a[k - 1];
 	int64_t sum = std::accumulate(a, a + k, 0);
-	printf("  stl nth_element %5ld ms, a[%d] = %lld, sum = %lld\n", getTime() - ts, k, (int64_t)maxe, sum);
+	printf("  stl nth_element %5ld ms, a[%d] = %ld, sum = %ld\n", NowMs() - ts, k, (int64_t)maxe, sum);
 
 	memcpy(a + n * 2, a, k * sizeof(a[0]));
 	check(a, n, k);
@@ -213,7 +207,7 @@ void stl_nth(stype a[], int n, const int k)
 void stl_priqueue(stype a[], int n, const int k)
 {
 //	reset(a, n, k);
-	clock_t ts = getTime();
+	clock_t ts = NowMs();
 
 	std::priority_queue<stype> pri_queue;
 	for (int m = 0; m < k; m++) {
@@ -229,23 +223,23 @@ void stl_priqueue(stype a[], int n, const int k)
 		}
 	}
 
-	ts = getTime() - ts;
+	ts = NowMs() - ts;
 	for (int j = 0; j < k; j ++) {
 		a[j] = pri_queue.top();
 		pri_queue.pop();
 	}
 
 	int64_t sum = std::accumulate(a, a + k, 0);
-	printf("  stl pri_queue   %5ld ms, a[%d] = %lld, sum = %lld\n", ts, k, (int64_t)maxe, sum);
-
 	std::sort(a, a + k);
+	printf("  stl pri_queue   %5ld ms, a[%d] = %ld, sum = %ld\n", ts, k, (int64_t)maxe, sum);
+
 	check(a, n, k);
 }
 
 void stl_makeheap(stype a[], int n, const int k)
 {
 	reset(a, n, k);
-	clock_t ts = getTime();
+	clock_t ts = NowMs();
 
 	std::make_heap(a, a + k);
 
@@ -260,15 +254,16 @@ void stl_makeheap(stype a[], int n, const int k)
 	}
 
 	int64_t sum = std::accumulate(a, a + k, 0);
-	printf("  stl make_heap   %5ld ms, a[%d] = %lld, sum = %lld\n", getTime() - ts, k, (int64_t)maxe, sum);
-
 	std::sort(a, a + k);
+
+	printf("  stl make_heap   %5ld ms, a[%d] = %ld, sum = %ld\n", NowMs() - ts, k, (int64_t)maxe, sum);
+
 	check(a, n, k);
 }
 
 void mymax_heap(stype a[], int n, const int k)
 {
-	clock_t ts = getTime();
+	clock_t ts = NowMs();
 
 	max_heap<stype> my_heap(k);
 #if 0
@@ -283,7 +278,7 @@ void mymax_heap(stype a[], int n, const int k)
 	stype maxe = my_heap.top();
 	for (int i = n + k; i < n * 2; i++) {
 		if (a[i] < maxe) {
-#ifdef POP_PUSH
+#if POP_PUSH
 			my_heap.pop(); my_heap.push(a[i]);
 			maxe = my_heap.top();
 #else
@@ -296,7 +291,7 @@ void mymax_heap(stype a[], int n, const int k)
 	memcpy(a, my_heap.a + 1, k * sizeof(a[0]));
 	std::sort(a, a + k);
 
-	printf("  ktprime max_heap%5ld ms, a[%d] = %lld, sum = %lld\n", getTime() - ts, k, (int64_t)maxe, sum);
+	printf("  ktprime max_heap%5ld ms, a[%d] = %ld, sum = %ld\n", NowMs() - ts, k, (int64_t)maxe, sum);
 
 	check(a, n, k);
 }
@@ -306,28 +301,27 @@ void bucket_sort(uint a[], uint n, uint k)
 {
 	reset((stype*)a, n, n);
 
-	clock_t ts = getTime();
+	clock_t ts = NowMs();
 
 #if I32
 	//bug for zero
 	for (int i = 0; i < n; i++) a[i] += INT_MAX;
 #endif
 
-	constexpr uint segbits = 16; //16 - 22 why
+	constexpr uint segbits = 20; //16 - 22 why
 	constexpr uint segsize = 1 << (32 - segbits);
-	const uint min_bucket = k < n / 16 ? segsize >> (6 + 1) : 0;
-//	if (k > min_bucket * segsize)
-//		min_bucket = k / segsize * 4;
+	constexpr uint min_bucket = segsize >> (6 + 1);
 
-	uint bucket[segsize] = { 0 };
+	//set bucket fill in L1 cache
+	uint bucket[segsize] = { 0 }; //
 	uint m = 0;
-	for (uint finds = k; m < n / 4; m++) {
+	for (uint finds = k * 3; m < n; m += 1) {
 		const uint bindex = a[m] >> segbits;
 		bucket[bindex] ++;
-#ifndef DF
+#if DF
 		////try find a small range
 		if (bindex < min_bucket && finds -- == 0) {
-#if DP
+#ifndef DP
 			printf("ration = %d%%, m = %u, min_bucket = %u\n", m * 100 / n, m, min_bucket);
 #endif
 			break;
@@ -335,6 +329,7 @@ void bucket_sort(uint a[], uint n, uint k)
 #endif
 	}
 
+#if 0
 	if (m >= n / 4) {
 		//do a full find for some bad case
 		for (; m < n; m++) {
@@ -342,24 +337,26 @@ void bucket_sort(uint a[], uint n, uint k)
 			bucket[bindex] ++;
 		}
 	}
+#endif
 
-	uint maxe = 1 << segbits;
+	uint maxe = UINT_MAX;
 	for (uint i = 0, sums = 0; i < segsize; i++) {
 		sums += bucket[i];
 		if (sums >= k) {
-			maxe = ((i + 1) << segbits) + 0;
+			maxe = ((i + 1) << segbits);
 			break;
 		}
 	}
 
 	uint sum_size = 0, min_size = k < 100 ? 4 * k + 32 : k * 3 / 2;
 	for (uint i = 0; i < n; i++) {
-		if (a[i] < maxe) {
-			a[sum_size++] = a[i];
-			if (sum_size > min_size) {
-				std::sort(a, a + sum_size);
-				maxe = a[(sum_size = k) - 1];
-			}
+		if (a[i] >= maxe)
+			continue ;
+
+		a[sum_size++] = a[i];
+		if (sum_size > min_size) {
+			std::sort(a, a + sum_size);
+			maxe = a[(sum_size = k) - 1];
 		}
 	}
 
@@ -371,7 +368,7 @@ void bucket_sort(uint a[], uint n, uint k)
 
 	int64_t sum = std::accumulate(a, a + k, 0);
 
-	printf("  bucket_sort     %5ld ms, a[%d] = %d, sum = %lld\n", getTime() - ts, k, (int)a[k - 1], sum);
+	printf("  bucket_sort     %5ld ms, a[%d] = %d, sum = %ld\n", NowMs() - ts, k, (int)a[k - 1], sum);
 	check((stype*)a, n, k);
 }
 
@@ -399,14 +396,10 @@ static int find_kth(stype a[], const int m, stype b[], const int n, const int kt
 
 	assert(i + j == kth);
 
-
 //	while (a[i - 1] > b[j]) i--, j++;
 //	while (a[i + 1] < b[j]) i ++, j--;
 
-	return (j >= n || i < m && a[i] <= b[j]) ? i : i - 1;
-
-	//int s = j >= n || i < m && a[i] < b[j] ? a[i++] : b[j++];
-	//return m+n & 1 ? s : (j >= n || i < m && a[i] < b[j] ? s+a[i] : s+b[j]) * 0.5;
+	return (j >= n || (i < m && a[i] <= b[j])) ? i : i - 1;
 }
 
 static void merge_array(stype a[], stype b[], const int n, const int m)
@@ -427,6 +420,7 @@ static void merge_array(stype a[], stype b[], const int n, const int m)
 	int j = t - 1 - i;
 
 	//merge a[0, i]/b[0, j] into a[0, n - 1]
+	//TODO: check i overflow
 	while (j >= 0) {
 		a[t --] = a[i] <= b[j] ? b[j --] : a[i --];
 	}
@@ -436,91 +430,97 @@ const int l2_cpu_size = 1024 * 1024, l1_cpu_size = 32 * 1024;
 void merge_sort(stype a[], int n, const int k)
 {
 	reset(a, n, k);
-	clock_t ts = getTime();
+	clock_t ts = NowMs();
 
 	std::sort(a, a + k);
 	a[-1] = ~max_v;
 
 	stype* ax_a = a + k;
 	stype maxe = a[k - 1];
-	int auxn = k / AK2, axn = 0;
-	if (auxn > l2_cpu_size / sizeof(a[0]))
-		auxn = l2_cpu_size / sizeof(a[0]);
-	if (auxn < 100)
-		auxn = k * 4 + 100;
-	auxn += auxn & 1;
+	int bestn = k / AK2, ax_n = 0;
+	if (bestn > l2_cpu_size / sizeof(a[0]))
+		bestn = l2_cpu_size / sizeof(a[0]);
+	if (bestn < 100)
+		bestn = k * 4 + 101;
 
 	for (int i = n + k; i < n + n; i++) {
 		if (a[i] >= maxe) {
 			continue ;
 		}
 
-		ax_a[axn++] = a[i];
-		if (axn == auxn) {
-			merge_array(a, ax_a, k, axn);
+		ax_a[ax_n++] = a[i];
+		if (ax_n == bestn) {
+			merge_array(a, ax_a, k, ax_n);
 			maxe = a[k - 1];
-			axn = 0;
+			ax_n = 0;
 		}
 	}
 
-	std::sort(a, ax_a + axn);
-//	std::sort(ax_a, ax_a + axn); std::inplace_merge(a, ax_a, ax_a + axn);
-//	std::partial_sort(a, ax_a, ax_a + axn);
-//	merge_array(a, ax_a, k, axn);
+//	std::sort(a, ax_a + ax_n);
+//	std::sort(ax_a, ax_a + ax_n); std::inplace_merge(a, ax_a, ax_a + ax_n);
+//	std::partial_sort(a, ax_a, ax_a + ax_n);
+	merge_array(a, ax_a, k, ax_n);
 
 	maxe = a[k - 1];
 	int64_t sum = std::accumulate(a, a + k, 0);
-	printf("  merge_sort      %5ld ms, a[%d] = %lld, sum = %lld\n", getTime() - ts, k, (int64_t)maxe, sum);
+	printf("  merge_sort      %5ld ms, a[%d] = %ld, sum = %ld\n", NowMs() - ts, k, (int64_t)maxe, sum);
 	check(a, n, k);
 }
 
 void merge_inplace(stype a[], int n, const int k)
 {
 	reset(a, n, k);
-	clock_t ts = getTime();
+	clock_t ts = NowMs();
 
 	std::sort(a, a + k);
 	stype* ax_a = a + k;
 	stype maxe = a[k - 1];
-	int auxn = k / AK, axn = 0;
+	int bestn = k / AK, ax_n = 0;
 
-	if (auxn > l2_cpu_size / sizeof(a[0]))
-		auxn = l2_cpu_size / sizeof(a[0]);
-	if (auxn < 100)
-		auxn = k * 4 + 100;
+	if (bestn > l2_cpu_size / sizeof(a[0]))
+		bestn = l2_cpu_size / sizeof(a[0]);
+	if (bestn < 100)
+		bestn = k * 4 + 100;
 
 	for (int i = n + k; i < n * 2; i++) {
 		if (a[i] >= maxe) {
 			continue ;
 		}
-
-		ax_a[axn++] = a[i];
-		if (axn == auxn) {
-			//if (std::is_sorted(ax_a, ax_a + axn, std::greater<stype>()))
-			//std::reverse(ax_a, axn);
-			//if (!std::is_sorted(ax_a, ax_a + axn))
-			std::sort(ax_a, ax_a + axn);
-			if (a[0] >= ax_a[axn - 1]) {
-				if (axn >= k)
-					memcpy(a, ax_a + axn - k, sizeof(a[0]) * k);
-				else {
-					memmove(a + axn, a, sizeof(a[0]) * (k - axn));
-					memcpy(a, ax_a, sizeof(a[0]) * axn);
-				}
-			} else {
-				std::inplace_merge(a, ax_a, ax_a + axn);
-			}
-			maxe = a[k - 1];
-			axn = 0;
+		ax_a[ax_n++] = a[i];
+		if (ax_n < bestn) {
+			continue;
 		}
+#if 0
+		if (std::is_sorted(ax_a, ax_a + ax_n, std::greater<stype>()))
+			std::reverse(ax_a, ax_a + ax_n);
+		else if (!std::is_sorted(ax_a, ax_a + ax_n))
+#endif
+			std::sort(ax_a, ax_a + ax_n);
+
+		if (a[0] >= ax_a[ax_n - 1]) {
+			if (ax_n >= k)
+				memcpy(a, a + ax_n, sizeof(a[0]) * k);
+			else {
+				memmove(a + ax_n, a, sizeof(a[0]) * (k - ax_n));
+				memcpy(a, ax_a, sizeof(a[0]) * ax_n);
+				//swap to a big range
+				if (k > 100)
+					bestn = k;
+			}
+		} else {
+			//TODO optimize inplace_merge without merge data after ax_a
+			std::inplace_merge(a, ax_a, ax_a + ax_n);
+		}
+		maxe = a[k - 1];
+		ax_n = 0;
 	}
 
-	std::sort(a, ax_a + axn);
-//	std::sort(ax_a, ax_a + axn); std::inplace_merge(a, ax_a, ax_a + axn);
+	std::sort(a, ax_a + ax_n);
+//	std::sort(ax_a, ax_a + ax_n); std::inplace_merge(a, ax_a, ax_a + ax_n);
 
 	maxe = a[k - 1];
 	int64_t sum = std::accumulate(a, a + k, 0);
-	printf("  merge_inplace   %5ld ms, a[%d] = %lld, sum = %lld\n", getTime() - ts, k, (int64_t)maxe, sum);
+	printf("  merge_inplace   %5ld ms, a[%d] = %ld, sum = %ld\n", NowMs() - ts, k, (int64_t)maxe, sum);
 	check(a, n, k);
 }
 
@@ -529,7 +529,7 @@ static void printInfo()
 	const char* sepator =
 		"------------------------------------------------------------------------------------------------------------";
 	puts(sepator);
-	//	puts("Copyright (C) by 2018-2020 Huang Yuanbing 22738078@qq.com/bailuzhou@163.com\n");
+	//	puts("Copyright (C) by 2018-2020 Huang Yuanbing bailuzhou at 163.com\n");
 
 	char cbuff[256];
 	char* info = cbuff;
@@ -571,11 +571,12 @@ static void printInfo()
 int main(int argc, char* argv[])
 {
 	srand(time(nullptr));
-	const int maxn = 10000*10000;
-	printf("\ncmd:topk -k(<=%d) -n(<=%d) -r(1-16) m(1-16) [type = 0-1 rand, 2-3 wavy, 4-5 rand, 6 decrease, 7 incre]\n\n", 1000000, maxn);
+	const int max_n = 1024*1024*32;
+
+	printf("\ncmd:topk -k(<=%d) -n(<=%d) -r(1-16) m(1-16) s(shuffle) [type = 0-1 rand, 2-3 wavy, 4-5 rand, 6 decrease, 7 incre]\n\n", 1000000, max_n);
 	printInfo();
 
-	int n = maxn, k = maxn / 1000, type = 0;
+	int n = max_n, k = max_n / 100, type = 0, shuff = 0;
 	for (int i = 1; i < argc; i++)
 	{
 		char c = argv[i][0];
@@ -585,15 +586,17 @@ int main(int argc, char* argv[])
 
 		if (c == 'k') {
 			if (r > 0) { k = r; }
-			else k = rand() % 100000;
+			else if (r == 0) k = rand() % 100000;
 		} else if (c == 'n') {
-			if (r >= -100 && r < 0) { n = maxn / (-r); }
-			else if (r <= 100 && r > 0) { n = maxn * r; }
+			if (r >= -100 && r < 0) { n = max_n / (-r); }
+			else if (r <= 100 && r > 0) { n = max_n * r; }
 			else if (r > 0) { n = r; }
 		} else if (c == 'r' && r > 0) {
 			AK = r;
 		} else if (c == 'm' && r > 0) {
 			AK2 = r;
+		} else if (c == 's') {
+			shuff = r;
 		}
 	}
 
@@ -605,38 +608,42 @@ int main(int argc, char* argv[])
 	stype* buff = arr + n;
 	buff[n] = (stype)(-1);
 
-	std::default_random_engine e(time(nullptr));
+	std::random_device rd;
+	std::default_random_engine e(rd());
 	std::mt19937_64 rng; rng.seed(time(nullptr));
+
 	std::uniform_int_distribution<int64_t> u(0, INT64_MAX / 2);
 	std::normal_distribution<> d(1 << (20 + rand() % 10), 1 << 16);
 //	std::exponential_distribution<> p(0.1);
 
-	printf("n = %d, topk = %d, r1 = %d, r2 = %d\n", n, k, AK, AK2);
+	printf("n = %d, topk = %d, r1 = %d, r2 = %d, shuff = %d\n", n, k, AK, AK2, shuff);
 	for (int j = 0; j <= 7; j ++) {
 		int64_t r = 0;
 		type = j;
 		for (size_t i = 1; i <= (size_t)n; i++) {
 			if (type == 0) {
-				r = e();
-			} else if (type == 1) {
-				r = u(e) + (1 << 20);
+				r = rd() + e();
 			} else if (type == 2) {
-				r = d(rng);
+				r = rng();
+			} else if (type == 1) {
+				r = u(rd) + (1 << 20);
 			} else if (type == 3) {
-				r = rng() * i - i % (1 << 16);
+				r = d(rng);
 			} else if (type == 4) {
-				r = i * i + (512 - e() % 1024) * (i % 8);
+				r = i * i + (512 - rng() % 1024) * (i % 8);
 			} else if (type == 5) {
-				r = e() - (int)(i * i) % 1024;
+				r = rng() - (int)(i * i) % 1024;
 			} else if (type == 6) {
 				r = n - i - rng() % 4; // i + 1
 			} else if (type == 7) {
-				r = i + e() % 256;
+				r = i + rng() % 256;
 			}
 			buff[i] = (stype)r + 1;
 		}
 
-//		std::shuffle(buff, buff + n);
+		if (shuff) {
+			std::shuffle(buff + 1, buff + n, rng);
+		}
 
 		printf("type = %d\n", type);
 		stl_nth(arr, n, k);
