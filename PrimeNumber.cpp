@@ -345,7 +345,7 @@ static uchar Lsb[1 << 16];
 #if POPCNT == 0
 //number of bits 1 binary representation table in Range[0-2^16)
 static uchar WordNumBit1[1 << 16];
-#elif __GNUC__
+#elif __GNUC__ || __clang__
 # include <popcntintrin.h>
 #endif
 
@@ -628,7 +628,7 @@ inline static uint bitScanForward(const stype n)
 	#else
 	_BitScanForward(&index, n);
 	#endif
-#elif __GNUC__
+#elif __GNUC__ || __clang__
 	#if X86_64
 //	uint index = __builtin_ffsll(n) - 1;
 	uint index = __builtin_ctzll(n);
@@ -638,7 +638,7 @@ inline static uint bitScanForward(const stype n)
 #elif ASM_X86
 	stype index;
 	#if X86_64
-	#if __GNUC__ || __TINYC__
+	#if __GNUC__ || __TINYC__ || __clang__
 	__asm__ ("bsfq %1, %0\n" : "=r" (index) : "rm" (n) : "cc");
 	#else
 	__asm
@@ -648,7 +648,7 @@ inline static uint bitScanForward(const stype n)
 	}
 	#endif
 	#else
-	#if __GNUC__ || __TINYC__
+	#if __GNUC__ || __TINYC__ || __clang__
 	__asm__ ("bsfl %1, %0\n" : "=r" (index) : "rm" (n) : "cc");
 	#else
 	__asm
@@ -669,7 +669,7 @@ inline static uint fastllDiv(const uint64 n, uint p)
 {
 #if ASM_X86 == 0
 	p = (uint)(n % p);
-#elif __GNUC__ || __TINYC__
+#elif __GNUC__ || __TINYC__ || __clang__
 	const uint loww = (uint)n, higw = (uint)(n >> 32);
 	__asm__ ( "divl %%ecx\n" : "=d" (p) : "d"(higw), "a"(loww), "c"(p));
 #else
@@ -726,7 +726,7 @@ static uint countBit0sArray(uint64 bitarray[], const uint bytes)
 	while (loops -- > 0) {
 		const uint64 qw = *bitarray++;
 #if POPCNT
-#if __GNUC__
+#if __GNUC__ || __clang__
 		bit2s += __builtin_popcountll(qw);
 #else
 		bit2s += _mm_popcnt_u64(qw);
@@ -1424,9 +1424,9 @@ static int segmentedSieve(uchar bitarray[], const uint64 start, const uint sieve
 
 	//or last l1_size seg with the first seg for overflow
 	const uint copy_from = Config.SieveSize;
-	for (uint i = 0; i < l1_maxp; i += sizeof(uint64)) {
-		uint64& c = *(uint64*)(bitarray + i + copy_from);
-		*(uint64*)(bitarray + i) |= c; c = 0;
+	for (uint i = 0; i < l1_maxp; i += sizeof(uint)) {
+		uint& c = *(uint*)(bitarray + i + copy_from);
+		*(uint*)(bitarray + i) |= c; c = 0;
 	}
 
 	for (uint offset = 0, l2_size = Threshold.L2Size * WHEEL30; offset < sieve_size; offset += l2_size) {
@@ -1461,9 +1461,9 @@ static int segmentedSieve2(uchar bitarray[], const uint start, const uint sieve_
 #if FSL1
 	const uint copy_from = L2_DCACHE_SIZE << 10;
 	if (sieve_size <= copy_from * WHEEL30 && bcopy) {
-		for (uint i = 0; i < l1_maxp; i += sizeof(uint64)) {
-			uint64* pc = (uint64*)(bitarray + i + copy_from);
-			*(uint64*)(bitarray + i) |= *pc; *pc = 0;
+		for (uint i = 0; i < l1_maxp; i += sizeof(uint)) {
+			uint* pc = (uint*)(bitarray + i + copy_from);
+			*(uint*)(bitarray + i) |= *pc; *pc = 0;
 		}
 	}
 	eratSieveSmall(bitarray, start, sieve_size, l1_maxp);
@@ -1751,7 +1751,7 @@ static uint adjustConfig(uint sieve_size, const uint sqrtp)
 	if (sqrtp > medium) {
 		const int l2segs = sieve_size / (Threshold.L2Size);
 		assert(l2segs > 0 && sieve_size >= (128 << 10));
-		if (Config.Bsegs * 2 < Config.Msegs) 
+		if (Config.Bsegs * 2 < Config.Msegs)
 			Config.Bsegs = 1 << ilog(Config.Msegs, 2);
 		if (Config.Bsegs > l2segs) {
 			Config.Bsegs = l2segs;
@@ -1845,7 +1845,7 @@ static void cpuidInfo(int regs[4], int id, int ext)
 {
 #if _MSC_VER >= 1600 //2010
 	__cpuidex(regs, id, ext);
-#elif __GNUC__ || __TINYC__
+#elif __GNUC__ || __TINYC__ || __clang__
 	__asm__ (
 		"cpuid\n"
 		: "=a"(regs[0]), "=b"(regs[1]), "=c"(regs[2]), "=d"(regs[3])
@@ -1900,7 +1900,7 @@ static int getIntelCache(int* l3size, int* l1size)
 		case 0x0D: SETL1(16);
 		case 0x0E: SETL1(24);
 		case 0x10: SETL1(16);
-	    //case 0x11: SETL1(16);
+		//case 0x11: SETL1(16);
 		//case 0x15: SETL1(16);
 		case 0x2C: SETL1(32);
 		case 0x30: SETL1(32);
