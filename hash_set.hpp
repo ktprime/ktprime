@@ -1,6 +1,6 @@
 
 // emhash6::HashSet for C++11
-// version 1.2.0
+// version 1.2.1
 // https://github.com/ktprime/ktprime/blob/master/hash_set.hpp
 //
 // Licensed under the MIT License <http://opensource.org/licenses/MIT>.
@@ -53,7 +53,8 @@
 #ifdef  GET_KEY
     #undef  NEXT_BUCKET
     #undef  GET_KEY
-    #undef NEW_KEY
+    #undef  NEW_KEY
+    #undef  hash_bucket
 #endif
 
 // likely/unlikely
@@ -72,7 +73,7 @@
 #endif
 
 #define GET_KEY(p,n)     p[n].first
-#define NEXT_BUCKET(s,n) s[n].second
+#define NEXT_BUCKET(p,n) p[n].second
 
 
 #define MASK_BIT         32
@@ -85,7 +86,8 @@
     #include <intrin.h>
 #endif
 
-namespace emhash {
+
+namespace emhash9 {
 
 constexpr uint32_t INACTIVE = 0xFFFFFFFF;
 
@@ -143,14 +145,14 @@ public:
 
         iterator& operator++()
         {
-            this->goto_next_element();
+            goto_next_element();
             return *this;
         }
 
         iterator operator++(int)
         {
             auto old_index = _bucket;
-            this->goto_next_element();
+            goto_next_element();
             return {_set, old_index};
         }
 
@@ -166,12 +168,12 @@ public:
 
         bool operator==(const iterator& rhs) const
         {
-            return this->_bucket == rhs._bucket;
+            return _bucket == rhs._bucket;
         }
 
         bool operator!=(const iterator& rhs) const
         {
-            return this->_bucket != rhs._bucket;
+            return _bucket != rhs._bucket;
         }
 
     private:
@@ -201,14 +203,14 @@ public:
 
         const_iterator& operator++()
         {
-            this->goto_next_element();
+            goto_next_element();
             return *this;
         }
 
         const_iterator operator++(int)
         {
             auto old_index = _bucket;
-            this->goto_next_element();
+            goto_next_element();
             return {_set, old_index};
         }
 
@@ -224,12 +226,12 @@ public:
 
         bool operator==(const const_iterator& rhs) const
         {
-            return this->_bucket == rhs._bucket;
+            return _bucket == rhs._bucket;
         }
 
         bool operator!=(const const_iterator& rhs) const
         {
-            return this->_bucket != rhs._bucket;
+            return _bucket != rhs._bucket;
         }
 
     private:
@@ -255,7 +257,7 @@ public:
         _pairs = nullptr;
         _bitmask = nullptr;
         _num_filled = 0;
-        max_load_factor(0.90f);
+        max_load_factor(0.95f);
         reserve(bucket);
     }
 
@@ -269,6 +271,7 @@ public:
         _pairs = (PairT*)malloc((2 + other._num_buckets) * sizeof(PairT) + other._num_buckets / 8 + sizeof(uint64_t));
         clone(other);
     }
+
 
     HashSet(HashSet&& other)
     {
@@ -302,7 +305,7 @@ public:
 
     HashSet& operator=(HashSet&& other)
     {
-        this->swap(other);
+        swap(other);
         return *this;
     }
 
@@ -1033,21 +1036,21 @@ private:
         if (NEXT_BUCKET(_pairs, bucket1) == INACTIVE)
             return bucket1;
 
-        const auto bucket2 = bucket_from + 2;
-        if (NEXT_BUCKET(_pairs, bucket2) == INACTIVE)
-            return bucket2;
+//        const auto bucket2 = bucket_from + 2;
+//        if (NEXT_BUCKET(_pairs, bucket2) == INACTIVE)
+//            return bucket2;
 
         const auto boset = bucket_from % 8;
-        const uint64_t bmask = *(uint64_t*)((uint8_t*)_bitmask + bucket_from / 8) >> boset;
+        const uint64_t bmask = *(uint64_t*)((uint8_t*)_bitmask + bucket_from / 8);
         if (bmask != 0) {
-            return bucket_from + CTZ64(bmask);
+            return bucket_from + CTZ64(bmask) - boset;
         }
 
-        const auto qmask = (64 + _num_buckets - 1) / 64 - 1;
-        for (uint32_t last = 2, next2 = (bucket_from + _num_filled) & qmask; ; last ++, next2 = (next2 + last) & qmask) {
-            const auto bmask2 = *((uint64_t*)_bitmask + next2);
+        const auto qmask = (_num_buckets + 64 - 1) / 64 - 1;
+        for (uint32_t last = 2, step = (bucket_from + _num_filled) & qmask; ; step = (step + last ++) & qmask) {
+            const auto bmask2 = *((uint64_t*)_bitmask + step);
             if (bmask2 != 0) {
-                return next2 * 64 + CTZ64(bmask2);
+                return step * 64 + CTZ64(bmask2);
             }
         }
 
