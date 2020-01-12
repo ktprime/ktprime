@@ -28,58 +28,81 @@
 	stype max_v = INT64_MAX;
 #endif
 
-static int AK = 4;
-static int AK2 = 4;
+// likely/unlikely
+#if (__GNUC__ >= 4 || __clang__)
+#    define EHASH_LIKELY(condition)   __builtin_expect(condition, 1)
+#    define EHASH_UNLIKELY(condition) __builtin_expect(condition, 0)
+#else
+#    define EHASH_LIKELY(condition)   condition
+#    define EHASH_UNLIKELY(condition) condition
+#endif
+
+static int AKI = 4;
+static int AK2 = 8;
 
 typedef unsigned int uint;
 
-template<class T>
+template<typename T>
 class max_heap
 {
 public:
-	max_heap(int k, T* out)
+	max_heap(int size)
 	{
 		_size = 0;
-		_a = out;
+		_a = new T[size * 2 + 2];
 
-#if POP_PUSH || NC
-		for (int i = 0; i <= k + 1; i++)
-			_a[k + i] = ~max_v;
-#else
-		_a[k + 1] = _a[k + 2] = ~max_v;
+#ifndef NC
+		for (int i = 3; i <= size + 2; i++)
+			_a[size + i] = ~max_v;
 #endif
+		_a[size + 1] = _a[size + 2] = ~max_v;
 		_a[0] = max_v;
 	}
 
-//	~max_heap() { free(a); }
-	T top() const { return _a[1]; }
+	void make_heap(const T* a, int size)
+	{
+#if 0
+		memcpy(_a + 1, a, sizeof(a[0]) * size);
+		_size = size;
+		std::make_heap(_a + 1, _a + _size + 1);
+#else
+		for (int i = 0; i < size; i++)
+			push(a[i]);
+#endif
+	}
 
-	void push(const T x)
+	~max_heap()   { delete []_a; }
+	T top() const { return _a[1];}
+
+	void push(const T v)
 	{
 		uint c = ++_size;
 		uint p = _size / 2;
 
-		while (x > _a[p] /*&& p >= 1*/) {
+		while (v > _a[p] /*&& p >= 1*/) {
 			_a[c] = _a[p];
 			c = p;
 			p /= 2;
 		}
-		_a[c] = x;
+		_a[c] = v;
 	}
 
 	void pop()
 	{
-		const T x = _a[_size--];
-		uint p = 1, c = 1;
+		const T v = _a[_size--];
+		uint p = 1, c = _a[3] > _a[2] ? 3 : 2;
 
-		while (x < _a[c]/* && c <= _size &&*/) {
+		while (v < _a[c]) {
 			_a[p] = _a[c];
 			p = c;
 			c *= 2;
-			//if (_a[c + 1] > _a[c]) c++;
-			c += (_a[c + 1] > _a[c]);
+#ifdef NC
+			if (c > _size)
+				break;
+#endif
+			c += _a[c + 1] > _a[c];
 		}
-		_a[p] = x;
+		_a[p] = v;
 	}
 
 	//https://en.wikipedia.org/wiki/Heapsort
@@ -88,12 +111,8 @@ public:
 	{
 		uint p = 1, l = 2, r = 3;
 
-#if !NC
-		while (l <= _size) {
-#else
 		while (true) {
-#endif
-			const T c = _a[l] >= _a[r] ? l : r;
+			const uint c = _a[l] >= _a[r] ? l : r;
 			if (v >= _a[c])
 				break;
 
@@ -101,6 +120,10 @@ public:
 			p = c;
 			l = c * 2 + 0; 
 			r = c * 2 + 1;
+#ifdef NC
+			if (l > _size)
+				break;
+#endif
 		}
 
 		_a[p] = v;
@@ -307,16 +330,11 @@ void stl_makeheap(stype a[], const int n, const int k)
 void ktprime_heap(stype a[], const int n, const int k)
 {
 	clock_t ts = NowMs();
-	max_heap<stype> my_heap(k, a);
+	max_heap<stype> my_heap(k);
 
-#if 0
-	memcpy(my_heap.a + 1, a + n, k * sizeof(a[0]));
-	std::sort(my_heap.a + 1, my_heap.a + 1 + k, std::greater<stype>());
-	my_heap.size = k;
-#else
-	for (int i = 0; i < k; i++)
-		my_heap.push(a[n + i]);
-#endif
+	my_heap.make_heap(a + n, k);
+//	for (int i = 0; i < k; i++)
+//		my_heap.push(a[n + i]);
 
 	stype maxe = my_heap.top();
 	for (int i = n + k; i < n * 2; i++) {
@@ -436,7 +454,7 @@ static int find_kth(stype a[], const int m, stype b[], const int n, const int kt
 		k -= p + 1;
 	}
 
-	assert(i + j == kth);
+//	assert(i + j == kth);
 
 //	while (a[i - 1] > b[j]) i--, j++;
 //	while (a[i + 1] < b[j]) i ++, j--;
@@ -517,7 +535,7 @@ void merge_inplace(stype a[], const int n, const int k)
 	std::sort(a, a + k);
 	stype* ax_a = a + k;
 	stype maxe = a[k - 1];
-	int bestn = k / AK, ax_n = 0;
+	int bestn = k / AKI, ax_n = 0;
 
 	if (bestn > l2_cpu_size / sizeof(a[0]))
 		bestn = l2_cpu_size / sizeof(a[0]);
@@ -613,23 +631,46 @@ static void printInfo()
 void ktprime_heap2(stype a[], const int n, const int k)
 {
 	clock_t ts = NowMs();
-	max_heap<stype> my_heap(k, a);
+	max_heap<stype> my_heap(k);
 
 	for (int i = 0; i < k; i++)
 		my_heap.push(a[n + i]);
 
 	int64_t sum = 0;
 	for (int i = n + k; i < n * 2; i++) {
-#if POP_PUSH
-		sum += my_heap.pop();
-		my_heap.push(a[i]);
-#else
 		sum += my_heap.top();
 		my_heap.pop_push(a[i]);
-#endif
 	}
 
 	stype maxe = my_heap.top();
+	printf("\tktprime heap     %5ld ms, a[%d] = %ld, sum = %ld\n", NowMs() - ts, k, (int64_t)maxe, sum);
+}
+
+void ktprime_heap3(stype a[], const int n, const int k)
+{
+	clock_t ts = NowMs();
+	max_heap<stype> my_heap1(k);
+	max_heap<stype> my_heap2(k);
+
+	for (int i = 0; i < k; i++) {
+		my_heap1.push(a[n + i]);
+		my_heap2.push(a[n + i]);
+	}
+
+	int64_t sum = 0;
+	for (int i = n + k; i < n * 2; i++) {
+		assert(my_heap1.top() == my_heap2.top());
+
+		sum += my_heap1.top();
+		my_heap1.pop(), my_heap1.push(a[i]);
+		my_heap2.pop_push(a[i]);
+		if (i % (1024 * 32) == 0) {
+			assert( std::accumulate(my_heap1._a + 1, my_heap1._a + k + 1, 0) ==
+					std::accumulate(my_heap2._a + 1, my_heap2._a + k + 1, 0));
+		}
+	}
+
+	stype maxe = my_heap1.top();
 	printf("\tktprime heap     %5ld ms, a[%d] = %ld, sum = %ld\n", NowMs() - ts, k, (int64_t)maxe, sum);
 }
 
@@ -651,7 +692,7 @@ void stl_priqueue2(stype a[], const int n, const int k)
 	stype maxe = pri_queue.top();
 
 	ts = NowMs() - ts;
-	printf("\tstl pri_queue2   %5ld ms, a[%d] = %ld, sum = %ld\n", ts, k, (int64_t)maxe, sum);
+	printf("\tstl pri_queue    %5ld ms, a[%d] = %ld, sum = %ld\n", ts, k, (int64_t)maxe, sum);
 }
 
 void stl_makeheap2(stype a[], const int n, const int k)
@@ -669,7 +710,7 @@ void stl_makeheap2(stype a[], const int n, const int k)
 	}
 	stype maxe = a[0];
 
-	printf("\tstl make_heap2   %5ld ms, a[%d] = %ld, sum = %ld\n", NowMs() - ts, k, (int64_t)maxe, sum);
+	printf("\tstl make_heap    %5ld ms, a[%d] = %ld, sum = %ld\n", NowMs() - ts, k, (int64_t)maxe, sum);
 }
 
 int main(int argc, char* argv[])
@@ -696,7 +737,7 @@ int main(int argc, char* argv[])
 			else if (r <= 100 && r > 0) { n = max_n * r; }
 			else if (r > 0) { n = r; }
 		} else if (c == 'r' && r > 0) {
-			AK = r;
+			AKI = r;
 		} else if (c == 'm' && r > 0) {
 			AK2 = r;
 		} else if (c == 's') {
@@ -720,7 +761,7 @@ int main(int argc, char* argv[])
 	std::normal_distribution<> d(1 << (20 + rand() % 10), 1 << 16);
 //	std::exponential_distribution<> p(0.1);
 
-	printf("n = %d, topk = %d, r1 = %d, r2 = %d, shuff = %d\n", n, k, AK, AK2, shuff);
+	printf("n = %d, topk = %d, r1 = %d, r2 = %d, shuff = %d\n", n, k, AKI, AK2, shuff);
 	for (int j = 0; j <= 7; j ++) {
 		int64_t r = 0;
 		type = j;
@@ -765,8 +806,9 @@ int main(int argc, char* argv[])
 
 		//test flow win
 		printf("\ntest flow windows heap\n");
+		//stl_priqueue2(arr, n, k);
 		ktprime_heap2(arr, n, k);
-		stl_priqueue2(arr, n, k);
+		//ktprime_heap3(arr, n, k);
 		stl_makeheap2(arr, n, k);
 
 		putchar('\n');
