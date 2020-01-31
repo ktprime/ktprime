@@ -13,6 +13,10 @@
 #include <climits>
 #include <random>
 
+#if PDQS
+	#include "pdqsort.h" //https://github.com/orlp/pdqsort/blob/master/pdqsort.h
+#endif
+
 #if I32
 	typedef int stype;
 	const stype max_v = INT_MAX;
@@ -38,7 +42,8 @@
 #endif
 
 static int AKI = 4;
-static int AK2 = 8;
+static int AK2 = 4;
+static int pdqs = 1;
 
 typedef unsigned int uint;
 
@@ -118,7 +123,7 @@ public:
 
 			_a[p] = _a[c];
 			p = c;
-			l = c * 2 + 0; 
+			l = c * 2 + 0;
 			r = c * 2 + 1;
 #ifdef NC
 			if (l > _size)
@@ -136,11 +141,24 @@ public:
 	uint _size;
 };
 
+template<typename T>
+inline void QSORT(T* a, T* e)
+{
+#if PDQS
+	if (pdqs)
+		pdqsort_branchless(a, e);
+	else
+		std::sort(a, e);
+#else
+	std::sort(a, e);
+#endif
+}
+
 void rand_swap(stype a[], const int n, int k)
 {
 #if 0
 	const int step = n / k;
-	//	std::sort(a, a + k);
+	//	QSORT(a, a + k);
 	for (int i = 1; i < k; i ++) {
 
 		int h = rand() % k, t = i * step + rand() % step;
@@ -214,7 +232,7 @@ void stl_sort(stype a[], const int n, const int k)
 	reset(a, n, k);
 	clock_t ts = NowMs();
 
-	std::sort(a, a + n);
+	QSORT(a, a + n);
 	printf("  stl sort       %5ld ms, a[%d] = %ld\n\n", NowMs() - ts, k, (int64_t)a[k - 1]);
 }
 #endif
@@ -226,7 +244,7 @@ void stl_nth(stype a[], const int n, const int k)
 
 #if 1
 	std::nth_element(a, a + k, a + n);
-	std::sort(a, a + k);
+	QSORT(a, a + k);
 #else
 	std::partial_sort(a, a + k, a + n);
 #endif
@@ -415,12 +433,12 @@ void bucket_sort(uint a[], uint n, uint k)
 
 		a[sum_size++] = a[i];
 		if (sum_size > min_size) {
-			std::sort(a, a + sum_size);
+			QSORT(a, a + sum_size);
 			maxe = a[(sum_size = k) - 1];
 		}
 	}
 
-	std::sort(a, a + sum_size);
+	QSORT(a, a + sum_size);
 
 #if I32
 	for (int i = 0; i < sum_size; i++) a[i] -= INT_MAX;
@@ -464,7 +482,7 @@ static int find_kth(stype a[], const int m, stype b[], const int n, const int kt
 
 static void merge_array(stype a[], stype b[], const int n, const int m)
 {
-	std::sort(b, b + m);
+	QSORT(b, b + m);
 	if (a[0] >= b[m - 1]) {
 		if (m >= n)
 			memcpy(a, b + m - n, sizeof(a[0]) * n);
@@ -492,7 +510,7 @@ void merge_sort(stype a[], const int n, const int k)
 	reset(a, n, k);
 	clock_t ts = NowMs();
 
-	std::sort(a, a + k);
+	QSORT(a, a + k);
 	a[-1] = ~max_v;
 
 	stype* ax_a = a + k;
@@ -516,8 +534,8 @@ void merge_sort(stype a[], const int n, const int k)
 		}
 	}
 
-//	std::sort(a, ax_a + ax_n);
-//	std::sort(ax_a, ax_a + ax_n); std::inplace_merge(a, ax_a, ax_a + ax_n);
+//	QSORT(a, ax_a + ax_n);
+//	QSORT(ax_a, ax_a + ax_n); std::inplace_merge(a, ax_a, ax_a + ax_n);
 //	std::partial_sort(a, ax_a, ax_a + ax_n);
 	merge_array(a, ax_a, k, ax_n);
 
@@ -532,7 +550,7 @@ void merge_inplace(stype a[], const int n, const int k)
 	reset(a, n, k);
 	clock_t ts = NowMs();
 
-	std::sort(a, a + k);
+	QSORT(a, a + k);
 	stype* ax_a = a + k;
 	stype maxe = a[k - 1];
 	int bestn = k / AKI, ax_n = 0;
@@ -555,7 +573,7 @@ void merge_inplace(stype a[], const int n, const int k)
 			std::reverse(ax_a, ax_a + ax_n);
 		else if (!std::is_sorted(ax_a, ax_a + ax_n))
 #endif
-			std::sort(ax_a, ax_a + ax_n);
+			QSORT(ax_a, ax_a + ax_n);
 
 		if (a[0] >= ax_a[ax_n - 1]) {
 			if (ax_n >= k)
@@ -575,8 +593,8 @@ void merge_inplace(stype a[], const int n, const int k)
 		ax_n = 0;
 	}
 
-	std::sort(a, ax_a + ax_n);
-//	std::sort(ax_a, ax_a + ax_n); std::inplace_merge(a, ax_a, ax_a + ax_n);
+	QSORT(a, ax_a + ax_n);
+//	QSORT(ax_a, ax_a + ax_n); std::inplace_merge(a, ax_a, ax_a + ax_n);
 
 	maxe = a[k - 1];
 	int64_t sum = std::accumulate(a, a + k, 0);
@@ -718,10 +736,11 @@ int main(int argc, char* argv[])
 	srand(time(nullptr));
 	const int max_n = 1024*1024*32;
 
-	printf("\ncmd:topk -k(<=%d) -n(<=%d) -r(1-16) m(1-16) s(shuffle) [type = 0-1 rand, 2-3 wavy, 4-5 rand, 6 decrease, 7 incre]\n\n", 1000000, max_n);
+	printf("\ncmd:topk -k(<=%d) -n(<=%d) -r(1-16) m(1-16) p(pdqs sort) s(shuffle) \
+			[type = 0-1 rand, 2-3 wavy, 4-5 rand, 6 decrease, 7 incre]\n\n", 1000000, max_n);
 	printInfo();
 
-	int n = max_n, k = max_n / 1000, type = 0, shuff = 0;
+	int n = max_n, k = max_n / 100, type = 0, shuff = 0;
 	for (int i = 1; i < argc; i++)
 	{
 		char c = argv[i][0];
@@ -742,6 +761,10 @@ int main(int argc, char* argv[])
 			AK2 = r;
 		} else if (c == 's') {
 			shuff = r;
+		} else if (c == 'p') {
+#if PDQS
+			pdqs = 1 - pdqs;
+#endif
 		}
 	}
 
@@ -761,7 +784,7 @@ int main(int argc, char* argv[])
 	std::normal_distribution<> d(1 << (20 + rand() % 10), 1 << 16);
 //	std::exponential_distribution<> p(0.1);
 
-	printf("n = %d, topk = %d, r1 = %d, r2 = %d, shuff = %d\n", n, k, AKI, AK2, shuff);
+	printf("n = %d, topk = %d, r1 = %d, r2 = %d, shuff = %d, pdqs = %d\n", n, k, AKI, AK2, shuff, pdqs);
 	for (int j = 0; j <= 7; j ++) {
 		int64_t r = 0;
 		type = j;
