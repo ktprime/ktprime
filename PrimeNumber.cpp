@@ -1,4 +1,4 @@
-/*Fast Single-thread segmented sieve of Eratosthenes prime number n < 2^64 ***/
+	/*Fast Single-thread segmented sieve of Eratosthenes prime number n < 2^64 ***/
 ////http://ntheory.org/sieves/benchmarks.html
 static const char* Benchmark =
 "g++ -DSIEVE_SIZE=2048 -DFSL1 -DFDIV -march=native -funroll-loops -O3 -s -pipe PrimeNumber.cpp -o prime\n"
@@ -621,9 +621,9 @@ static uint isqrt(const uint64 x)
 #if BIT_SCANF
 inline static uint bitScanForward(const stype n)
 {
-#if _MSC_VER > 1400
+#if _WIN32
 	unsigned long index;
-	#if X86_64
+	#if _WIN64
 	_BitScanForward64(&index, n);
 	#else
 	_BitScanForward(&index, n);
@@ -797,7 +797,7 @@ static void setWheelSmall(const uint64 start, const uint maxp)
 			offset += (p2 - offset) / segsize * segsize;
 
 		uint sieve_index = p - (uint)(offset % p);
-		if (EUNLIKELY(p2 > offset))
+		if (p2 > offset)
 			sieve_index = (uint)(p2 - offset);
 
 		const int pi = WheelInit30[p % WHEEL30].WheelIndex;
@@ -829,14 +829,14 @@ static void setWheelMedium(uchar* bitarray, const uint sieve_size, const uint me
 	const uint pn = 1 + bytes / sizeof(mask);
 
 	for (uint i = 0; i < pn; ) {
-		if (mask == 0) {
+		if (EUNLIKELY(mask == 0)) {
 			mask = ~sbitarray[i ++];
 			noffset += sizeof(mask) * WHEEL30;
 			continue;
 		}
 
 		const uint p = noffset + PRIME_OFFSET(mask); mask &= mask - 1;
-		if (Threshold.L2Index == 0 && p >= Threshold.L2Maxp) {
+		if (EUNLIKELY(Threshold.L2Index == 0 && p >= Threshold.L2Maxp)) {
 			MediumPrime[j + 0].Sp = MediumPrime[j + 1].Sp = MediumPrime[j + 2].Sp = UINT_MAX;
 			Threshold.L2Maxp = p;
 			Threshold.L2Index = j += 3;
@@ -915,7 +915,7 @@ static void setWheelBig(uchar* bitarray, uint medium, uint sqrtp, const uint64 s
 		const uint pn = 1 + bytes / sizeof(mask);
 
 		for (uint j = 0; j < pn; ) {
-			if (mask == 0) {
+			if (EUNLIKELY(mask == 0)) {
 				mask = ~sbitarray[j ++];
 				offset += sizeof(mask) * WHEEL30;
 				continue;
@@ -948,7 +948,7 @@ static void setWheelBig(uchar* bitarray, uint medium, uint sqrtp, const uint64 s
 			}
 
 #ifndef B_R
-			if (EUNLIKELY(sieve_index > irange))
+			if (sieve_index > irange)
 				continue;
 #endif
 
@@ -1610,7 +1610,7 @@ static int64 pi(uchar* bitarray, uint64 start, uint64 end, PrimeCall* pcall)
 	if (EUNLIKELY(++end == 0)) end --; //overflow if end = 2^64-1
 
 	//pi(n) ~= n/log(n), complexty ~= n*log(log(n)), replaced by n*log(n) more accurate
-#ifndef _DEBUG
+#ifndef PTIME
 	double lge = end * log((double)end), lgs = start * log(start + 10.0);
 	double pie = PI(end, 1.2), pis = PI(start, 1.2);
 #endif
@@ -1628,7 +1628,7 @@ static int64 pi(uchar* bitarray, uint64 start, uint64 end, PrimeCall* pcall)
 
 		primes += segmentProcessed(bitarray, start, bytes, pcall);
 
-#ifndef _DEBUG
+#ifndef PTIME
 		if (EUNLIKELY((si ++ & Config.Progress) == 15)) {
 			const double cur = start + sieve_size;
 			double lgc = cur * log(cur), pic = PI(cur, 1.2);
@@ -2168,7 +2168,7 @@ static void printInfo()
 		"------------------------------------------------------------------------------------------------------------";
 	puts(sepator);
 	puts("Fast implementation of the segmented sieve of Eratosthenes n < 2^64\n"
-			"Copyright (C) by 2010-2019 Huang Yuanbing 22738078@qq.com/bailuzhou@163.com\n"
+			"Copyright (C) by 2010-2020 Huang Yuanbing 22738078@qq.com/bailuzhou@163.com\n"
 			"Compile: g++ -DFSL1 -DFDIV -march=native -funroll-loops -O3 -s -pipe PrimeNumber.cpp -o prime\n");
 
 	char buff[500];
@@ -2378,14 +2378,12 @@ static bool executeCmd(const char* cmd)
 			else
 				startTest(0);
 		} else if (cmdc == 'P') {
-#if PC
 			PrimeCall pcall = {0, dumpPrime, 0};
 			pcall.data = &pcall.primes;
 			doSieve(start, end, &pcall);
-#endif
 		} else if (cmdi >= 0) {
 			doSieve(start, end, NULL);
-#if FTEST
+#if FCHECK
 			if (end >> 32 == 0 || sizeof(uint64) == sizeof(uint))
 				pi2(start, end);
 #endif
@@ -2494,9 +2492,10 @@ static void randTest()
 int main(int argc, char* argv[])
 {
 	initPrime(); //5ms
-	if (argc == 2)
+	if (argc == 2) {
 		executeCmd(argv[1]);
-	else if (argc > 2)
+		return 0;
+	} else if (argc > 2)
 		randTest();
 
 #ifdef B_R
