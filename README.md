@@ -1,6 +1,6 @@
 #bechmark
   
-    g++ -DSIEVE_SIZE=4096 -DFSL1 -DFDIV -march=native -funroll-loops -O3 -s -pipe PrimeNumber.cpp -o prime
+    g++ -DSIEVE_SIZE=4096 -DFDIV -march=native -funroll-loops -O3 -s -pipe PrimeNumber.cpp -o prime
 Windows 10 x64               i3-350M,i5-3470,i7-7500u,i7-6700,r7-1700
 
 * Pi(0,    1e10) = 455052511    3.10   1.84    1.55     1.32    1.65
