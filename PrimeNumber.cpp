@@ -2385,7 +2385,7 @@ static bool executeCmd(const char* cmd)
 #endif
 		} else if (cmdi >= 0) {
 			doSieve(start, end, NULL);
-#if FDIV
+#if FTEST
 			if (end >> 32 == 0 || sizeof(uint64) == sizeof(uint))
 				pi2(start, end);
 #endif
