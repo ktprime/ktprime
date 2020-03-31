@@ -17,7 +17,7 @@ http://en.wikipedia.org/wiki/Sophie_Germain_prime
 # include <stdio.h>
 # include <assert.h>
 
-# define SVERSION       "2.0"
+# define SVERSION       "2.1"
 # define MAXN           "1e16"
 # define MINN           100000000
 # define SGP            2
@@ -27,11 +27,16 @@ http://en.wikipedia.org/wiki/Sophie_Germain_prime
 # define SEGMENT_SIZE   (510510 * 19 * 1)
 # define MAX_THREADS    256
 
+#if __x86_64__ || __amd64__ || _M_X64 || __amd64 || __x86_64
+	# define X86_64       1
+#elif __i386__ | _M_IX86 | _X86_ | __i386
+	# define X86          1
+#endif
 //SSE4a popcnt instruction, make sure cpu support it
 #if _MSC_VER > 1400
 	# define POPCNT      1
 	# include <intrin.h>
-#elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44)
+#elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44) && (X86_64 || X86)
 	# define POPCNT      1
 	# include <popcntintrin.h>
 #else
@@ -49,7 +54,7 @@ http://en.wikipedia.org/wiki/Sophie_Germain_prime
 # define TREE2           0
 # define OPT_SEG_SIEVE   1
 
-#if _MSC_VER && _M_AMD64
+#if (_MSC_VER && _M_AMD64) || __aarch64__
 # define NO_ASM_X86      1
 #endif
 
@@ -69,10 +74,10 @@ typedef unsigned int uint;
 	#include <pthread.h>
 #endif
 
-
 #ifndef BSHIFT
 # define BSHIFT 5
 #endif
+
 # if BSHIFT == 3
 	typedef uchar utype;
 	# define MASK 7
@@ -195,7 +200,7 @@ static struct
 }
 Config =
 {
-	PRINT_RET | PRINT_TIME, MAX_L1SIZE, 1024, 4, (1 << 9) - 1
+	PRINT_RET | PRINT_TIME, MAX_L1SIZE, 2048, 8, (1 << 9) - 1
 };
 
 static struct
@@ -384,7 +389,7 @@ static uint isqrt(const uint64 x)
 	return (uint)g0;
 }
 
-//convert str to uint64 ((x)*E(y)+-*(z))
+//convert str to uint64 ((x)*E(y)[+-*](z))
 //valid input format: 123456 1234-12 e9 2e7+2^30 2e10-2 10^11-25 2e6*2
 static uint64 atoint64(const char* str, uint64 defaultn = 0)
 {
@@ -616,12 +621,14 @@ static uchar reverseByte(const uchar c)
 static inline int countBitOnes(uint64 n)
 {
 #if POPCNT
-	//popcnt instruction : INTEL i7/SSE4.2, AMD Phonem/SSE4A
-	#if _M_AMD64 || __x86_64__
+	//popcnt instruction : newer x86 cpu
+	#if X86_64
 	return _mm_popcnt_u64(n);
 	#else
 	return _mm_popcnt_u32(n) + _mm_popcnt_u32(n >> 32);
 	#endif
+#elif __GNUC__
+	return __builtin_popcountll(n);
 #elif TREE2 == 0
 	uint hig = (int)(n >> 32), low = (uint)n;
 	return WordNumBit1[(ushort)low] + WordNumBit1[low >> 16] +
@@ -1411,7 +1418,7 @@ static int parseTask(struct Task &curtask)
 	char linebuf[400] = {0}, taskdata[400] = {0};
 	freopen("sophie.ta", "rb", stdin);
 
-	while (gets(linebuf)) {
+	while (fgets(linebuf, sizeof(linebuf), stdin)) {
 		if (linebuf[0] == 's') {
 			sscanf(linebuf, "sg[%d-%d]=%lld", &curtask.Pendi, &curtask.Pbegi, &curtask.Result);
 			continue;
@@ -1734,7 +1741,7 @@ static void cpuid(int cpuinfo[4], int id)
 		mov dword ptr [edi + 8], ecx
 		mov dword ptr [edi +12], edx
 	}
-#elif __GNUC__
+#elif __GNUC__ && (__x86_64__ || __x86__)
 	int deax, debx, decx, dedx;
 	__asm
 	(
@@ -1751,7 +1758,8 @@ static void cpuid(int cpuinfo[4], int id)
 
 // http://msdn.microsoft.com/en-us/library/hskdteyh%28v=vs.100%29.aspx
 static int getCpuInfo()
-{
+{ 
+#ifndef NO_ASM_X86
 	char cpuName[255] = {-1};
 	int (*pTmp)[4] = (int(*)[4])cpuName;
 	cpuid(*pTmp++, 0x80000002);
@@ -1769,12 +1777,13 @@ static int getCpuInfo()
 
 	//amd cpu
 	if (cpuName[0] == 'A') {
-		Config.CpuL1Size = 64 << 13;
+		Config.CpuL1Size = 32 << 13;
 	} else {
 		Config.CpuL1Size = 32 << 13;
 	}
 
 	return cpuinfo[2] >> 16;
+#endif
 }
 
 static void printInfo( )
@@ -1785,18 +1794,45 @@ static void printInfo( )
 	puts(sepator);
 
 	printf("Sophie Germain Prime (n < %s) version %s\n", MAXN, SVERSION);
-	puts("Copyright (c) by Huang Yuanbing 2013 - 2018 bailuzhou@163.com");
+	puts("Copyright (c) by Huang Yuanbing 2013 - 2020 bailuzhou@163.com");
 
-#ifdef _MSC_VER
-	printf("Compiled by MS/vc++ %d", _MSC_VER);
+	char buff[256];
+	char* info = buff;
+
+#ifdef __clang__
+	info += sprintf(info, "clang %s", __clang_version__); //vc/gcc/llvm
+#if __llvm__
+	info += sprintf(info, " on llvm/");
+#endif
+#endif
+
+#if _MSC_VER
+	info += sprintf(info, "Compiled by vc %d", _MSC_VER);
+#elif __GNUC__
+	info += sprintf(info, "Compiled by gcc %d.%d.%d", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+#elif __TINYC__
+	info += sprintf(info, "Compiled by tcc %d", __TINYC__);
+#endif
+
+#if __cplusplus
+	info += sprintf(info, " c++ version %d", (int)__cplusplus);
+#endif
+
+#if X86_64
+	info += sprintf(info, " x86-64");
+#elif X86
+	info += sprintf(info, " x86");
+#elif __arm64__ || __aarch64__
+	info += sprintf(info, " arm64");
+#elif __arm__ || __aarch__
+	info += sprintf(info, " arm");
 #else
-	printf("Compiled by g++ %s", __VERSION__);
+	info += sprintf(info, " unknow");
 #endif
 
-#if _M_AMD64 || __x86_64__
-	printf(" on x64");
-#endif
-	printf(" on %s %s\n", __TIME__, __DATE__);
+	info += sprintf(info, "\n%s %s in %s\n", __TIME__, __DATE__, __FILE__);
+	*info = 0;
+	puts(buff);
 
 	printf("[MARCO] Work threads = %d, POPCNT = %d, PRIME_DIFF = %d\n", Config.Threads, POPCNT, PRIME_DIFF);
 	printf("[MARCO] L1 = %d k, OPT_L1/L2 = %d/%d, BSHIFT = %d\n", Config.CpuL1Size >> 13, OPT_L1CACHE, OPT_L2CACHE, BSHIFT);
@@ -1859,7 +1895,7 @@ static int parseCmd(char params[][80])
 			case 'C':
 				if (tmp <= (MAX_L1SIZE >> 13) && tmp > 15) {
 					Config.CpuL1Size = tmp << 13;
-				} else if (tmp < 4000) {
+				} else if (tmp < 16000) {
 					Config.CpuL2Size = tmp;
 				}
 				break;
@@ -1996,13 +2032,14 @@ int main(int argc, char* argv[])
 			executeCmd(argv[i]);
 	}
 
-	executeCmd("d m10 t4 c1000 1e15 1000");
+	executeCmd("t4 e11 d");
+//	executeCmd("d m10 t4 c1000 1e15 1000");
 //	executeCmd("A d m7 t3 c1200 e12");
 
 	char ccmd[255] = {0};
 	while (true) {
 		printf("\n>> ");
-		if (!gets(ccmd) || !executeCmd(ccmd))
+		if (!fgets(ccmd, 100,stdin) || !executeCmd(ccmd))
 			break;
 	}
 
@@ -2020,7 +2057,7 @@ int main(int argc, char* argv[])
 8     423140
 9     3308859
 10    26569515
-1     218116524
+11    218116524
 12    1822848478
 13    15462601989
 14    132822315652
@@ -2028,7 +2065,7 @@ int main(int argc, char* argv[])
 MINGW: gcc 5.1.0
 CXXFLAGS: -Ofast -msse4 -s -pipe -march=corei7 -funroll-loops
 windows 7 64 bit, I5 3470 3.2G / i3 350M 2.26G
-S(1e11) = 218116524        4.64| 14.0 sec
+S(1e11) = 218116524        4.64| 13.6 sec
 S(1e12) = 1822848478       52.8| 140.4 sec
 S(1e13) = 15462601989      505.| 1790. sec
 S(1e14) = 132822315652     6023| 5.20 hour

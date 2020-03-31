@@ -12,7 +12,7 @@
 # define CHAR_BIT        8
 #endif
 
-# define L1_CACHE_SIZE   63
+# define L1_CACHE_SIZE   64
 # define L1_SIEVE_SEG    6
 
 //max continuous goldbach partition number
@@ -34,7 +34,7 @@ enum eConst
 #if _MSC_VER > 1300
 	# define POPCNT      1
 	# include <intrin.h>
-#elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44)
+#elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44) && X86_64
 	# define POPCNT      1
 	# include <popcntintrin.h>
 #else
@@ -42,9 +42,11 @@ enum eConst
 #endif
 
 #ifdef _MSC_VER
-	#define MEM_ALIGN(n) //__declspec(align(n))
-#else
+	#define MEM_ALIGN(n) // __declspec(align(n))
+#elif __GNUC__
 	#define MEM_ALIGN(n) __attribute__ ((aligned(n)))
+#else
+	#define MEM_ALIGN(n)
 #endif
 
 typedef unsigned char uchar;
@@ -52,7 +54,7 @@ typedef unsigned short ushort;
 typedef unsigned int uint;
 
 #ifdef _WIN32
-	const char* GPFORMAT = "G(%I64d) = %I64d\n";
+	const char* GPFORMAT = "G(%lld) = %lld\n";
 	typedef unsigned __int64 uint64;
 	# include <windows.h>
 	# define CONSOLE "CON"
@@ -449,6 +451,7 @@ static void setL1Data(int L1Size)
 //http://msdn.microsoft.com/en-us/library/hh977022%28v=vs.110%29.aspx
 static int getCpuInfo()
 {
+#if X86_64 || X86
 	char cpuName[255] = {-1};
 	int (*pTmp)[4] = (int(*)[4])cpuName;
 	cpuid(*pTmp++, 0x80000002);
@@ -466,7 +469,7 @@ static int getCpuInfo()
 
 	//amd cpu
 	if (cpuName[0] == 'A') {
-		setL1Data(64);
+		setL1Data(32);
 	} else {
 		setL1Data(32);
 	}
@@ -474,6 +477,9 @@ static int getCpuInfo()
 	CpuCache.L2Size = cpuinfo[2] >> 16;
 
 	return cpuinfo[2] >> 16;
+#else
+    return 0;
+#endif
 }
 
 static int getSystemInfo( )
@@ -572,7 +578,7 @@ inline static int countBit1(uint64 n)
 	#if X86_64
 	return _mm_popcnt_u64(n);
 	#else
-	return _mm_popcnt_u32(n) + _mm_popcnt_u32(n >> 32);
+	return _mm_popcnt_u32((uint)n) + _mm_popcnt_u32(uint(n >> 32));
 	#endif
 #elif __GNUC__
 	return __builtin_popcountll(n);
@@ -702,8 +708,38 @@ static int countBit0ArrayOrPopcnt(uint64 bitarray1[], uint64 bitarray2[], const 
 	return ((1 + (bitleng >> 6)) << 6) - bit1s;
 }
 
-
 #if AVX2
+
+const static __m256i Z = _mm256_set1_epi8(0x0);
+const static __m256i F = _mm256_set1_epi8(0xF);
+//Vector with pre-calculated bit count:
+const static __m256i T = _mm256_setr_epi8(0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4,
+                                   0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4);
+
+static int countBit0ArrayOrAvx2_(const uchar * src1, const uchar * src2, size_t bitleng)
+{
+	int loops = bitleng / 8;
+	__m256i _sum = _mm256_setzero_si256();
+	for (size_t i = 0; i < loops; i += 32)
+	{
+		//load 32-byte vector
+		__m256i _src = _mm256_or_si256(_mm256_loadu_si256((__m256i*)(src1 + i)), _mm256_loadu_si256((__m256i*)(src2 + i)));
+
+		//__m256i _src = _mm256_loadu_si256((__m256i*)(src1 + i), (__m256i*)(src1 + i));
+		//get low 4 bit for every byte in vector
+		__m256i lo = _mm256_and_si256(_src, F);
+		//sum precalculated value from T
+		_sum = _mm256_add_epi64(_sum, _mm256_sad_epu8(Z, _mm256_shuffle_epi8(T, lo)));
+		//get high 4 bit for every byte in vector
+		__m256i hi = _mm256_and_si256(_mm256_srli_epi16(_src, 4), F);
+		//sum precalculated value from T
+		_sum = _mm256_add_epi64(_sum, _mm256_sad_epu8(Z, _mm256_shuffle_epi8(T, hi)));
+	}
+	uint64 sum[4];
+	_mm256_storeu_si256((__m256i*)sum, _sum);
+	return (bitleng / 256 + 1) * 256 - (sum[0] + sum[1] + sum[2] + sum[3]);
+}
+
 static int countBit0ArrayOrAvx2(const uchar* bitarray1, const uchar* bitarray2, const int bitleng)
 {
 	int loops = bitleng / 256;
@@ -727,8 +763,8 @@ static int countBit0ArrayOrAvx2(const uchar* bitarray1, const uchar* bitarray2, 
 #if __GNUC__
 		.m256i
 #endif
-//		= _mm256_or_si256(_mm256_loadu_si256(pd1++), _mm256_loadu_si256(pd2++));
-		= _mm256_or_si256(*pd1++, *pd2++);
+		= _mm256_or_si256(_mm256_loadu_si256(pd1++), _mm256_loadu_si256(pd2++));
+//		= _mm256_or_si256(*pd1++, *pd2++);
 
 #if X86_64
 		bit1s +=
@@ -1428,7 +1464,9 @@ static void initFastGp( )
 {
 	eratoSieve(100131);
 	getSystemInfo();
+#if (X86_64 || X86) && !(__clang__ && __llvm__ == 0)
 	getCpuInfo();
+#endif
 	initSieveTpl( );
 	initBitTable( );
 	initWheelSkip( );
@@ -1489,7 +1527,7 @@ static int startTest(const int checkloops, int gploops)
 
 		setSieveSize(rand() % (MAX_CACHE + 32));
 		Config.Algorithm = rand() % 3 + 1;
-		Config.Threads = rand() % 4 + 1;
+		Config.Threads = rand() % 16 + 1;
 		Config.Advanced = !Config.Advanced;
 
 		getGp2(minn, gcount2, Gp);
@@ -2093,42 +2131,68 @@ static void getGp2(uint64 minn, int gpcount, uint64 gp[])
 
 static void printInfo( )
 {
-	puts("---------------------------------------------------------------");
-	puts("Count Multi Goldbach Partition in [6, 1e14], version 2.1\n");
-	puts("Copyright @ by Huang Yuanbing 2011 - 2018 bailuzhou@163.com\n"
-	"Code:<https://github.com/ktprime/ktprime/blob/master/FastGn.cpp>\n"
+
+	const char* sepator =
+		"----------------------------------------------------------------------------------------------------";
+	puts(sepator);
+
+	puts("Count Multi Goldbach Partition in [6, 1e14], version 2.3\n");
+	puts("Copyright @ by Huang Yuanbing 2011 - 2020 bailuzhou@163.com\n"
+	"https://github.com/ktprime/ktprime/blob/master/FastGn.cpp\n"
 	"CXXFLAG:g++ -march=native -mpopcnt -funroll-loops -O3 -s -pipe");
 
-#ifdef _MSC_VER
-	printf("Compiled by MS/vc++ %d", _MSC_VER);
-#else
-	printf("Compiled by GNU/g++ %s", __VERSION__);
+	char buff[256];
+	char* info = buff;
+
+#ifdef __clang__
+	info += sprintf(info, "clang %s", __clang_version__); //vc/gcc/llvm
+#if __llvm__
+	info += sprintf(info, " on llvm/");
+#endif
 #endif
 
+#if _MSC_VER
+	info += sprintf(info, "Compiled by vc %d", _MSC_VER);
+#elif __GNUC__
+	info += sprintf(info, "Compiled by gcc %d.%d.%d", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+#elif __TINYC__
+	info += sprintf(info, "Compiled by tcc %d", __TINYC__);
+#endif
+
+#if __cplusplus
+	info += sprintf(info, " c++ version %d", (int)__cplusplus);
+#endif
 #if X86_64
-	printf(" x86-64 ");
+	info += sprintf(info, " x86-64");
+#elif X86
+	info += sprintf(info, " x86");
+#elif __arm64__ && __aarch64__
+	info += sprintf(info, " arm64");
+#elif __arm__
+	info += sprintf(info, " arm");
+#else
+	info += sprintf(info, " unknow");
 #endif
-	printf(" on %s %s\n", __TIME__, __DATE__);
 
-	puts("---------------------------------------------------------------");
-	puts("---------------------------------------------------------------");
-	printf("MACRO: L1_CACHE_SIZE = %d, DATA_TYPE = %d, POPCNT = %d\n",
-		L1_CACHE_SIZE, BSHIFT, POPCNT);
+	info += sprintf(info, "\n%s %s in %s\n", __TIME__, __DATE__, __FILE__);
+	*info = 0;
+	puts(buff);
 
-	printf("Work threads = %d, Segment Cache ~= %d kb, Algorithm = %d\n",
-		Config.Threads, (Config.SieveSize / WHEEL) >> 10, Config.Algorithm);
+	puts(sepator);
+	printf("MACRO: L1_CACHE_SIZE = %d, DATA_TYPE = %d, POPCNT = %d\n", L1_CACHE_SIZE, BSHIFT, POPCNT);
+	printf("Work threads = %d, Segment Cache ~= %d kb, Algorithm = %d\n", Config.Threads, (Config.SieveSize / WHEEL) >> 10, Config.Algorithm);
 
-	puts("---------------------------------------------------------------\n");
+	puts(sepator);
 }
 
 static void doCompile()
 {
 	char exename[256] = {0};
-	strcpy(exename, __FILE__);
+	sprintf(exename,"%s", __FILE__);
 	char* pdot = strchr(exename, '.');
 	if (pdot) {
 #if _WIN32
-		strcpy(pdot, "_.exe");
+		sprintf(pdot, "%s", "_.exe");
 #else
 		*pdot = 0;
 #endif
@@ -2299,15 +2363,15 @@ int main(int argc, char* argv[])
 	}
 
 #if 1
-	executeCmd("t1 s200 pr r e9 1 g3; r e9 1 g2; r e9 1 g1; pr");
-	executeCmd("t1 s63 e9 e3 g1; e9 e3 g2; e9 e3 g3");
+	executeCmd("i t1 s200 pr r e10 1 g3; r e10 1 g2; r e10 1 g1; pr");
 	executeCmd("t4 e9 e4 g2; e9 e4 g3");
+	executeCmd("t1 e9 e3 g1; e9 e3 g2; e9 e3 g3");
 #endif
 
 	char ccmd[255] = {0};
 	while (true) {
 		printf("\n>> ");
-		if (!gets(ccmd) || !executeCmd(ccmd))
+		if (!fgets(ccmd, sizeof(ccmd), stdin) || !executeCmd(ccmd))
 			break;
 	}
 
@@ -2320,16 +2384,9 @@ mail to: bailuzhou@163.com
 free use for non-commercial purposes
 
 G[10^9] to G[10^9 + 2e4]
-2.26G Intel I3 350M 11.00 x86
-2.26G Intel I3 350M 5.60 x64
-3.20G Intel I5 3470 3.00 x86
-3.20G Intel I5 3470 1.60 x64
-
-G[10^9] to G[10^9 + 2e3]
-popcnt64 : 1620
-popcnt32 : 2063
-tree3    : 2600
-table16  : 3560
+"Windows 10 x64               i3-350M,  i5-3470,  i7-7500u,  i7-6700,  r7-1700\n"
+x64                           5.6       1.6       1.2        1.00      0.66
+x86                           11        3.0       1.80       1.50      1.20
 
 http://graphics.stanford.edu/~seander/bithacks.html
 *******************************************************************

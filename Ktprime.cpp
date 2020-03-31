@@ -49,21 +49,21 @@ http://www.ieeta.pt/~tos/primes.html
 # include <math.h>
 # include <assert.h>
 
-# define KVERSION       "2.1"
+# define KVERSION       "2.2"
 # define TABLE_GAP      12
 # define MAXN           "1e16"
 # define MINN           10000000
 
 # define MAX_L1SIZE     (64 << 13)
-# define SEGMENT_SIZE   (510510 * 19)
-# define MAX_THREADS    32
+# define SEGMENT_SIZE   (510510 * 4)
+# define MAX_THREADS    256
 
 //SSE4 popcnt instruction, make sure your cpu support it
 //use of the SSE4.2/ SSE4a POPCNT instruction for fast bit counting.
 #if _MSC_VER > 1400
-	# define POPCNT      1
+	# define POPCNT      0
 	# include <intrin.h>
-#elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44)
+#elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44) && __x86_64__
 	# define POPCNT      0
 	# include <popcntintrin.h>
 #else
@@ -281,7 +281,7 @@ static struct
 	int Kgap;
 	//cpu L1/L2 size
 	uint CpuL1Size;
-	uint CpuL2Size;
+	uint CacheSize;
 	//work threads
 	uint Threads;
 	//print the progress gap
@@ -1973,7 +1973,7 @@ static int getWheel(const uint64 n)
 
 	int cachesize = n / wheel;
 
-	int blocks = cachesize / (Config.CpuL2Size << 13);
+	int blocks = cachesize / (Config.CacheSize << 13);
 
 	wheel *= (blocks + 1);
 
@@ -2128,7 +2128,7 @@ static int parseTask(struct Task &curtask)
 	char linebuf[400] = {0}, taskdata[400] = {0};
 	freopen("ktp.ta", "rb", stdin);
 
-	while (gets(linebuf)) {
+	while (fgets(linebuf, sizeof(linebuf), stdin)) {
 		if (linebuf[0] == 'k') {
 			sscanf(linebuf, "kt[%d-%d]=%lld", &curtask.Pendi, &curtask.Pbegi, &curtask.Result);
 			continue;
@@ -2362,7 +2362,7 @@ static int startTest(int tesecase, bool rwflag)
 		} else {
 			uint64 res, n;
 			char linebuf[256] = {0};
-			gets(linebuf);
+			fgets(linebuf, sizeof(linebuf), stdin);
 			if (sscanf(linebuf, PrintFormat[Config.Ptk], &n, &res) != 2) {
 				printf("line %d is wrong data\n", i);
 				if (fails++ > 30) {
@@ -2534,7 +2534,7 @@ static void testPik()
 		{"k72", "e10 000239", "e11 0001152", "e12 00005913", "e13 000033066"}
 	};
 
-	Config.CpuL2Size = 1 << 10;
+	Config.CacheSize = 1 << 10;
 	Config.PrintGap = (1 << 8) - 1;
 	SET_FLAG(PRINT_TIME);
 
@@ -2626,7 +2626,7 @@ static void cpuid(int cpuinfo[4], int id)
 		mov dword ptr [edi + 8], ecx
 		mov dword ptr [edi +12], edx
 	}
-#elif __GNUC__
+#elif __GNUC__ && __x86_64__
 	int deax, debx, decx, dedx;
 	__asm
 	(
@@ -2644,6 +2644,7 @@ static void cpuid(int cpuinfo[4], int id)
 // http://msdn.microsoft.com/en-us/library/hskdteyh%28v=vs.100%29.aspx
 static int getCpuInfo()
 {
+#if __x86_64__
 	char cpuName[255] = {-1};
 	int (*pTmp)[4] = (int(*)[4])cpuName;
 	cpuid(*pTmp++, 0x80000002);
@@ -2655,20 +2656,26 @@ static int getCpuInfo()
 			putchar(cpuName[i]);
 	}
 
-	int cpuinfo[4];
-	cpuid(cpuinfo, 0x80000006);
-	printf(", L2 cache = %d kb\n", cpuinfo[2] >> 16);
+	int cpuinfo1[4]; cpuid(cpuinfo1, 0x80000005); //work for amd cpu
+	int cpuinfo2[4]; cpuid(cpuinfo2, 0x80000006);
+//	int cpuinfo3[4]; cpuidInfo(cpuinfo3, 0x2);
 
-	//amd cpu
-	if (cpuName[0] == 'A') {
-		Config.CpuL1Size = 64 << 13;
-	} else {
+	if (cpuinfo1[2] >> 24 >= 16)
+		Config.CpuL1Size = (cpuinfo1[2] >> 24) << 13;
+	else if (cpuName[0] == 'I')
 		Config.CpuL1Size = 32 << 13;
-	}
 
-//	Config.CpuL2Size = (cpuinfo[2] >> 16) << 13;
+	if (cpuinfo2[2] >> 16 >= 64)
+		Config.CacheSize = cpuinfo2[2] >> 16;
+	if (cpuinfo2[3] >> 12 >= 256)
+		Config.CacheSize = cpuinfo2[3] >> 12;
 
-	return cpuinfo[2] >> 16;
+	printf(" L1/L2/L3 cache = %d/%d/%d kb\n", Config.CpuL1Size >> 13, cpuinfo2[2] >> 16, Config.CacheSize);
+
+	return cpuinfo2[2] >> 16;
+#else
+	return 0;
+#endif
 }
 
 //print the Ptk info
@@ -2683,25 +2690,49 @@ static void printInfo()
 	3.Ktuplet prime PIk(n)\n (n < %s) version %s\n",
 	KtupletName[0], KtupletName[1], MAXN, KVERSION);
 
-	puts("Copyright (c) by Huang Yuanbing 2010 - 2018 bailuzhou@163.com");
+	puts("Copyright (c) by Huang Yuanbing 2010 - 2020 bailuzhou@163.com");
 
-#ifdef _MSC_VER
-	printf("Compiled by MS/vc++ %d", _MSC_VER);
+	char buff[256];
+	char* info = buff;
+
+#ifdef __clang__
+	info += sprintf(info, "clang %s", __clang_version__); //vc/gcc/llvm
+#if __llvm__
+	info += sprintf(info, " on llvm/");
+#endif
+#endif
+
+#if _MSC_VER
+	info += sprintf(info, "Compiled by vc %d", _MSC_VER);
+#elif __GNUC__
+	info += sprintf(info, "Compiled by gcc %d.%d.%d", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+#elif __TINYC__
+	info += sprintf(info, "Compiled by tcc %d", __TINYC__);
+#endif
+
+#if __cplusplus
+	info += sprintf(info, " c++ version %d", (int)__cplusplus);
+#endif
+#if X86_64
+	info += sprintf(info, " x86-64");
+#elif X86
+	info += sprintf(info, " x86");
+#elif __arm64__ || __aarch64__
+	info += sprintf(info, " arm64");
+#elif __arm__
+	info += sprintf(info, " arm");
 #else
-	printf("Compiled by g++ %s", __VERSION__);
+	info += sprintf(info, " unknow");
 #endif
 
-#if _M_AMD64 || __x86_64__
-	printf(" on x64");
-#endif
-	printf(" on %s %s\n", __TIME__, __DATE__);
+	info += sprintf(info, "\n%s %s in %s\n", __TIME__, __DATE__, __FILE__);
+	*info = 0;
+	puts(buff);
 
 	getCpuInfo();
 
-	printf("Work threads = %d, POPCNT = %d, ASM_X86 = %d\n", \
-			Config.Threads, POPCNT, ASM_X86);
-	printf("L1 Size = %d k, OPT_L1CACHE = %d, BSHIFT = %d\n",
-			 Config.CpuL1Size >> 13, OPT_L1CACHE, BSHIFT);
+	printf("Work threads = %d, POPCNT = %d, ASM_X86 = %d\n", Config.Threads, POPCNT, ASM_X86);
+	printf("L1 Size = %d k, OPT_L1CACHE = %d, BSHIFT = %d\n", Config.CpuL1Size >> 13, OPT_L1CACHE, BSHIFT);
 	puts("---------------------------------------------------------------");
 	puts("---------------------------------------------------------------\n");
 }
@@ -2824,8 +2855,8 @@ static int parseCmd(char cmdparams[][80])
 			case 'C':
 				if (tmp <= (MAX_L1SIZE >> 13) && tmp > 15) {
 					Config.CpuL1Size = tmp << 13;
-				} else if (tmp < 4000) {
-					Config.CpuL2Size = tmp;
+				} else if (tmp < 16000) {
+					Config.CacheSize = tmp;
 				}
 				break;
 			case 'F':
@@ -2993,12 +3024,13 @@ int main(int argc, char* argv[])
 	}
 
 	executeCmd("d t1 k21 e10");
-//	executeCmd("d t4 M6 C1200 k6 e13");
+//	executeCmd("t8 M8 k6 C2000 e15 2000");
+//	executeCmd("t8 M8 k2 C2000 e13 10000");
 
 	char ccmd[256] = {0};
 	while (true) {
 		printf("\n>> ");
-		if (!gets(ccmd) || !executeCmd(ccmd))
+		if (!fgets(ccmd, sizeof(ccmd), stdin) || !executeCmd(ccmd))
 			break;
 	}
 
@@ -3035,11 +3067,7 @@ BLOCKSIZE  PI        PI2       PI3      PI4      PI5     PI6     PI7     PI8
 ---------------------------------------------------------------------------------
 ********************************************************************************
 
-PI(1e13) = 346065536839, time use 1681.128 s
-
-feature:
-  14. win32 gui
-  15. remove unused marco
+PI(1e13) = 346065536839, time use 1681.128 s / 400 amd r7-1700
 
 Linux g++:
   g++ -Wall -msse4 -O3 -march=native -s -pipe -ffunction-sections -fomit-frame-pointer -lpthread Ktprime.cpp

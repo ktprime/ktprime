@@ -1,7 +1,7 @@
 	/*Fast Single-thread segmented sieve of Eratosthenes prime number n < 2^64 ***/
 ////http://ntheory.org/sieves/benchmarks.html
 static const char* Benchmark =
-"g++ -DSIEVE_SIZE=2048 -DFSL1 -DFDIV -march=native -funroll-loops -O3 -s -pipe PrimeNumber.cpp -o prime\n"
+"g++ -DSIEVE_SIZE=2048 -DFDIV -march=native -funroll-loops -O3 -s -pipe PrimeNumber.cpp -o prime\n"
 "Windows 10 x64               i3-350M,i5-3470,i7-7500u,i7-6700,r7-1700\n"
 "Pi(0,    1e10) = 455052511    3.10   1.84    1.55     1.32    1.65\n"
 "Pi(1e11, 1e10) = 394050419    4.35   2.50    2.02     1.78    2.00\n"
@@ -345,8 +345,9 @@ static uchar Lsb[1 << 16];
 #if POPCNT == 0
 //number of bits 1 binary representation table in Range[0-2^16)
 static uchar WordNumBit1[1 << 16];
-#elif __GNUC__ || __clang__
+#if (__GNUC__ || __clang__) && (X86 || X86_64)
 # include <popcntintrin.h>
+#endif
 #endif
 
 ////////////////thread/task data //////////////////////////////
@@ -399,7 +400,7 @@ static struct Config_ Config =
 
 ////////////////basic func //////////////////////////////
 
-//the simple sieve of Eratosthenes p < 16
+//the simple sieve of Eratosthenes p < 2^16
 static int eratoSimple()
 {
 	int primes = 1;
@@ -725,12 +726,10 @@ static uint countBit0sArray(uint64 bitarray[], const uint bytes)
 	uint loops = bytes / sizeof(uint64);
 	while (loops -- > 0) {
 		const uint64 qw = *bitarray++;
-#if POPCNT
 #if __GNUC__ || __clang__
 		bit2s += __builtin_popcountll(qw);
-#else
+#elif POPCNT
 		bit2s += _mm_popcnt_u64(qw);
-#endif
 #else
 		const uint hig = (uint)(qw >> 32);
 		const uint low = (uint)(qw);
@@ -922,7 +921,7 @@ static void setWheelBig(uchar* bitarray, uint medium, uint sqrtp, const uint64 s
 			}
 
 			const uint p = offset + PRIME_OFFSET(mask); mask &= mask - 1;
-#if FDIV
+#ifndef FDIV
 			if (EUNLIKELY (p > nextp)) { //ugly & difficult to understand but efficient
 				remp = start / (nextp = p + (uint64)p * p / (uint)(start >> 32));
 				if (EUNLIKELY(p > nextp)) //overflow
@@ -1748,6 +1747,7 @@ static uint adjustConfig(uint sieve_size, const uint sqrtp)
 		sieve_size = setSieveSize(1 << ilog(sieve_size >> 10, 2));
 
 	medium = (sieve_size * WHEEL30) / Config.Msegs + 1;
+#ifndef FB
 	if (sqrtp > medium) {
 		const int l2segs = sieve_size / (Threshold.L2Size);
 		assert(l2segs > 0 && sieve_size >= (128 << 10));
@@ -1758,6 +1758,7 @@ static uint adjustConfig(uint sieve_size, const uint sqrtp)
 			Config.Msegs = 2;
 		}
 	}
+#endif
 
 	return sieve_size;
 }
@@ -1866,7 +1867,7 @@ static void cpuidInfo(int regs[4], int id, int ext)
 #endif
 }
 
-static int getIntelCache(int* l3size, int* l1size)
+static int getIntelCache(int* l3size, int* l2size, int* l1size)
 {
 	int regs[4];
 
@@ -1970,8 +1971,8 @@ static int getIntelCache(int* l3size, int* l1size)
 
 		if (cache_type == 3 && cache_level == 3)
 			*l3size = cache_size;
-//		if (cache_type == 2 && cache_level == 3)
-//			*l3size = cache_size;
+		if (cache_type == 3 && cache_level == 2)
+			*l2size = cache_size;
 		else if (cache_type == 1 && cache_level == 1) //data cache
 			*l1size = cache_size;
 		printf("\n cache_level %d, cache_type = %d cache_size = %d kb", cache_level, cache_type, cache_size);
@@ -2005,7 +2006,7 @@ static int getCpuInfo()
 		cpuidInfo(regs, 0x80000008, 0), cpuCores = (regs[2] & 0xFF) + 1;
 		setSieveSize(l3Size / 4);
 	} else if (strstr(vendor, "Intel")) {
-		getIntelCache(&l3Size, &l1Size);
+		getIntelCache(&l3Size, &l2Size, &l1Size);
 		cpuidInfo(regs, 0, 0);
 		if (regs[0] >= 0xB) { //max_leaf
 			uint ebx[2] = {0}, words[4] = {0}, trys = 0;
@@ -2169,7 +2170,7 @@ static void printInfo()
 	puts(sepator);
 	puts("Fast implementation of the segmented sieve of Eratosthenes n < 2^64\n"
 			"Copyright (C) by 2010-2020 Huang Yuanbing 22738078@qq.com/bailuzhou@163.com\n"
-			"Compile: g++ -DFSL1 -DFDIV -march=native -funroll-loops -O3 -s -pipe PrimeNumber.cpp -o prime\n");
+			"Compile: g++ -march=native -funroll-loops -O3 -pipe PrimeNumber.cpp -o prime\n");
 
 	char buff[500];
 	char* info = buff;
@@ -2198,7 +2199,7 @@ static void printInfo()
 	info += sprintf(info, " x86-64");
 #elif X86
 	info += sprintf(info, " x86");
-#elif __arm64__
+#elif __arm64__ || __aarch64__
 	info += sprintf(info, " arm64");
 #elif __arm__
 	info += sprintf(info, " arm");

@@ -1,6 +1,6 @@
 /************************************************************
   A pair of primes (p,q) that sum to an even integer 2n=p+q are known as a Goldbach partition (Oliveira e Silva).
-	this programming is the most fast algorithm for calcultating
+	this programming is quite fast algorithm for calcultating
 goldbach partition g(2n), performance and throughput improvement by minimizing cache conflicts and misses
 in the last level caches of multi-cores processors.
 
@@ -18,19 +18,25 @@ http://mathworld.wolfram.com/GoldbachPartition.html
 # include <stdio.h>
 # include <assert.h>
 
-# define GVERSION       "2.2"
+# define GVERSION       "2.4"
 # define MAXN           "1e16"
 # define MINN           10000000
 
 # define MAX_L1SIZE     (64 << 13)
-# define SEGMENT_SIZE   (510510 * 19 * 2)
+# define SEGMENT_SIZE   (510510 * 4)
 # define MAX_THREADS    256
+
+#if __x86_64__ || __amd64__ || _M_X64 || __amd64 || __x86_64
+	# define X86_64       1
+#elif __i386__ | _M_IX86 | _X86_ | __i386
+	# define X86          1
+#endif
 
 //SSE4a popcnt instruction, make sure cpu support it
 #if _MSC_VER > 1400
 	# define POPCNT      1
 	# include <intrin.h>
-#elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44)
+#elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44) && (X86_64 || X86)
 	# define POPCNT      1
 	# include <popcntintrin.h>
 #else
@@ -45,10 +51,11 @@ http://mathworld.wolfram.com/GoldbachPartition.html
 # define OPT_L1CACHE     1
 # define OPT_L2CACHE     1
 # define PRIME_DIFF      1
-# define TREE2           0
 # define OPT_SEG_SIEVE   1
 
-#if _MSC_VER && _M_AMD64
+# define TREE2           0
+
+#if (_MSC_VER && _M_X64) || __aarch64__
 # define NO_ASM_X86      1
 #endif
 
@@ -57,11 +64,11 @@ typedef unsigned short ushort;
 typedef unsigned int uint;
 
 #ifdef _WIN32
-	typedef __int64 uint64;
+	typedef unsigned __int64 uint64;
 	#define CONSOLE "CON"
 	#include <windows.h>
 #else
-	typedef long long uint64;
+	typedef unsigned long long uint64;
 	#define CONSOLE "/dev/tty"
 	#include <unistd.h>
 	#include <sys/time.h>
@@ -69,8 +76,9 @@ typedef unsigned int uint;
 #endif
 
 #ifndef BSHIFT
-# define BSHIFT 5
+# define BSHIFT 4
 #endif
+
 # if BSHIFT == 3
 	typedef uchar utype;
 	# define MASK 7
@@ -190,7 +198,7 @@ static struct
 	uint Flag;
 	//cpu L1/L2 size
 	uint CpuL1Size;
-	uint CpuL2Size;
+	uint CacheSize;
 	//work threads
 	uint Threads;
 	//print the progress gap
@@ -198,7 +206,7 @@ static struct
 }
 Config =
 {
-	PRINT_RET | PRINT_TIME, MAX_L1SIZE, 1024, 4, (1 << 9) - 1
+	PRINT_RET | PRINT_TIME, MAX_L1SIZE, 1024*4, 4, (1 << 9) - 1
 };
 
 static struct
@@ -316,8 +324,8 @@ static int gcd(int a, int b)
 	return b;
 }
 
-/*
 //http://en.wikipedia.org/wiki/Extended_Euclidean_algorithm
+/*
 function extended_gcd(a, b)
     if a mod b = 0
         return {0, 1}
@@ -605,6 +613,7 @@ static void segmentedSieve(utype bitarray[], const uint64 start, const int leng,
 }
 
 //reverse bit order of a byte with binary representation
+//c = ((c * 0x80200802ULL) & 0x0884422110ULL) * 0x0101010101ULL >> 32;
 static uchar reverseByte(const uchar c)
 {
 	uchar n = 0;
@@ -631,12 +640,14 @@ static int reverseWord(ushort n)
 static inline int countBitOnes(uint64 n)
 {
 #if POPCNT
-	//popcnt instruction : new x86 cpu
-	#if _M_AMD64 || __x86_64__
+	//popcnt instruction : newer x86 cpu
+	#if X86_64
 	return _mm_popcnt_u64(n);
 	#else
 	return _mm_popcnt_u32(n) + _mm_popcnt_u32(n >> 32);
 	#endif
+#elif __GNUC__
+	return __builtin_popcountll(n);
 #elif TREE2 == 0
 	uint hig = (int)(n >> 32), low = (uint)n;
 	return WordNumBit1[(ushort)low] + WordNumBit1[low >> 16] +
@@ -1199,7 +1210,7 @@ static uint64 sievePattern(const int pbegi, const int pendi, int tid)
 
 		gpn += sieveGp(bitarray, pattern);
 
-#if _M_AMD64 && _MSC_VER
+#if X86_64 && _MSC_VER
 		InterlockedAdd((LONG*)(&scnt), 1);
 #else
 		scnt++;
@@ -1330,7 +1341,7 @@ static int getWheel(const uint64 n)
 
 	const int cachesize = (int)(n / wheel);
 
-	const int blocks = cachesize / (Config.CpuL2Size << 13);
+	const int blocks = cachesize / (Config.CacheSize << 13);
 
 	wheel *= (blocks + 1);
 
@@ -1472,7 +1483,7 @@ static void saveTask(struct Task& curtask)
 	if (curtask.Result > 0)
 		printf("gp[%d-%d]=%lld\n", curtask.Pbegi, curtask.Pendi, curtask.Result);
 	else
-		printf(TaskFormat, Gp.Wheel, Gp.Patterns, curtask.Tasks, Config.CpuL2Size, Gp.N);
+		printf(TaskFormat, Gp.Wheel, Gp.Patterns, curtask.Tasks, Config.CacheSize, Gp.N);
 	freopen(CONSOLE, "at", stdout);
 }
 
@@ -1482,7 +1493,7 @@ static int parseTask(struct Task &curtask)
 	char linebuf[400] = {0}, taskdata[400] = {0};
 	freopen("gpa.ta", "r", stdin);
 
-	while (gets(linebuf)) {
+	while (fgets(linebuf, sizeof(linebuf), stdin)) {
 		if (linebuf[0] == 'g') {
 			sscanf(linebuf, "gp[%d-%d]=%lld", &curtask.Pendi, &curtask.Pbegi, &curtask.Result);
 			continue;
@@ -1658,7 +1669,7 @@ static int startTest(int tesecase, bool rwflag)
 		} else {
 			uint64 res, n;
 			char linebuf[256] = {0};
-			gets(linebuf);
+			fgets(linebuf, sizeof(linebuf), stdin);
 			if (sscanf(linebuf, PrintFormat, &n, &res) != 2) {
 				printf("line %d is wrong data\n", i);
 				if (fails++ > 30) {
@@ -1762,7 +1773,7 @@ static void listPowGp(const char params[][80], int cmdi)
 	}
 
 	CLR_FLAG(PRINT_RET);
-	for (uint64 i = startindex; i <= endindex; i++) {
+	for (int i = startindex; i <= endindex; i++) {
 		uint64 n = ipow(m, i);
 		uint64 r = getGp(n, 0);
 		printf(PrintFormat, i, r);
@@ -1834,7 +1845,7 @@ static void testGp( )
 		{"1e16", "23", "060", "16146185"}
 	};
 
-	Config.CpuL2Size = 1 << 10;
+	Config.CacheSize = 1 << 10;
 //	Config.PrintGap = 0;
 	SET_FLAG(PRINT_TIME);
 
@@ -1844,7 +1855,7 @@ static void testGp( )
 		Gp.Wheel = atoi(gpdata[i][0 + 1]);
 		const uint64 gp = getGp(n, psize);
 		if (atoi(gpdata[i][3]) != gp) {
-			printf("%s : %s ~= %d fail !!!\n", gpdata[i][0], gpdata[i][3], gp);
+			printf("%s : %s ~= %lld fail !!!\n", gpdata[i][0], gpdata[i][3], gp);
 		}
 	}
 }
@@ -1864,7 +1875,7 @@ static void cpuid(int cpuinfo[4], int id)
 		mov dword ptr [edi + 8], ecx
 		mov dword ptr [edi +12], edx
 	}
-#elif __GNUC__
+#elif __GNUC__ && (__x86_64__ || __x86__)
 	int deax, debx, decx, dedx;
 	__asm
 	(
@@ -1879,8 +1890,9 @@ static void cpuid(int cpuinfo[4], int id)
 #endif
 }
 
-static int getCpuInfo()
+static void getCpuInfo()
 {
+#if X86_64 && X86
 	char cpuName[255] = {-1};
 	int (*pTmp)[4] = (int(*)[4])cpuName;
 	cpuid(*pTmp++, 0x80000002);
@@ -1892,18 +1904,23 @@ static int getCpuInfo()
 			putchar(cpuName[i]);
 	}
 
-	int cpuinfo[4];
-	cpuid(cpuinfo, 0x80000006);
-	printf(", L2 cache = %d kb\n", cpuinfo[2] >> 16);
+	int cpuinfo1[4]; cpuid(cpuinfo1, 0x80000005); //work for amd cpu
+	int cpuinfo2[4]; cpuid(cpuinfo2, 0x80000006);
+//	int cpuinfo3[4]; cpuidInfo(cpuinfo3, 0x2);
 
-	//amd cpu
-	if (cpuName[0] == 'A') {
-		Config.CpuL1Size = 64 << 13;
-	} else {
+	if (cpuinfo1[2] >> 24 >= 16)
+		Config.CpuL1Size = (cpuinfo1[2] >> 24) << 13;
+	else if (cpuName[0] == 'I')
 		Config.CpuL1Size = 32 << 13;
-	}
 
-	return cpuinfo[2] >> 16;
+	if (cpuinfo2[2] >> 16 >= 64)
+		Config.CacheSize = cpuinfo2[2] >> 16;
+	if (cpuinfo2[3] >> 12 >= 256)
+		Config.CacheSize = cpuinfo2[3] >> 12;
+
+	printf(" L1/L2/L3 cache = %d/%d/%d kb\n", Config.CpuL1Size >> 13, cpuinfo2[2] >> 16, Config.CacheSize);
+//	return cpuinfo2[2] >> 16;
+#endif
 }
 
 static void printInfo( )
@@ -1914,18 +1931,45 @@ static void printInfo( )
 	puts(sepator);
 
 	printf("Goldbach partition (n < %s) version %s\n", MAXN, GVERSION);
-	puts("Copyright (c) by Huang Yuanbing 2008 - 2018 bailuzhou@163.com");
+	puts("Copyright (c) by Huang Yuanbing 2010 - 2020 bailuzhou@163.com");
 
-#ifdef _MSC_VER
-	printf("Compiled by MS/vc++ %d", _MSC_VER);
+	char buff[256];
+	char* info = buff;
+
+#ifdef __clang__
+	info += sprintf(info, "clang %s", __clang_version__); //vc/gcc/llvm
+#if __llvm__
+	info += sprintf(info, " on llvm/");
+#endif
+#endif
+
+#if _MSC_VER
+	info += sprintf(info, "Compiled by vc %d", _MSC_VER);
 #elif __GNUC__
-	printf("Compiled by Gnu/g++ %s", __VERSION__);
+	info += sprintf(info, "Compiled by gcc %d.%d.%d", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+#elif __TINYC__
+	info += sprintf(info, "Compiled by tcc %d", __TINYC__);
 #endif
 
-#if _M_AMD64 || __x86_64__
-	printf(" on x64");
+#if __cplusplus
+	info += sprintf(info, " c++ version %d", (int)__cplusplus);
 #endif
-	printf(" on %s %s\n", __TIME__, __DATE__);
+
+#if X86_64
+	info += sprintf(info, " x86-64");
+#elif X86
+	info += sprintf(info, " x86");
+#elif __arm64__ || __aarch64__
+	info += sprintf(info, " arm64");
+#elif __arm__ || __aarch__
+	info += sprintf(info, " arm");
+#else
+	info += sprintf(info, " unknow");
+#endif
+
+	info += sprintf(info, "\n%s %s in %s\n", __TIME__, __DATE__, __FILE__);
+	*info = 0;
+	puts(buff);
 
 	printf("[MARCO] Work threads = %d, POPCNT = %d, PRIME_DIFF = %d\n", Config.Threads, POPCNT, PRIME_DIFF);
 	printf("[MARCO] L1 = %d k, OPT_L1/L2 = %d/%d, BSHIFT = %d\n", Config.CpuL1Size >> 13, OPT_L1CACHE, OPT_L2CACHE, BSHIFT);
@@ -1936,10 +1980,10 @@ static void printInfo( )
 static void doCompile()
 {
 	char exename[64];
-	strcpy(exename, __FILE__);
+	sprintf(exename,"%s", __FILE__);
 	char* pdot = strchr(exename, '.');
 	if (pdot) {
-		strcpy(pdot, "_.exe");
+		sprintf(pdot, "%s", "_.exe");
 		puts(exename);
 	}
 
@@ -1947,7 +1991,7 @@ static void doCompile()
 #ifdef _MSC_VER
 		"cl /O2 /Oi /Ot /Oy /GT /GL %s %s";
 #else
-		"g++ -mpopcnt -mtune=native -O3 -s -pipe -fomit-frame-pointer -lpthread %s -o %s";
+		"g++ -mpopcnt -march=native -O3 -s -pipe -fomit-frame-pointer -lpthread %s -o %s";
 #endif
 
 	char compileLine[256] = {0};
@@ -1988,8 +2032,8 @@ static int parseCmd(char params[][80])
 			case 'C':
 				if (tmp <= (MAX_L1SIZE >> 13) && tmp > 15) {
 					Config.CpuL1Size = tmp << 13;
-				} else if (tmp < 4000) {
-					Config.CpuL2Size = tmp;
+				} else if (tmp < 16000) {
+					Config.CacheSize = tmp;
 				}
 				break;
 			case 'F':
@@ -2127,14 +2171,16 @@ int main(int argc, char* argv[])
 			executeCmd(argv[i]);
 	}
 
-	executeCmd("d t4 m8 1e15 1000");
-	//executeCmd("t1 d m7 1e14 200; e15 100");
-	//	executeCmd("d m7 1e15");
+//	executeCmd("d e11 t8 c2000;");
+	executeCmd("t16 e13 10000 c2000 d;");
+//	executeCmd("t16 e14 10000 c2000 d;");
+//	executeCmd("t10 e15 10000 c2000 d;");
+//	executeCmd("t8 m6 e16 10000  c1900 d;");
 
 	char ccmd[256] = {0};
 	while (true) {
 		printf("\n>> ");
-		if (!gets(ccmd) || !executeCmd(ccmd))
+		if (!fgets(ccmd, sizeof(ccmd), stdin) || !executeCmd(ccmd))
 			break;
 	}
 
@@ -2142,24 +2188,17 @@ int main(int argc, char* argv[])
 }
 
 /*************************************************************************
-G(1e14) = 90350630388, 6481.20 s AMD X4 820
-
-
 MINGW: gcc 5.1.0
 CXXFLAGS: -Ofast -msse4 -s -pipe -march=corei7 -funroll-loops
-windows 10 64 bit,   I5 3470 3.2G| i3 350M 2.26G
-G(1e11) = 149091160        3.04  | 09.0 sec
-G(1e12) = 1243722370       30.8  | 89.4 sec
-G(1e13) = 10533150855      320.  | 990. sec
-G(1e14) = 90350630388      3900  | 3.20 h
-G(1e15) = 783538341852     15 h  | 45.4 h
-G(1e16) =                  240h  | 700h
+windows 10 64 bit,       I5-3470 | i3-350M | i7-7500u | r7-1700
+G(1e11) = 149091160        3.04  | 8.80    | 4.21     | 0.9
+G(1e12) = 1243722370       30.8  | 87.8    | 34.1     | 9.0
+G(1e13) = 10533150855      320.  | 990.    | 360      | 97
+G(1e14) = 90350630388      3900  | 3.20 h  | 4000     | 1050
+G(1e15) = 783538341852     15 h  | 45.4 h  | 20h      | 4.7
+G(1e16) =                  240h  | 700h    |          | 80
 
-  c1600 m5 d t4 e15 1000
-	need 28h amd phoenm x4 830
-feature:
-  1. win32 gui
-  2. detial algorithm and readme
+c1600 m5 d t4 e15 1000
 
 Linux g++:
   g++ -Wall -march=native -s -pipe -O2 -ffunction-sections -fomit-frame-pointer -lpthread gpartiton.cpp
