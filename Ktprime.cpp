@@ -49,7 +49,7 @@ http://www.ieeta.pt/~tos/primes.html
 # include <math.h>
 # include <assert.h>
 
-# define KVERSION       "2.2"
+# define KVERSION       "2.3"
 # define TABLE_GAP      12
 # define MAXN           "1e16"
 # define MINN           10000000
@@ -58,12 +58,17 @@ http://www.ieeta.pt/~tos/primes.html
 # define SEGMENT_SIZE   (510510 * 4)
 # define MAX_THREADS    256
 
+#if __x86_64__ || __amd64__ || _M_X64 || __amd64 || __x86_64
+	# define X86_64       1
+#elif __i386__ | _M_IX86 | _X86_ | __i386
+	# define X86          1
+#endif
 //SSE4 popcnt instruction, make sure your cpu support it
 //use of the SSE4.2/ SSE4a POPCNT instruction for fast bit counting.
 #if _MSC_VER > 1400
 	# define POPCNT      0
 	# include <intrin.h>
-#elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44) && __x86_64__
+#elif (__GNUC__ * 10 + __GNUC_MINOR__ > 44) && X86_64
 	# define POPCNT      0
 	# include <popcntintrin.h>
 #else
@@ -79,12 +84,9 @@ http://www.ieeta.pt/~tos/primes.html
 # define FAST_CROSS      1
 # define OPT_L1CACHE     1
 
-#if defined _M_AMD64
+#if __aarch64__ || (_M_AMD64 && _MSC_VER)
 	# define ASM_X86     0
-#if _MSC_VER
-	# define LINE_COVER  1
-#endif
-#elif _MSC_VER >= 1200
+#elif X86_64 || X86
 	# define ASM_X86     1
 #else
 	# define ASM_X86     0
@@ -95,11 +97,11 @@ typedef unsigned short ushort;
 typedef unsigned int   uint;
 
 #ifdef _WIN32
-	typedef __int64 uint64;
+	typedef unsigned __int64 uint64;
 	#define CONSOLE "CON"
 	#include <windows.h>
 #else
-	typedef unsigned long long uint64;
+	typedef unsigned long uint64;
 	#define CONSOLE "/dev/tty"
 	#include <unistd.h>
 	#include <sys/time.h>
@@ -204,7 +206,7 @@ N = %llu\n";
 
 static const char* const PrintFormat[] =
 {
-#if _MSC_VER == 1200
+#if _WIN32
 	"PI(%I64d) = %I64d",
 	"PI2(%I64d) = %I64d",
 	"PI%d(%I64d) = %I64d"
@@ -354,11 +356,12 @@ static void devideTaskData(int threads, int pbegi, int pendi)
 	}
 
 	int tsize = (pendi - pbegi) / threads;
-	tsize += tsize & 1;
+	if ((tsize + 1) * threads < pendi - pbegi)
+		tsize += tsize & 1;
+
 	TData[0].Pbegi = pbegi;
 	for (int i = 1; i < threads; i++) {
-		TData[i].Pbegi = TData[i - 1].Pendi =
-		TData[i - 1].Pbegi + tsize;
+		TData[i].Pbegi = TData[i - 1].Pendi = TData[i - 1].Pbegi + tsize;
 	}
 	TData[threads - 1].Pendi = pendi;
 }
@@ -367,7 +370,7 @@ static uint64 startWorkThread(int threads, int pbegi, int pendi)
 {
 	int i;
 	if (threads > MAX_THREADS) {
-		threads = 4;
+		threads = 16;
 	}
 
 	devideTaskData(threads, pbegi, pendi);
@@ -402,7 +405,7 @@ static uint64 startWorkThread(int threads, int pbegi, int pendi)
 //us
 static double getTime()
 {
-#ifdef WIN32
+#ifdef _WIN32
 	LARGE_INTEGER freq, count;
 	QueryPerformanceFrequency(&freq);
 	QueryPerformanceCounter(&count);
@@ -629,9 +632,9 @@ $end:
 }
 
 static void inline
-setBitArray(utype bitarray[], int start, const int step)
+setBitArray(utype bitarray[], int start, int step)
 {
-#if (ASM_X86 == 0)
+#if 1
 	for (; start > 0; start += step) {
 		SET_BIT(bitarray, start);
 	}
@@ -740,7 +743,7 @@ setBitArray0(utype bitarray[], const uint64 start, const int step, const int len
 static inline int
 setBitArray(utype bitarray[], int start, int step, int bitleng)
 {
-#if (ASM_X86 == 0)
+#if 1
 	for (; start < bitleng; start += step) {
 		SET_BIT(bitarray, start);
 	}
@@ -963,11 +966,13 @@ static inline int countBitOnes(uint64 n)
 {
 #if POPCNT
 	//popcnt instruction : INTEL i7/SSE4.2, AMD Phonem/SSE4A
-	#if _M_AMD64 || __x86_64__
+	#if X86_64
 	return _mm_popcnt_u64(n);
 	#else
 	return _mm_popcnt_u32(n) + _mm_popcnt_u32(n >> 32);
 	#endif
+#elif __GNUC__
+	return __builtin_popcountll(n);
 #elif TREE2 == 0
 	uint hig = (int)(n >> 32), low = (uint)n;
 	return WordNumBit1[(ushort)low] + WordNumBit1[low >> 16] +
@@ -1053,7 +1058,7 @@ static void reverseBitArray(utype bitarray[], const int bitleng)
 static inline int
 asmMulDiv(const uint startp, const uint pattern, uint p)
 {
-#ifdef LINE_COVER
+#if ASM_X86 == 0
 	p = ((uint64)startp) * pattern % p;
 #elif !defined _MSC_VER
 	__asm
@@ -1089,8 +1094,8 @@ asmMulDiv(const uint startp, const uint pattern, uint p)
 static inline int
 asmMulDivSub(const uint startp, const uint pattern, uint p, const uint bitleng)
 {
-#ifdef LINE_COVER
-	p = (((uint64)startp) * pattern - bitleng) % p + bitleng;
+#if ASM_X86 == 0
+	p = (((long long)startp) * pattern - bitleng) % p + bitleng;
 #elif !(defined _MSC_VER)
 	__asm
 	(
@@ -1762,6 +1767,7 @@ static uint64 sievePattern(const int pbegi, const int pendi)
 		stid = scnt = 0;
 	}
 
+
 	int tid = ++stid;
 
 	uint64 gpts = 0;
@@ -2223,7 +2229,7 @@ static uint64 getGpKtPn(const uint64 n, int pn, bool addsmall)
 			gptn += sievePattern(bi + 1, ei);
 		}
 #else
-		if (pendi - pbegi > 6 && Config.Threads > 1) {
+		if (pendi - pbegi > Config.Threads && Config.Threads > 1) {
 			gptn += startWorkThread(Config.Threads, pbegi, pendi);
 		} else if (pendi > pbegi) {
 			gptn += sievePattern(pbegi, pendi);
@@ -2400,7 +2406,7 @@ static void listDiffGpt(const char cmdparams[][80], int cmdi)
 
 	int ni = 1, step = 2;
 	uint64 start = ipow(10, 9), end = start + 1000;
-	uint64 buf[ ] = {0, start, end, step, 0};
+	uint64 buf[ ] = {0, start, end, (uint64)step, 0};
 
 	for (int i = cmdi; cmdparams[i][0] && ni < sizeof(buf) / sizeof(buf[0]); i++) {
 		char c = cmdparams[i][0];
@@ -2626,7 +2632,7 @@ static void cpuid(int cpuinfo[4], int id)
 		mov dword ptr [edi + 8], ecx
 		mov dword ptr [edi +12], edx
 	}
-#elif __GNUC__ && __x86_64__
+#elif __GNUC__ && ASM_X86
 	int deax, debx, decx, dedx;
 	__asm
 	(
@@ -2644,7 +2650,7 @@ static void cpuid(int cpuinfo[4], int id)
 // http://msdn.microsoft.com/en-us/library/hskdteyh%28v=vs.100%29.aspx
 static int getCpuInfo()
 {
-#if __x86_64__
+#if X86_64 || X86
 	char cpuName[255] = {-1};
 	int (*pTmp)[4] = (int(*)[4])cpuName;
 	cpuid(*pTmp++, 0x80000002);
@@ -2652,7 +2658,7 @@ static int getCpuInfo()
 	cpuid(*pTmp++, 0x80000004);
 
 	for (int i = 0; cpuName[i]; i++) {
-		if (cpuName[i] != ' ' || cpuName[i + 1] != ' ')
+//		if (cpuName[i] != ' ' || cpuName[i + 1] != ' ')
 			putchar(cpuName[i]);
 	}
 
@@ -2670,7 +2676,7 @@ static int getCpuInfo()
 	if (cpuinfo2[3] >> 12 >= 256)
 		Config.CacheSize = cpuinfo2[3] >> 12;
 
-	printf(" L1/L2/L3 cache = %d/%d/%d kb\n", Config.CpuL1Size >> 13, cpuinfo2[2] >> 16, Config.CacheSize);
+	printf("L1/L2/L3 cache = %d/%d/%d kb\n", Config.CpuL1Size >> 13, cpuinfo2[2] >> 16, Config.CacheSize);
 
 	return cpuinfo2[2] >> 16;
 #else
@@ -2685,10 +2691,9 @@ static void printInfo()
 	puts("---------------------------------------------------------------");
 
 	printf("\
-	1.%s %s PI(n)\n \
-	2.Twin/Cousin/Sexy/p, p+2n/ prime pairs PI2(n)\n \
-	3.Ktuplet prime PIk(n)\n (n < %s) version %s\n",
-	KtupletName[0], KtupletName[1], MAXN, KVERSION);
+	1.%s %s PI(n)\n\
+	2.Twin/Cousin/Sexy/p, p+2n/ prime pairs PI2(n)\n\
+	3.Ktuplet prime PIk(n) (n < %s) version %s\n\n", KtupletName[0], KtupletName[1], MAXN, KVERSION);
 
 	puts("Copyright (c) by Huang Yuanbing 2010 - 2020 bailuzhou@163.com");
 
@@ -2725,7 +2730,7 @@ static void printInfo()
 	info += sprintf(info, " unknow");
 #endif
 
-	info += sprintf(info, "\n%s %s in %s\n", __TIME__, __DATE__, __FILE__);
+	info += sprintf(info, " %s %s in %s\n", __TIME__, __DATE__, __FILE__);
 	*info = 0;
 	puts(buff);
 
@@ -3023,7 +3028,7 @@ int main(int argc, char* argv[])
 			executeCmd(argv[i]);
 	}
 
-	executeCmd("d t1 k21 e10");
+	executeCmd("k2 e11");
 //	executeCmd("t8 M8 k6 C2000 e15 2000");
 //	executeCmd("t8 M8 k2 C2000 e13 10000");
 

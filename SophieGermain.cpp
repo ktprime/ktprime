@@ -245,7 +245,7 @@ static void devideTaskData(int threads, int pbegi, int pendi)
 	}
 
 	int tsize = (pendi - pbegi) / threads;
-	tsize += tsize & 1;
+//	tsize += tsize & 1;
 	TData[0].Pbegi = pbegi;
 	TData[0].Tasks = 1;
 	for (int i = 1; i < threads; i++) {
@@ -1509,7 +1509,7 @@ static uint64 doGetGp(const uint64 n, int pn, bool addsmall)
 		gpn += sievePattern(bi + 1, ei, 1);
 	}
 #else
-	if (pendi - pbegi > 10 && Config.Threads > 1) {
+	if (pendi - pbegi > Config.Threads && Config.Threads > 1) {
 		gpn += startWorkThread(Config.Threads, pbegi, pendi);
 	} else if (pendi > pbegi) {
 		gpn += sievePattern(pbegi, pendi, 1);
@@ -1585,7 +1585,7 @@ static void listDiffGp(const char params[][80], int cmdi)
 
 	int ni = 1, step = 2;
 	uint64 start = ipow(10, 9), end = start + 1000;
-	uint64 buf[ ] = {0, start, end, step, 0};
+	uint64 buf[ ] = {0, start, end, (uint64)step, 0};
 
 	for (int i = cmdi; params[i][0] && ni < sizeof(buf) / sizeof(buf[0]); i++) {
 		char c = params[i][0];
@@ -1830,7 +1830,7 @@ static void printInfo( )
 	info += sprintf(info, " unknow");
 #endif
 
-	info += sprintf(info, "\n%s %s in %s\n", __TIME__, __DATE__, __FILE__);
+	info += sprintf(info, " %s %s in %s\n", __TIME__, __DATE__, __FILE__);
 	*info = 0;
 	puts(buff);
 
@@ -2032,7 +2032,7 @@ int main(int argc, char* argv[])
 			executeCmd(argv[i]);
 	}
 
-	executeCmd("t4 e11 d");
+	executeCmd("t8 e11 d");
 //	executeCmd("d m10 t4 c1000 1e15 1000");
 //	executeCmd("A d m7 t3 c1200 e12");
 

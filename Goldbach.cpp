@@ -250,7 +250,7 @@ static void devideTaskData(int threads, int pbegi, int pendi)
 	}
 
 	int tsize = (pendi - pbegi) / threads;
-	tsize += tsize & 1;
+//	tsize += tsize & 1;
 	TData[0].Pbegi = pbegi;
 	TData[0].Tasks = 1;
 	for (int i = 1; i < threads; i++) {
@@ -1587,7 +1587,7 @@ static uint64 getGp(const uint64 n, int pn)
 		gpn += sievePattern(bi + 1, ei, 1);
 	}
 #else
-	if (pendi - pbegi > 10 && Config.Threads > 1) {
+	if (pendi - pbegi > Config.Threads && Config.Threads > 1) {
 		gpn += startWorkThread(Config.Threads, pbegi, pendi);
 	} else if (pendi > pbegi) {
 		gpn += sievePattern(pbegi, pendi, 1);
@@ -1706,7 +1706,7 @@ static void listDiffGp(const char params[][80], int cmdi)
 
 	int ni = 1, step = 2;
 	uint64 start = ipow(10, 9), end = start + 1000;
-	uint64 buf[ ] = {0, start, end, step, 0};
+	uint64 buf[ ] = {0, start, end, (uint64)step, 0};
 
 	for (int i = cmdi; params[i][0] && ni < sizeof(buf) / sizeof(buf[0]); i++) {
 		char c = params[i][0];
@@ -1776,7 +1776,7 @@ static void listPowGp(const char params[][80], int cmdi)
 	for (int i = startindex; i <= endindex; i++) {
 		uint64 n = ipow(m, i);
 		uint64 r = getGp(n, 0);
-		printf(PrintFormat, i, r);
+		printf(PrintFormat, n, r);
 		putchar('\n');
 	}
 	SET_FLAG(PRINT_RET);
@@ -1875,7 +1875,7 @@ static void cpuid(int cpuinfo[4], int id)
 		mov dword ptr [edi + 8], ecx
 		mov dword ptr [edi +12], edx
 	}
-#elif __GNUC__ && (__x86_64__ || __x86__)
+#elif __GNUC__ && (X86_64 || X86)
 	int deax, debx, decx, dedx;
 	__asm
 	(
@@ -1892,7 +1892,7 @@ static void cpuid(int cpuinfo[4], int id)
 
 static void getCpuInfo()
 {
-#if X86_64 && X86
+#if X86_64 || X86
 	char cpuName[255] = {-1};
 	int (*pTmp)[4] = (int(*)[4])cpuName;
 	cpuid(*pTmp++, 0x80000002);
@@ -2171,8 +2171,8 @@ int main(int argc, char* argv[])
 			executeCmd(argv[i]);
 	}
 
-//	executeCmd("d e11 t8 c2000;");
-	executeCmd("t16 e13 10000 c2000 d;");
+	executeCmd("d e11 t8 c2000;");
+//	executeCmd("t16 e13 10000 c2000 d;");
 //	executeCmd("t16 e14 10000 c2000 d;");
 //	executeCmd("t10 e15 10000 c2000 d;");
 //	executeCmd("t8 m6 e16 10000  c1900 d;");
