@@ -17,6 +17,10 @@
 	#include "pdqsort.h" //https://github.com/orlp/pdqsort/blob/master/pdqsort.h
 #endif
 
+#if SKA_SORT
+	#include "ska_sort.hpp" //https://github.com/skarupke/ska_sort/blob/master/ska_sort.hpp
+#endif
+
 #if I32
 	typedef int stype;
 	const stype max_v = INT_MAX;
@@ -43,7 +47,10 @@
 
 static int AKI = 4;
 static int AK2 = 4;
-static int pdqs = 1;
+static int pdqs = 2;
+
+static int64_t gsum = 0;
+static stype  gmaxe = 0;
 
 typedef unsigned int uint;
 
@@ -145,8 +152,17 @@ template<typename T>
 inline void QSORT(T* a, T* e)
 {
 #if PDQS
-	if (pdqs)
+	if (pdqs == 2)
 		pdqsort_branchless(a, e);
+#if SKA_SORT
+	else if (pdqs == 1)
+		ska_sort(a, e);
+#endif
+	else
+		std::sort(a, e);
+#elif SKA_SORT
+	if (pdqs > 0)
+		ska_sort(a, e);
 	else
 		std::sort(a, e);
 #else
@@ -154,7 +170,7 @@ inline void QSORT(T* a, T* e)
 #endif
 }
 
-void rand_swap(stype a[], const int n, int k)
+static void rand_swap(stype a[], const int n, int k)
 {
 #if 0
 	const int step = n / k;
@@ -170,13 +186,25 @@ void rand_swap(stype a[], const int n, int k)
 #endif
 }
 
-void reset(stype a[], const int n, int k)
+static void reset(stype a[], const int n, int k)
 {
 	memcpy(a, a + n, k * sizeof(a[0]));
 	rand_swap(a, n, 10000);
 }
 
-void check(const stype a[], const int n, int k)
+static void check_sum(int64_t sum, stype maxe, const char* func)
+{
+	if (sum != gsum || maxe != gmaxe) {
+		if (gsum == 0) {
+			gsum  = sum;
+			gmaxe = maxe;
+		}
+		else
+			printf("%s %ld %ld\n", func, sum, (long)maxe);
+	}
+}
+
+static void check_ak(const stype a[], const int n, int k)
 {
 	if (a[2*n] == (stype)(-1)) {
 		return;
@@ -212,9 +240,9 @@ static clock_t NowMs()
 #elif _WIN32
 	static LARGE_INTEGER freq = {0};
 	if (freq.QuadPart == 0) {
-		SetThreadAffinityMask(GetCurrentThread(), 0x3);
+//		SetThreadAffinityMask(GetCurrentThread(), 0x3);
 		QueryPerformanceFrequency(&freq);
-		printf("freq = %.2lf\n", (double)freq.QuadPart);
+//		printf("freq = %.2lf\n", (double)freq.QuadPart);
 	}
 
 	LARGE_INTEGER nowus = {0};
@@ -227,7 +255,7 @@ static clock_t NowMs()
 
 #if __cplusplus
 #if 0
-void stl_sort(stype a[], const int n, const int k)
+static void stl_sort(stype a[], const int n, const int k)
 {
 	reset(a, n, k);
 	clock_t ts = NowMs();
@@ -237,7 +265,7 @@ void stl_sort(stype a[], const int n, const int k)
 }
 #endif
 
-void stl_nth(stype a[], const int n, const int k)
+static void stl_nth(stype a[], const int n, const int k)
 {
 	reset(a, n, n);
 	clock_t ts = NowMs();
@@ -250,14 +278,15 @@ void stl_nth(stype a[], const int n, const int k)
 #endif
 
 	stype maxe = a[k - 1];
-	int64_t sum = std::accumulate(a, a + k, 0);
-	printf("  stl nth_element %5ld ms, a[%d] = %ld, sum = %ld\n", NowMs() - ts, k, (int64_t)maxe, sum);
+	printf("  stl nth_element %5ld ms\n", NowMs() - ts);
 
 	memcpy(a + n * 2, a, k * sizeof(a[0]));
-	check(a, n, k);
+	check_ak(a, n, k);
+	int64_t sum = std::accumulate(a, a + k, 0);
+	check_sum(sum, maxe, __FUNCTION__);
 }
 
-void stl_priqueue(stype a[], const int n, const int k)
+static void stl_priqueue(stype a[], const int n, const int k)
 {
 //	reset(a, n, k);
 	clock_t ts = NowMs();
@@ -281,13 +310,14 @@ void stl_priqueue(stype a[], const int n, const int k)
 		pri_queue.pop();
 	}
 
-	int64_t sum = std::accumulate(a, a + k, 0);
-	printf("  stl pri_queue   %5ld ms, a[%d] = %ld, sum = %ld\n", ts, k, (int64_t)maxe, sum);
+	printf("  stl pri_queue   %5ld ms\n", ts);
 
-	check(a, n, k);
+	check_ak(a, n, k);
+	int64_t sum = std::accumulate(a, a + k, 0);
+	check_sum(sum, maxe, __FUNCTION__);
 }
 
-void stl_makeheap(stype a[], const int n, const int k)
+static void stl_makeheap(stype a[], const int n, const int k)
 {
 	reset(a, n, k);
 	clock_t ts = NowMs();
@@ -337,15 +367,16 @@ void stl_makeheap(stype a[], const int n, const int k)
 		}
 	}
 
-	int64_t sum = std::accumulate(a, a + k, 0);
 	std::sort_heap(a, a + k);
 
-	printf("  stl make_heap   %5ld ms, a[%d] = %ld, sum = %ld\n", NowMs() - ts, k, (int64_t)maxe, sum);
+	printf("  stl make_heap   %5ld ms\n", NowMs() - ts);
 
-	check(a, n, k);
+	check_ak(a, n, k);
+	int64_t sum = std::accumulate(a, a + k, 0);
+	check_sum(sum, maxe, __FUNCTION__);
 }
 
-void ktprime_heap(stype a[], const int n, const int k)
+static void ktprime_heap(stype a[], const int n, const int k)
 {
 	clock_t ts = NowMs();
 	max_heap<stype> my_heap(k);
@@ -366,17 +397,18 @@ void ktprime_heap(stype a[], const int n, const int k)
 		}
 	}
 
-	int64_t sum = std::accumulate(my_heap._a + 1, my_heap._a + k + 1, 0);
 	memcpy(a, my_heap._a + 1, k * sizeof(a[0]));
 	std::sort_heap(a, a + k);
 
-	printf("  ktprime heap    %5ld ms, a[%d] = %ld, sum = %ld\n", NowMs() - ts, k, (int64_t)maxe, sum);
+	printf("  ktprime heap    %5ld ms\n", NowMs() - ts);
 
-	check(a, n, k);
+	check_ak(a, n, k);
+	int64_t sum = std::accumulate(a, a + k, 0);
+	check_sum(sum, maxe, __FUNCTION__);
 }
 #endif
 
-void bucket_sort(uint a[], uint n, uint k)
+static void bucket_sort(uint a[], uint n, uint k)
 {
 	reset((stype*)a, n, n);
 	clock_t ts = NowMs();
@@ -444,10 +476,11 @@ void bucket_sort(uint a[], uint n, uint k)
 	for (int i = 0; i < sum_size; i++) a[i] -= INT_MAX;
 #endif
 
-	int64_t sum = std::accumulate(a, a + k, 0);
 
-	printf("  bucket_sort     %5ld ms, a[%d] = %d, sum = %ld\n", NowMs() - ts, k, (int)a[k - 1], sum);
-	check((stype*)a, n, k);
+	printf("  bucket_sort     %5ld ms\n", NowMs() - ts);
+	check_ak((stype*)a, n, k);
+	int64_t sum = std::accumulate(a, a + k, 0);
+	check_sum(sum, maxe, __FUNCTION__);
 }
 
 static void swap_array(stype a[], const int k)
@@ -498,14 +531,14 @@ static void merge_array(stype a[], stype b[], const int n, const int m)
 	int j = t - 1 - i;
 
 	//merge a[0, i]/b[0, j] into a[0, n - 1]
-	//TODO: check i overflow
+	//TODO: check_ak i overflow
 	while (j >= 0) {
 		a[t --] = a[i] <= b[j] ? b[j --] : a[i --];
 	}
 }
 
 const int l2_cpu_size = 1024 * 1024, l1_cpu_size = 32 * 1024;
-void merge_sort(stype a[], const int n, const int k)
+static void merge_sort(stype a[], const int n, const int k)
 {
 	reset(a, n, k);
 	clock_t ts = NowMs();
@@ -539,13 +572,14 @@ void merge_sort(stype a[], const int n, const int k)
 //	std::partial_sort(a, ax_a, ax_a + ax_n);
 	merge_array(a, ax_a, k, ax_n);
 
-	maxe = a[k - 1];
+	printf("  merge_sort      %5ld ms\n", NowMs() - ts);
+	check_ak(a, n, k);
 	int64_t sum = std::accumulate(a, a + k, 0);
-	printf("  merge_sort      %5ld ms, a[%d] = %ld, sum = %ld\n", NowMs() - ts, k, (int64_t)maxe, sum);
-	check(a, n, k);
+	maxe = a[k - 1];
+	check_sum(sum, maxe, __FUNCTION__);
 }
 
-void merge_inplace(stype a[], const int n, const int k)
+static void merge_inplace(stype a[], const int n, const int k)
 {
 	reset(a, n, k);
 	clock_t ts = NowMs();
@@ -596,10 +630,12 @@ void merge_inplace(stype a[], const int n, const int k)
 	QSORT(a, ax_a + ax_n);
 //	QSORT(ax_a, ax_a + ax_n); std::inplace_merge(a, ax_a, ax_a + ax_n);
 
-	maxe = a[k - 1];
+	printf("  merge_inplace   %5ld ms\n", NowMs() - ts);
+
+	check_ak(a, n, k);
 	int64_t sum = std::accumulate(a, a + k, 0);
-	printf("  merge_inplace   %5ld ms, a[%d] = %ld, sum = %ld\n", NowMs() - ts, k, (int64_t)maxe, sum);
-	check(a, n, k);
+	maxe = a[k - 1];
+	check_sum(sum, maxe, __FUNCTION__);
 }
 
 static void printInfo()
@@ -634,7 +670,7 @@ static void printInfo()
 	info += sprintf(info, " x86-64");
 #elif __i386__ || _M_IX86 || _X86_ || __i386
 	info += sprintf(info, " x86");
-#elif __arm64__
+#elif __arm64__ || __aarch64__
 	info += sprintf(info, " arm64");
 #elif __arm__
 	info += sprintf(info, " arm");
@@ -646,7 +682,7 @@ static void printInfo()
 	puts(sepator);
 }
 
-void ktprime_heap2(stype a[], const int n, const int k)
+static void ktprime_heap2(stype a[], const int n, const int k)
 {
 	clock_t ts = NowMs();
 	max_heap<stype> my_heap(k);
@@ -661,10 +697,11 @@ void ktprime_heap2(stype a[], const int n, const int k)
 	}
 
 	stype maxe = my_heap.top();
-	printf("\tktprime heap     %5ld ms, a[%d] = %ld, sum = %ld\n", NowMs() - ts, k, (int64_t)maxe, sum);
+	printf("\tktprime heap     %5ld ms\n", NowMs() - ts);
+	check_sum(sum, maxe, __FUNCTION__);
 }
 
-void ktprime_heap3(stype a[], const int n, const int k)
+static void ktprime_heap3(stype a[], const int n, const int k)
 {
 	clock_t ts = NowMs();
 	max_heap<stype> my_heap1(k);
@@ -689,10 +726,11 @@ void ktprime_heap3(stype a[], const int n, const int k)
 	}
 
 	stype maxe = my_heap1.top();
-	printf("\tktprime heap     %5ld ms, a[%d] = %ld, sum = %ld\n", NowMs() - ts, k, (int64_t)maxe, sum);
+	printf("\tktprime heap     %5ld ms\n", NowMs() - ts);
+	check_sum(sum, maxe, __FUNCTION__);
 }
 
-void stl_priqueue2(stype a[], const int n, const int k)
+static void stl_priqueue2(stype a[], const int n, const int k)
 {
 	//	reset(a, n, k);
 	clock_t ts = NowMs();
@@ -709,11 +747,11 @@ void stl_priqueue2(stype a[], const int n, const int k)
 	}
 	stype maxe = pri_queue.top();
 
-	ts = NowMs() - ts;
-	printf("\tstl pri_queue    %5ld ms, a[%d] = %ld, sum = %ld\n", ts, k, (int64_t)maxe, sum);
+	printf("\tstl pri_queue    %5ld ms\n", NowMs() - ts);
+	check_sum(sum, maxe, __FUNCTION__);
 }
 
-void stl_makeheap2(stype a[], const int n, const int k)
+static void stl_makeheap2(stype a[], const int n, const int k)
 {
 	reset(a, n, k);
 	clock_t ts = NowMs();
@@ -728,7 +766,8 @@ void stl_makeheap2(stype a[], const int n, const int k)
 	}
 	stype maxe = a[0];
 
-	printf("\tstl make_heap    %5ld ms, a[%d] = %ld, sum = %ld\n", NowMs() - ts, k, (int64_t)maxe, sum);
+	printf("\tstl make_heap    %5ld ms\n", NowMs() - ts);
+	check_sum(sum, maxe, __FUNCTION__);
 }
 
 int main(int argc, char* argv[])
@@ -736,11 +775,12 @@ int main(int argc, char* argv[])
 	srand(time(nullptr));
 	const int max_n = 1024*1024*32;
 
-	printf("\ncmd:topk -k(<=%d) -n(<=%d) -r(1-16) m(1-16) p(pdqs sort) s(shuffle) \
+	printf("\ntopk -k(<=%d) -n(<=%d) -r(1-16) m(1-16) p(pdqs 2 ska_sort 1) s(shuffle) q(pop_push)\n\
 			[type = 0-1 rand, 2-3 wavy, 4-5 rand, 6 decrease, 7 incre]\n\n", 1000000, max_n);
 	printInfo();
 
 	int n = max_n, k = max_n / 100, type = 0, shuff = 0;
+	int pop_push = 0;
 	for (int i = 1; i < argc; i++)
 	{
 		char c = argv[i][0];
@@ -762,10 +802,11 @@ int main(int argc, char* argv[])
 		} else if (c == 's') {
 			shuff = r;
 		} else if (c == 'p') {
-#if PDQS
-			pdqs = 1 - pdqs;
+#if PDQS || SKA_SORT
+			pdqs = r;
 #endif
-		}
+		} else if (c == 'q')
+			pop_push = 1 - pop_push;
 	}
 
 	if (k > n) {
@@ -784,7 +825,8 @@ int main(int argc, char* argv[])
 	std::normal_distribution<> d(1 << (20 + rand() % 10), 1 << 16);
 //	std::exponential_distribution<> p(0.1);
 
-	printf("n = %d, topk = %d, r1 = %d, r2 = %d, shuff = %d, pdqs = %d\n", n, k, AKI, AK2, shuff, pdqs);
+	printf("n = %d, k = %d, r1 = %d, r2 = %d, shuff = %d, pdqs = %d, pop_push = %d\n", n, k, AKI, AK2, shuff, pdqs, pop_push);
+
 	for (int j = 0; j <= 7; j ++) {
 		int64_t r = 0;
 		type = j;
@@ -813,6 +855,7 @@ int main(int argc, char* argv[])
 			std::shuffle(buff + 1, buff + n, rng);
 		}
 
+		gsum = 0;
 		printf("data type = %d\n", type);
 		stl_nth(arr, n, k);
 
@@ -827,13 +870,15 @@ int main(int argc, char* argv[])
 		merge_inplace(arr, n, k);
 		merge_sort(arr, n, k);
 
-		//test flow win
-		printf("\ntest flow windows heap\n");
-		//stl_priqueue2(arr, n, k);
-		ktprime_heap2(arr, n, k);
-		//ktprime_heap3(arr, n, k);
-		stl_makeheap2(arr, n, k);
-
+		if (pop_push) {
+			//test flow win
+			printf("\n\ttest pop-push\n");
+			gsum = 0;
+			//stl_priqueue2(arr, n, k);
+			ktprime_heap2(arr, n, k);
+			//ktprime_heap3(arr, n, k);
+			stl_makeheap2(arr, n, k);
+		}
 		putchar('\n');
 	}
 
@@ -847,4 +892,3 @@ int main(int argc, char* argv[])
 // http://rextester.com/l/cpp_online_compiler_gcc
 // https://www.onlinegdb.com/
 // https://www.ideone.com/3rCdob
-
