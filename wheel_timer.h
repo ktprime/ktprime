@@ -3,9 +3,28 @@
 #include <stdint.h>
 #include <vector>
 
-#include "net/quic/quartc/quartc_task_runner_interface.h"
-typedef net::QuartcTaskRunnerInterface::Task* QTask;
-typedef net::QuartcTaskRunnerInterface QuartcTaskRunnerInterface;
+class TaskRunnerInterface {
+ public:
+  virtual ~TaskRunnerInterface() {}
+
+  class Task {
+   public:
+    virtual ~Task() {}
+
+    // Called when it's time to start the task.
+    virtual void Run() = 0;
+
+    //int taskId = -1;
+  };
+
+  // Schedules a task, which will be run after the given delay. A ScheduledTask
+  // may be used to cancel the task.
+  virtual int64_t Schedule(Task* task, uint64_t deadline) = 0;
+
+  virtual void Cancel(Task* task) = 0;
+};
+
+typedef TaskRunnerInterface::Task* QTask;
 
 #if 1
     #include "hash_table5.hpp"
@@ -14,8 +33,6 @@ typedef net::QuartcTaskRunnerInterface QuartcTaskRunnerInterface;
     #include "robin_hood.h"
     #define HASH_MAP robin_hood::unordered_map
 #endif
-
-
 
 // timer queue implemented with hashed hierarchical wheel.
 //
