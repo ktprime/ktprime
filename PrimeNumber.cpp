@@ -1576,13 +1576,14 @@ void setCacheSize(int level, uint cache)
 {
 	//	cache = 1 << ilog(cache, 2);
 	if (level == 1 && cache >= 16 && cache <= (Threshold.L2Size >> 10)) {
-		Threshold.L1Size = cache << 10;
+		Threshold.L1Size = (1 << ilog(cache, 2)) << 10;
 		Threshold.L1Maxp = Threshold.L1Size / Config.L1Segs;
 		Threshold.L2Size = Threshold.L2Size / Threshold.L1Size * Threshold.L1Size;
 		Threshold.L2Maxp = Threshold.L2Size / Config.L2Segs;
 		setL1Index();
 	} else if (level == 2 && cache >= (Threshold.L1Size >> 10) && cache <= MAX_SEGMENT) {
-		Threshold.L2Size = (cache << 10) / Threshold.L1Size * Threshold.L1Size;
+		//Threshold.L2Size = (cache << 10) / Threshold.L1Size * Threshold.L1Size;
+		Threshold.L2Size = (1 << ilog(cache, 2)) << 10;
 		Threshold.L2Maxp = Threshold.L2Size / Config.L2Segs;
 	}
 }
@@ -1989,8 +1990,8 @@ static int getCpuInfo()
 		setSieveSize((l3Size >> 10) / 2);
 	}
 
-	setCacheSize(2, l2Size);
 	setCacheSize(1, l1Size);
+	setCacheSize(2, l2Size);
 
 	printf(" L1Dsize/L2Size/L3Size = %d/%d/%d kb, cores = %u\n\n", l1Size, l2Size, l3Size, cpuCores);
 	return 0;
@@ -2128,7 +2129,7 @@ static void printInfo()
 		"------------------------------------------------------------------------------------------------------------";
 	puts(sepator);
 	puts("Fast implementation of the segmented sieve of Eratosthenes n < 2^64\n"
-		"Copyright (C) by 2010-2022 Huang Yuanbing bailuzhou at 163.com\n"
+		"Copyright (C) by 2010-2024 Huang Yuanbing bailuzhou at 163.com\n"
 		"Compile: g++ -march=native -funroll-loops -O3 -pipe PrimeNumber.cpp -o prime\n");
 
 	char buff[500];
