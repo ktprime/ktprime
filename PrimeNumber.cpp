@@ -1878,7 +1878,7 @@ uint64 doSieve(const uint64 start, const uint64 end, PrimeCall * pcall)
 	allocMedium(medium);
 
 	const uint l1_maxp = Threshold.L1Maxp;
-	const uint max_cache = sieve_byte + Threshold.L2Size + sizeof(uint64);
+	const uint max_cache = sieve_byte + Threshold.L2Size + Threshold.L1Maxp + sizeof(uint64);
 	uchar* bitarray = (uchar*)malloc(max_cache); //TODO align64
 	assert((size_t)bitarray % sizeof(stype) == 0);
 
