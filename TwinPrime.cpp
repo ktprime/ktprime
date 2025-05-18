@@ -124,9 +124,9 @@ typedef unsigned short ushort;
 
 enum ECONST
 {
-	ERAT_SMALL    = 2, //4 - 16
-	ERAT_MEDIUM   = 2, //2 - 6
-	ERAT_BIG      = 8, //2 - 6
+	ERAT_SMALL    = 6, //4 - 16
+	ERAT_MEDIUM   = 6, //2 - 6
+	ERAT_BIG      = 6, //2 - 6
 
 #ifndef CHAR_BIT
 # define CHAR_BIT   8
@@ -139,7 +139,7 @@ enum ECONST
 	NEXT_MULTIPLE = 0x799b799b,
 	MAX_WHEEL_GAP = 28,
 	PI_65536      = 6542 + 1, //pi(2^16) + 1
-	MAX_SEGMENT   = 4 << 10,  //4Mkb
+	MAX_SEGMENT   = 8 << 10,  //4Mkb
 #ifndef UINT_MAX
 	UINT_MAX      = 0-1u,
 #endif
@@ -151,7 +151,7 @@ enum ECONST
 	L2_DCACHE_SIZE= 256,
 #endif
 #ifndef SIEVE_SIZE
-	SIEVE_SIZE    = 2048
+	SIEVE_SIZE    = 4096
 #endif
 };
 
@@ -1027,7 +1027,7 @@ static void setWheelBig(uchar* bitarray, uint medium, uint sqrtp, const uint64 s
 			uint sieve_index = p - (uint)(start % p);
 #endif
 
-#if 0
+#if 1
 			if (sieve_index > range) continue;
 #endif
 			const uint sp = (p / WHEEL210 << SP_BIT) + WheelInit210[p % WHEEL210].PrimeIndex;
@@ -1968,7 +1968,7 @@ static int getCpuInfo()
 				cpuCores /= 2;
 		}
 
-		setSieveSize((l3Size >> 10) / cpuCores * 2);
+		setSieveSize((l3Size >> 10) / cpuCores * 1);
 	}
 
 	setCacheSize(2, l2Size);
@@ -2361,12 +2361,12 @@ int main(int argc, char* argv[])
 		executeCmd("L41 L42 i 2^31;");
 
 	executeCmd("1e12 1e10; e14 e10; e10+0");
-	executeCmd("10^12 1e9; e16 e9; e18 e9*1; 0-e9 0-1; b 10");
+	executeCmd("10^12 1e9; e16 e9; e18 e9*1; 0-e9 0-1;");
 
 	while (true) {
 		char ccmd[257];
 		printf("\n>> ");
-		if (fgets(ccmd, sizeof(ccmd), stdin) || !executeCmd(ccmd))
+		if (!fgets(ccmd, sizeof(ccmd), stdin) || !executeCmd(ccmd))
 			break;
 	}
 
