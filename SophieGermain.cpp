@@ -1760,7 +1760,7 @@ static void cpuid(int cpuinfo[4], int id)
 static int getCpuInfo()
 { 
 #ifndef NO_ASM_X86
-	char cpuName[255] = {-1};
+	char cpuName[255] = {0};
 	int (*pTmp)[4] = (int(*)[4])cpuName;
 	cpuid(*pTmp++, 0x80000002);
 	cpuid(*pTmp++, 0x80000003);
@@ -2032,7 +2032,8 @@ int main(int argc, char* argv[])
 			executeCmd(argv[i]);
 	}
 
-	executeCmd("t8 e11 d");
+	executeCmd("t2 e11 d");
+	executeCmd("t4 22801763489 d");
 //	executeCmd("d m10 t4 c1000 1e15 1000");
 //	executeCmd("A d m7 t3 c1200 e12");
 
@@ -2080,5 +2081,3 @@ MS vc++:
   cl /O2 /Os sophieGermain.cpp
 
  ****************************************************/
-
-
