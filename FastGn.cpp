@@ -42,7 +42,7 @@ enum eConst
 #endif
 
 #ifdef _MSC_VER
-	#define MEM_ALIGN(n) // __declspec(align(n))
+	#define MEM_ALIGN(n) __declspec(align(n))
 #elif __GNUC__
 	#define MEM_ALIGN(n) __attribute__ ((aligned(n)))
 #else
@@ -80,8 +80,17 @@ typedef unsigned int uint;
 	typedef uint utype;
 # endif
 
-#if __x86_64__ || _M_AMD64 || __amd64__
-	#define X86_64   1
+#if __x86_64__ || __amd64__ || _M_X64 || __amd64 || __x86_64
+# define X86_64       1
+#elif __i386__ || _M_IX86
+# define X86          1
+#endif
+
+#if (X86_64 || X86) && (__GNUC__ || _MSC_VER || __clang__ || __TINYC__ || __INTEL_COMPILER)
+# define BIT_SCANF    1
+#if X86 || _MSC_VER == 0
+# define ASM_X86      1
+#endif
 #endif
 
 # ifdef PRIME_DIFF
@@ -768,10 +777,8 @@ static int countBit0ArrayOrAvx2(const uchar* bitarray1, const uchar* bitarray2, 
 
 #if X86_64
 		bit1s +=
-			_mm_popcnt_u64(avx2.m256i_u64[0]) +
-			_mm_popcnt_u64(avx2.m256i_u64[1]) +
-			_mm_popcnt_u64(avx2.m256i_u64[2]) +
-			_mm_popcnt_u64(avx2.m256i_u64[3]);
+			_mm_popcnt_u64(avx2.m256i_u64[0]) + _mm_popcnt_u64(avx2.m256i_u64[1]) +
+			_mm_popcnt_u64(avx2.m256i_u64[2]) + _mm_popcnt_u64(avx2.m256i_u64[3]);
 #else
 		bit1s +=
 			_mm_popcnt_u32(avx2.m256i_u32[0]) + _mm_popcnt_u32(avx2.m256i_u32[1]) +
@@ -804,7 +811,7 @@ static void packQword(uchar bitarray[], const int lastbitpos)
 {
 	utype* upack = (utype*)bitarray;
 	PACK_BIT(upack, lastbitpos);
-	memset(bitarray + (lastbitpos >> 3) + 1, ~0, 256 / 8);
+	memset(bitarray + (lastbitpos >> 3) + 1, ~0, 512 / 8);
 }
 
 //copy from srcarray with bit in [frompos, frompos + bitleng) to dstarray in [0, bitleng] frompos < CHAR_BIT
@@ -1511,7 +1518,7 @@ static int startTest(const int checkloops, int gploops)
 		gploops = maxgpcount;
 
 	Config.PrintRet = Config.PrintTime = false;
-	Config.PrintGap = -1u;
+	Config.PrintGap = 0-1u;
 
 	printf("Test gp %llu:%d, cases %d, gploops %d\n", start, maxgpcount, checkloops, gploops);
 
@@ -1552,7 +1559,7 @@ static int startTest(const int checkloops, int gploops)
 
 	//restore the default configuration
 	Config.PrintRet = Config.PrintTime = true;
-	Config.PrintGap = -1u;
+	Config.PrintGap = 0-1u;
 
 	freopen(CONSOLE, "r", stdin);
 
@@ -1683,8 +1690,8 @@ static void addGpInMiddle(const uint64 minn, const int gpcount, uint64 gp[])
 static int segmentedGp01(const uint64 start1, const uint64 start2, const uint sievesize, uint64 total)
 {
 	//assert(start + sievesize <= start2 + 1 && 0 == start % WHEEL);
-	uchar bitarray1[SIEVE_SZIE / WORD_BIT] MEM_ALIGN(32);
-	uchar bitarray2[SIEVE_SZIE / WORD_BIT] MEM_ALIGN(32);
+	MEM_ALIGN(32) uchar bitarray1[SIEVE_SZIE / WORD_BIT];
+	MEM_ALIGN(32) uchar bitarray2[SIEVE_SZIE / WORD_BIT];
 
 	bitarray1[0] = bitarray2[0] = CON_VTOWHEEL;
 	segmentedSieve1(start1, sievesize, bitarray1);
@@ -1713,8 +1720,8 @@ static int segmentedGp01(const uint64 start1, const uint64 start2, const uint si
 static int segmentedGp02(const uint64 start1, const uint64 start2, const uint sievesize, uint64 total)
 {
 	//assert(start + sievesize <= start2 + 1 && 0 == start % WHEEL);
-	uchar bitarray1[BUFFER_SIZE] MEM_ALIGN(32);
-	uchar bitarray2[BUFFER_SIZE] MEM_ALIGN(32);
+	MEM_ALIGN(32) uchar bitarray1[BUFFER_SIZE];
+	MEM_ALIGN(32) uchar bitarray2[BUFFER_SIZE];
 
 	bitarray1[0] = bitarray2[0] = COPY_BYBIT;
 	int byteleng1 = segmentedSieve2(start1, sievesize, bitarray1);
@@ -1740,8 +1747,8 @@ static int segmentedGp02(const uint64 start1, const uint64 start2, const uint si
 static int segmentedGp03(const uint64 start1, const uint64 start2, const uint sievesize, uint64 total)
 {
 	//assert(start + sievesize <= start2 + 1);// & BUFFER_SIZE > sievesize);
-	uchar bitarray1[8][BUFFER_SIZE8] MEM_ALIGN(32);
-	uchar bitarray2[8][BUFFER_SIZE8] MEM_ALIGN(32);
+	MEM_ALIGN(32) uchar bitarray1[8][BUFFER_SIZE8];
+	MEM_ALIGN(32) uchar bitarray2[8][BUFFER_SIZE8];
 
 	const int begbit = segmentedSieve3(start1, sievesize + 1, bitarray1);
 	const int packlen = getPackLen(start2,  sievesize);
@@ -1776,8 +1783,8 @@ static int segmentedGp03(const uint64 start1, const uint64 start2, const uint si
 static void segmentedGp1(const uint64 start1, const uint64 start2, const uint sievesize, const int gpcount, uint64 gp[])
 {
 	//	assert(start + sievesize <= start2 + 1 && 0 == start % WHEEL);
-	uchar bitarray1[SIEVE_SZIE / WORD_BIT] MEM_ALIGN(32);
-	uchar bitarray2[SIEVE_SZIE / WORD_BIT] MEM_ALIGN(32);
+	MEM_ALIGN(32) uchar bitarray1[SIEVE_SZIE / WORD_BIT];
+	MEM_ALIGN(32) uchar bitarray2[SIEVE_SZIE / WORD_BIT];
 
 	bitarray1[0] = bitarray2[0] = CON_VTOWHEEL;
 	segmentedSieve1(start1, sievesize, bitarray1);
@@ -1801,12 +1808,13 @@ static void segmentedGp1(const uint64 start1, const uint64 start2, const uint si
 
 //the seconds algorithm to segmented goldbach partition
 //fast than the third algorithm for gpcount < 1000
+//TODO mabye overflow on windows #pragma stack_alloc(1048576)
 static void segmentedGp2(const uint64 start1, const uint64 start2, const uint sievesize, const int gpcount, uint64 gp[])
 {
 	//assert(start + sievesize <= start2 + 1 && 0 == start % WHEEL);
-	uchar bitarray1[8][BUFFER_SIZE8] MEM_ALIGN(32);
-	uchar bitarray2[8][BUFFER_SIZE8] MEM_ALIGN(32);
-	uchar tmparray[BUFFER_SIZE] MEM_ALIGN(32);
+	MEM_ALIGN(32) uchar bitarray1[8][BUFFER_SIZE8];
+	MEM_ALIGN(32) uchar bitarray2[8][BUFFER_SIZE8];
+	MEM_ALIGN(32) uchar tmparray[BUFFER_SIZE];
 
 	//sieve the first bit array
 	tmparray[0] = COPY_BYBIT;
@@ -1854,8 +1862,8 @@ static void segmentedGp2(const uint64 start1, const uint64 start2, const uint si
 static void segmentedGp3(const uint64 start1, const uint64 start2, const uint sievesize, const int gpcount, uint64 gp[])
 {
 	//assert(start + sievesize <= start2 + 1);// & BUFFER_SIZE > sievesize);
-	uchar bitarray1[8][BUFFER_SIZE8] MEM_ALIGN(32);
-	uchar bitarray2[8][BUFFER_SIZE8] MEM_ALIGN(32);
+	MEM_ALIGN(32) uchar bitarray1[8][BUFFER_SIZE8];
+	MEM_ALIGN(32) uchar bitarray2[8][BUFFER_SIZE8];
 
 	const int begbit = segmentedSieve3(start1, sievesize, bitarray1);
 	const int leng2 = sievesize - 1 + (gpcount - 1) * 2;
@@ -1984,7 +1992,7 @@ static uint64 coreSieve0(const uint64 begin, int sievesize)
 static void getGp0(uint64 minn, uint gpcount, const uint gstep)
 {
 	if (Config.SaveResult) {
-		Config.PrintGap = -1u;
+		Config.PrintGap = 0-1u;
 		Config.PrintRet = true;
 		Config.PrintTime = false;
 		freopen("gp.txt", "wb+", stdout);
@@ -2090,7 +2098,7 @@ static void getGp2(uint64 minn, int gpcount, uint64 gp[])
 	}
 
 	if (Config.SaveResult) {
-		Config.PrintGap = -1u;
+		Config.PrintGap = 0-1u;
 		Config.PrintRet = true;
 		freopen("gp.txt", "wb+", stdout);
 		printf("%llu:%d:%d\n", minn, gpcount, 2);
@@ -2287,7 +2295,7 @@ static bool executeCmd(const char* cmd)
 
 		//each command split by ';'
 		char* pcmd = (char*) strchr(cmd, ';');
-		char cmdparams[8][40] = {0};
+		char cmdparams[16][40] = {0};
 
 		if (splitCmd(cmd, cmdparams) <= 0) {
 			return false;
@@ -2364,7 +2372,7 @@ int main(int argc, char* argv[])
 
 #if 1
 	executeCmd("i t1 s200 pr r e10 1 g3; r e10 1 g2; r e10 1 g1; pr");
-	executeCmd("t4 e9 e4 g2; e9 e4 g3");
+	executeCmd("t16 e9 e4 g2; e9 e4 g3");
 	executeCmd("t1 e9 e3 g1; e9 e3 g2; e9 e3 g3");
 #endif
 
@@ -2379,14 +2387,13 @@ int main(int argc, char* argv[])
 }
 
 /******************************************************************
-copyright (C) 2009 - 2018 by Huang Yuan bing
-mail to: bailuzhou@163.com
+copyright (C) 2009 - 2025 by Huang Yuan bing
+mail to: bailuzhou at 163.com
 free use for non-commercial purposes
 
 G[10^9] to G[10^9 + 2e4]
-"Windows 10 x64               i3-350M,  i5-3470,  i7-7500u,  i7-6700,  r7-1700\n"
-x64                           5.6       1.6       1.2        1.00      0.66
-x86                           11        3.0       1.80       1.50      1.20
+"Windows 10 x64               i3-350M i5-3470 i7-7500u i7-6700 r7-1700 i7-9700 r7-5800H\n"
+x64                           5.6     1.6     1.2      1.00    0.66    0.60    0.48
 
 http://graphics.stanford.edu/~seander/bithacks.html
 *******************************************************************
