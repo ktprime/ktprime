@@ -2105,7 +2105,7 @@ static void printInfo( )
 		"------------------------------------------------------------------------------------------------------------";
 	puts(sepator);
 	puts("Fast implementation of the segmented sieve of Eratosthenes 2^64\n"
-	"Copyright (C) by 2010-2018 Huang Yuanbing 22738078@qq.com/bailuzhou@163.com\n"
+	"Copyright (C) by 2010-2025 Huang Yuanbing 22738078@qq.com/bailuzhou@163.com\n"
 	"Compile: g++ -DSIEVE_SIZE=2048 -DFSL1 -DFDIV -march=native -funroll-loops -O3 -s -pipe PrimeNumber.cpp\n");
 
 	char buff[500];

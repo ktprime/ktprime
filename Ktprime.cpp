@@ -2695,7 +2695,7 @@ static void printInfo()
 	2.Twin/Cousin/Sexy/p, p+2n/ prime pairs PI2(n)\n\
 	3.Ktuplet prime PIk(n) (n < %s) version %s\n\n", KtupletName[0], KtupletName[1], MAXN, KVERSION);
 
-	puts("Copyright (c) by Huang Yuanbing 2010 - 2020 bailuzhou@163.com");
+	puts("Copyright (c) by Huang Yuanbing 2010 - 2025 bailuzhou@163.com");
 
 	char buff[256];
 	char* info = buff;

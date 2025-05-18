@@ -395,7 +395,7 @@ public :
 			bool curro = ISOPER(currc), lasto = ISOPER(lastc);
 
 			if ((curro || currc == '=') && convertExpr[i + 1] == 0) {
-				printf("Error: wrong %c in last\n", currc);
+				printf("Error: wrong '%c' in last\n", currc);
 				isValid = false;
 			} else if (lastc == '(') {
 				if (curro || currc == ')') {

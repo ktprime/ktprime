@@ -2193,7 +2193,7 @@ static void printInfo()
 		"------------------------------------------------------------------------------------------------------------";
 	puts(sepator);
 	puts("Fast implementation of the segmented sieve of Eratosthenes n < 2^64\n"
-		"Copyright (C) by 2010-2024 Huang Yuanbing bailuzhou at 163.com\n"
+		"Copyright (C) by 2010-2025 Huang Yuanbing bailuzhou at 163.com\n"
 		"Compile: g++ -march=native -funroll-loops -O3 -pipe PrimeNumber.cpp -o prime\n");
 
 	char buff[500] = { 0 };

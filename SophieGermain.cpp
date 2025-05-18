@@ -29,7 +29,7 @@ http://en.wikipedia.org/wiki/Sophie_Germain_prime
 
 #if __x86_64__ || __amd64__ || _M_X64 || __amd64 || __x86_64
 	# define X86_64       1
-#elif __i386__ | _M_IX86 | _X86_ | __i386
+#elif __i386__ | _M_IX86
 	# define X86          1
 #endif
 //SSE4a popcnt instruction, make sure cpu support it
@@ -1783,6 +1783,8 @@ static int getCpuInfo()
 	}
 
 	return cpuinfo[2] >> 16;
+#else
+	return 1024;
 #endif
 }
 
@@ -1794,7 +1796,7 @@ static void printInfo( )
 	puts(sepator);
 
 	printf("Sophie Germain Prime (n < %s) version %s\n", MAXN, SVERSION);
-	puts("Copyright (c) by Huang Yuanbing 2013 - 2020 bailuzhou@163.com");
+	puts("Copyright (c) by Huang Yuanbing 2013 - 2025 bailuzhou@163.com");
 
 	char buff[256];
 	char* info = buff;
