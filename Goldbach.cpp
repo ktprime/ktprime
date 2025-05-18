@@ -170,7 +170,7 @@ static ptype* Pattern = NULL;//[99532800 + 10];
 
 #if FAST_CROSS
 //CrossedTpl cross out prime <= 17
-static utype CrossedTpl[(SEGMENT_SIZE >> (BSHIFT + 1)) + 100];
+static utype CrossedTpl[(SEGMENT_SIZE >> (BSHIFT + 1)) + 8];
 #endif
 
 //bit 1 left most table
@@ -933,7 +933,7 @@ static void initBitTable( )
 
 #if FAST_CROSS
 	//4. init CrossedTpl table, pre sieve the factor in array sievefactor
-	sieveWheelFactor(CrossedTpl, 0, sizeof(CrossedTpl) * 16, SEGMENT_SIZE);
+	sieveWheelFactor(CrossedTpl, 0, sizeof(CrossedTpl) * (1 << 3) * 2 - 1, SEGMENT_SIZE);
 #endif
 }
 
@@ -1931,7 +1931,7 @@ static void printInfo( )
 	puts(sepator);
 
 	printf("Goldbach partition (n < %s) version %s\n", MAXN, GVERSION);
-	puts("Copyright (c) by Huang Yuanbing 2010 - 2020 bailuzhou@163.com");
+	puts("Copyright (c) by Huang Yuanbing 2010 - 2025 bailuzhou@163.com");
 
 	char buff[256];
 	char* info = buff;
