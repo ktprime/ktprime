@@ -1,5 +1,5 @@
 /************************************************************
-copyright (C) 20010-2018 by Huang Yuanbing
+copyright (C) 2010-2025 by Huang Yuanbing
 mail to: bailuzhou@163.com
 free use for non-commercial purposes
 
