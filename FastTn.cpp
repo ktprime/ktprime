@@ -1,7 +1,7 @@
 /************************************************************
 Calculate number of tuplet T(n): (p1, p2, p3) with n = p1 + p2 + p3
 (p1 <= p2 <= p3), p1, p2 and p3 are all odd prime number;
-copyright (C) 2008 - 2013 by Huang Yuanbing
+copyright (C) 2008 - 2025 by Huang Yuanbing
 version 7.0
 mail to: bailuzhou@163.com
 free use for non-commercial purposes
@@ -268,7 +268,7 @@ static void* threadProcGp(void* ptinfo)
 	return 0;
 }
 
-static int64 startWorkThread(int threads, const int n, int* proc = 0)
+static int64 startWorkThread(int threads, const int n)
 {
 	int64 tn = 0;
 	int i;
@@ -288,7 +288,7 @@ static int64 startWorkThread(int threads, const int n, int* proc = 0)
 	DWORD tid[MAX_THREADS];
 	for (i = 0; i < threads; i++) {
 		thandle[i] = CreateThread(NULL, 0,
-				(LPTHREAD_START_ROUTINE)proc,
+				(LPTHREAD_START_ROUTINE)threadProcGp,
 				(LPVOID)(&Tparam[i]), 0, &tid[i]);
 		Sleep(5);
 		if (thandle[i] == NULL) {
@@ -304,7 +304,7 @@ static int64 startWorkThread(int threads, const int n, int* proc = 0)
 #else
 	pthread_t tid[MAX_THREADS];
 	for (i = 0; i < threads; i++) {
-		int error = pthread_create(&tid[i], NULL, void* (void*)(proc), &Tparam[i]);
+		int error = pthread_create(&tid[i], NULL, threadProcGp, &Tparam[i]);
 		if (error != 0) {
 			printf("create posix thread error %d\n", error);
 		}
@@ -1105,7 +1105,7 @@ static bool createGpTable(const int n)
 		2 * gntsize, FACTP);
 
 	if (gntsize > 1000000 && Config.Threads > 1)
-		startWorkThread(Config.Threads, gntsize, (int*)threadProcGp);
+		startWorkThread(Config.Threads, gntsize);
 	else
 		createGpTable(gntsize, 0, 1);
 
@@ -1293,7 +1293,7 @@ static int64 getTn(const int n)
 #endif
 
 	if (n > 1000000 && Config.Threads > 1)
-		tn += startWorkThread(Config.Threads, n, (int*)threadProcTn);
+		tn += startWorkThread(Config.Threads, n);
 	else
 		tn += coreSieve(n, 1, 2);
 
@@ -1553,7 +1553,7 @@ static void printInfo( )
 	puts("---------------------------------------------------------------");
 	puts("Count number of tuples T(n): (p1, p2, p3)\n,\
 n = p1 + p2 + p3(p1 <= p2 <= p3), p1, p2, p3\nare all odd prime numbers");
-	puts("version 6.2 Copyright (c) by Huang Yuanbing 2009 - 2011 bailuzhou@163.com");
+	puts("version 6.2 Copyright (c) by Huang Yuanbing 2009 - 2025 bailuzhou@163.com");
 
 	getCpuInfo();
 
@@ -1742,7 +1742,7 @@ int main(int argc, char* argv[])
 	char ccmd[256] = {0};
 	while (true) {
 		printf("\n[input command] : ");
-		if (!gets(ccmd) || !excuteCommand(ccmd))
+		if (!fgets(ccmd, sizeof(ccmd), stdin) || !excuteCommand(ccmd))
 			break;
 	}
 
@@ -1798,4 +1798,3 @@ todo:
 1. Remove marco MAXN, FACTP, PATTERNS
 2.
 **********************************************/
-
