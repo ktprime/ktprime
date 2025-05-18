@@ -41,6 +41,10 @@ enum eConst
 	# define POPCNT      0
 #endif
 
+#ifdef __AVX2__
+	#include <immintrin.h>
+#endif
+
 #ifdef _MSC_VER
 	#define MEM_ALIGN(n) __declspec(align(n))
 #elif __GNUC__
@@ -2144,8 +2148,8 @@ static void printInfo( )
 		"----------------------------------------------------------------------------------------------------";
 	puts(sepator);
 
-	puts("Count Multi Goldbach Partition in [6, 1e14], version 2.3\n");
-	puts("Copyright @ by Huang Yuanbing 2011 - 2020 bailuzhou@163.com\n"
+	puts("Count Multi Goldbach Partition in [6, 1e14], version 3.0\n");
+	puts("Copyright @ by Huang Yuanbing 2011 - 2025 bailuzhou at 163.com\n"
 	"https://github.com/ktprime/ktprime/blob/master/FastGn.cpp\n"
 	"CXXFLAG:g++ -march=native -mpopcnt -funroll-loops -O3 -s -pipe");
 
