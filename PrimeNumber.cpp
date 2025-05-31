@@ -718,10 +718,10 @@ static uint countBit0sArray(uint64 bitarray[], const uint bytes)
 	uint loops = bytes / sizeof(uint64);
 	while (loops-- > 0) {
 		const uint64 qw = *bitarray++;
-#if (__GNUC__ || __clang__ ) && X86_64 || POPCNT
-		bit2s += _mm_popcnt_u64(qw);
-#elif POPCNT
+#if __GNUC__ || __clang__
 		bit2s += __builtin_popcountll(qw);
+#elif POPCNT || AVX2
+		bit2s += _mm_popcnt_u64(qw);
 #else
 		const uint hig = (uint)(qw >> 32);
 		const uint low = (uint)(qw);
@@ -841,17 +841,17 @@ static void initMediumWheel(uchar* bitarray, const uint sieve_size, const uint m
 			sieve_index += wf.Correct * p;
 #ifdef SL2
 			MediumPrime[j + 0].Sp = p;
-#ifndef SM0
+	#ifndef SM0
 			MediumPrime[j++].Si = 0 - ((sieve_index << 4) + wf.Multiple);
-#else
+	#else
 			MediumPrime[j++].Si = (sieve_index << 4) + wf.Multiple;
-#endif
+	#endif
 #else
 			MediumPrime[j + 0].Sp = (p / WHEEL30 << SI_BIT) + pi;
 			MediumPrime[j++].Si = (sieve_index / WHEEL30 << SI_BIT) + wf.WheelIndex;
-#ifdef SM0
+	#ifdef SM0
 			MediumPrime[j - 1].Si = -MediumPrime[j - 1].Si;
-#endif
+	#endif
 #endif
 		}
 		else {
@@ -1932,7 +1932,7 @@ uint64 doSieve(const uint64 start, const uint64 end, PrimeCall * pcall)
 		const int64 ta = getTime();
 		printResult(start, end, primes);
 		if (Config.Flag & PRINT_TIME)
-			printf(" (%.2f + %.2f = %.2f sec %u kb L%u%u%u %d)",
+			printf(" (%.2f + %.2f = %.3f sec %u kb L%u%u%u %d)",
 				(ti - ts) / 1000.0, (ta - ti) / 1000.0, (ta - ts) / 1000.0, Config.SieveSize >> 10,
 				Config.L1Segs, Config.L2Segs, Config.Msegs, Config.Bsegs);
 		putchar('\n');

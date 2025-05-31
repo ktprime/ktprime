@@ -1118,7 +1118,7 @@ static bool createGpTable(const int n)
 	//save table GPT to file
 	if (file) {
 		//save check the size type
-		int check[2] = {sizeof(GPT[0]), gntsize * sizeof(GPT[0]) + 8};
+		int check[2] = {sizeof(GPT[0]), int(gntsize * sizeof(GPT[0]) + 8)};
 		fwrite(check, sizeof(check[0]), 2, file);
 		fwrite(GPT + GSINDEX - 1, sizeof(GPT[0]), gntsize, file);
 		fclose(file);
